@@ -1,86 +1,102 @@
-# webЯcade: Feed-driven gaming
+# CloudRcade
 
-[![Actions Status](https://github.com/webrcade/webrcade/workflows/Build/badge.svg)](https://github.com/webrcade/webrcade/actions)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Docker Build Status](https://img.shields.io/docker/pulls/webrcade/webrcade)](https://hub.docker.com/r/webrcade/webrcade/)
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/C4gXN2HJAv)
-[![PayPal](https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white)](https://paypal.me/webrcade)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/webrcade)
+[![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 
-WebЯcade consists of an intuitive [web-based front end](https://docs.webrcade.com/userguide/) that enables playing popular gaming content entirely within the context of the browser across a [wide variety of platforms](https://docs.webrcade.com/platforms/) (Xbox Series X|S, iOS, Android, Windows, macOS). Gamepads are supported (Bluetooth and USB) for both front-end navigation and while playing games.
+CloudRcade is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade)
+with Nextcloud saves, editable mobile controls, offline caching, Recently Played,
+clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app.
+It preserves upstream history and credits; it is not an official webRcade release.
 
-The content for playing games (binaries, etc.) and populating the front-end (images, etc.) is collected from [cloud-based resources](https://docs.webrcade.com/feeds/resources/) based on [user-defined feeds](https://docs.webrcade.com/feeds/) (typically created using the [Feed Editor](https://editor.webrcade.com)). Each feed item (game, etc.) has an associated application type. [Application types](https://docs.webrcade.com/apps/) include [emulators](https://docs.webrcade.com/apps/emulators/) (Atari, Sega, Nintendo) and [game engines](https://docs.webrcade.com/apps/engines/) (Classic Doom).
+## Run with Docker
 
+```sh
+git clone https://github.com/jacoknapp/cloudrcade.git
+cd cloudrcade
+cp .env.example .env
+mkdir -p roms/nes/roms roms/3DS/bios data/feeds data/derived managed config
+# Edit .env for your public HTTPS origin, paths, cloud options and branding.
+docker compose up -d
+```
 
-<p align="center">
- <a href="https://play.webrcade.com">
-  <img src="https://docs.webrcade.com/assets/images/platforms/ios/safari-full.png?raw=true" width="97%">
- </a>
- <br>
- <i>webЯcade on Safari for iOS (iPhone)</i>
-</p>
+Open your configured HTTPS origin. The default listener is `127.0.0.1:8443`;
+place it behind your HTTPS gateway or change the bind address for your network.
+ROMs and BIOS are supplied by the operator and mounted read-only. Most systems
+use `roms/<system>/roms/` and `roms/<system>/bios/`; 3DS games can live below
+`roms/3DS/`. The scanner writes feeds and derived discs into `data/`, preserving
+the ROM originals. The same app container scans at startup and refreshes every six hours. Set
+`WEBRCADE_SCAN_ENABLED` and `WEBRCADE_SCAN_INTERVAL_SECONDS` to control it.
+The initial library can be empty while the first scan runs. Request an immediate
+refresh with `docker compose exec webrcade python3 /usr/local/share/cloudrcade/service.py scan`.
+Optional metadata integration is disabled by default.
 
-## Play Now.
+The single image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `master`
+builds and publishes it; pull requests build and validate without publishing.
+Commit-specific `sha-<full-commit>` tags and `v*` release tags are also published.
+CI authenticates using GitHub's built-in token; no Docker Hub secret is required.
 
-Play webЯcade now at [play.webrcade.com](https://play.webrcade.com).
+## Internet connection for streamed games
 
-## Documentation
+**PlayStation and Nintendo 3DS ROM/disc streaming requires an active internet
+connection during play.** Game data is fetched as needed. PlayStation CHD/PBP
+discs stream through HTTP byte ranges; the 3DS loader streams ROMs larger than
+512 MiB. Keep the connection available for uncached portions of the file.
+Partially streamed files are not complete offline games. Offline play requires
+all required game, emulator and BIOS assets to have been fully downloaded and
+cached; runtime 3DS keys are fetched separately and are never cached.
 
-The [webЯcade Documentation](https://docs.webrcade.com/) consists of a [User Guide](https://docs.webrcade.com/userguide/), instructions specific to each [Platform](https://docs.webrcade.com/platforms/) (OS, devices) supported by webЯcade, detailed information (button mappings, etc.) for the various [Application Types](https://docs.webrcade.com/apps/) (emulators, etc.), and guidance for developing your own [Feeds](https://docs.webrcade.com/feeds/).
+**3DS caches shaders as they are created.** The first encounter with a new
+shader can cause hitching. Encountering many new shaders at once can cause
+larger pauses, especially on mobile devices; cached shaders reduce repeat work.
 
-The following steps are recommended for getting started with webЯcade:
+## Nextcloud and SSO
 
-* Review the [User Guide](https://docs.webrcade.com/userguide/) in order to familiarize yourself with the webЯcade front-end.
-* Read the documentation for the [Platform](https://docs.webrcade.com/platforms/) (OS, device) you will be using with webЯcade to learn platform-specific details such as how to optimize the experience and how to connect gamepads.
-* Review the documentation for each [Application](https://docs.webrcade.com/apps/) that is launched to determine its keyboard and gamepad mappings as well as any other application-specific notes (an application is the emulator or engine being used to play a particular game, etc.).
-* Use the [Feed Editor](https://editor.webrcade.com) to create your own feeds with games and content of your choosing.
+Set `NEXTCLOUD_URL` and `NEXTCLOUD_ENABLED=true` to make Nextcloud available.
+Set `NEXTCLOUD_AUTO_REDIRECT=true` to start login automatically. These flags are
+independent: disabling automatic login leaves the **Link** button available.
+Other cloud choices retain their normal setup flow.
 
-## Default Feed
+For automatic authorization with an existing Nextcloud/Authentik session,
+install the [optional Nextcloud handoff app](integrations/nextcloud/README.md),
+configure its exact trusted origin/client and existing SAML provider, then set
+`NEXTCLOUD_HANDOFF=true`. The default native Nextcloud flow retains Nextcloud's
+approval screen. Existing SSO can pass through without another login; the
+identity provider can still require authentication or MFA when its policy does.
 
-The default feed consists of high-quality publicly available games and demos across the various [application types](https://docs.webrcade.com/apps/) ([emulators](https://docs.webrcade.com/apps/emulators/), [engines](https://docs.webrcade.com/apps/engines/), etc.) that are supported by webЯcade.
+Denied access returns to the library and displays: “No access has been enabled
+for Nextcloud. Please enable your own cloud instance.” Optional access-header
+hints are configured through the environment; Nextcloud still authorizes grants.
+URLs, feature flags, origins, paths, app name, storage namespace and save folder
+come from `.env`. Keep the namespace and save folder stable when upgrading to
+preserve the selected save locations. Existing deployments can keep their
+previous branding and namespace by setting those variables explicitly.
 
-The [default feed AUTHORS page](https://github.com/webrcade/webrcade-default-feed/blob/main/AUTHORS-default-feed.md) includes the list of titles that are included in the default feed, their respective authors, and related links.
+## 3DS BIOS and keys
 
-## What is (and is not) webЯcade?
+The release includes a key-free 3DS emulator. Encrypted games need your own
+compatible Citra-format `aes_keys.txt` in the mounted BIOS directory selected
+by `WEBRCADE_3DS_BIOS_PATH`. `WEBRCADE_3DS_KEYS_FILE` selects its container path.
+Decrypted games can run without it. No key set, BIOS, ROM or console backup is
+provided. Builds remove upstream preset keys before compilation.
 
-The following lists further describe webЯcade in terms of its focus.
+The authorized browser reads the mounted keys into emulator memory at runtime;
+the endpoint uses `no-store` and same-origin restrictions. Keys are excluded
+from source control, build contexts, offline assets and ordinary battery-save
+ZIPs. See [3DS setup and limitations](deploy/webrcade/retro-azahar/README.md#runtime-decryption-keys).
 
-**Primary focus:**
+## Development and licensing
 
-* Runs entirely within the web browser leveraging JavaScript, WebAssembly, and the HTML5 gamepad and audio interfaces
-* Adaptive user interface that supports a [wide variety of platforms](https://docs.webrcade.com/platforms/) (Xbox Series X|S, iOS, Android, Windows, macOS)
-* Native gamepad support (Bluetooth and USB) for both front-end navigation and while playing games
-* [User-defined cloud-based feeds](https://docs.webrcade.com/feeds/) identify the resources (images, etc.) required to populate the front-end as well as the content (binaries, etc.) required to play games
-* Each feed item (game, etc.) has an associated application type. [Application types](https://docs.webrcade.com/apps/) include [emulators](https://docs.webrcade.com/apps/emulators/) (Atari, Sega, Nintendo) and [game engines](https://docs.webrcade.com/apps/engines/) (Classic Doom). The quantity and types of applications will continue to expand over time.
+See [configuration and features](deploy/webrcade/README.md),
+[build architecture](docs/architecture.md), and [third-party licenses](THIRD_PARTY.md).
+The release uses a pinned upstream runtime with hash-checked overlays; inherited
+frontend source edits require an explicit source-build upgrade or overlay port.
+Run `python3 scripts/check-release.py` and `python3 scripts/test.py` to validate
+portable source and synthetic tests. Browser/native-core tests are documented
+in their headers and require your own staged deployment/build sources.
 
-**Not focused on:**
-
-* Directly playing locally stored game content (ROMs, etc.)<br>*(Technically possible by using a local web server, but not a primary use case)*
-* The "latest and greatest" emulator features and compatibility<br>*(Primary emphasis is on compatibility with popular game content across a variety of platforms while minimizing resource requirements)*
-* Touch-based (virtual) gamepad controls<br>*(The focus is on native gamepad support via Bluetooth and USB)*
-
-## Support
-
-webЯcade is free and open-source, and will always remain so. If you enjoy the project and would like to help cover some of the ongoing costs (GitHub, hosting, domain, etc.), contributions are greatly appreciated but never expected.
-
-<p>
-  <a href="https://buymeacoffee.com/webrcade"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
-  &nbsp;
-  <a href="https://paypal.me/webrcade"><img src="https://img.shields.io/badge/PayPal-003087?style=for-the-badge&logo=paypal&logoColor=white" alt="Donate via PayPal"></a>
-</p>
-
-## Get Involved
-
-Have a question, suggestion, or just want to chat? Come join the community!
-
-* 💬 **[Discord](https://discord.gg/C4gXN2HJAv)** — Join the webЯcade Discord server to chat, ask questions, and stay up to date.
-* 📋 **[GitHub Issues](https://github.com/webrcade/webrcade/issues)** — Report bugs or request features.
-* 💡 **[GitHub Discussions](https://github.com/webrcade/webrcade/discussions)** — Share ideas or ask questions.
-
-## LICENSE
-
-Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+The frontend and our standalone deployment additions use Apache 2.0, with
+upstream attribution retained. Emulator cores and the optional Nextcloud app
+have separate licenses, including GPL/AGPL and noncommercial terms. The full
+core bundle must not be treated as wholly Apache-licensed or unrestricted for
+commercial redistribution. The modified 3DS corresponding source ships in the
+image at `/licenses/sources/3ds-source.tar.gz`. See [LICENSE](LICENSE),
+[NOTICE](NOTICE), and [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -1,0 +1,33 @@
+diff --git a/tasks/task_save.c b/tasks/task_save.c
+index 3014786..7e6b9d0 100644
+--- a/tasks/task_save.c
++++ b/tasks/task_save.c
+@@ -1836,22 +1836,19 @@ void set_save_state_in_background(bool state)
+ char* save_state_info(void)
+ {
+    void* save_data = NULL;
+-   char state_data[300]; // This should NEVER overflow. If it does we are doing something very wrong.
+-   memset(state_data, '\0', sizeof(state_data));
++   char* state_data = (char*)calloc(300, 1);
++   if (!state_data) return NULL;
+ 
+-   size_t serial_size;
++   size_t serial_size = 0;
+ 
+    if (!core_info_current_supports_savestate()) {
+       strcpy(state_data, "Not supported||0");
+       return state_data;
+    }
+ 
+-   serial_size = core_serialize_size();
+-   if (serial_size == 0) {
+-      strcpy(state_data, "Size is zero||0");
+-      return state_data;
+-   }
+-
++   /* content_get_serialized_data queries the size itself. Azahar prepares a
++    * complete compressed snapshot during that query; doing it twice wastes
++    * both CPU work and peak memory. */
+    save_data = content_get_serialized_data(&serial_size);
+    if (!save_data) {
+       strcpy(state_data, "Error writing data||0");

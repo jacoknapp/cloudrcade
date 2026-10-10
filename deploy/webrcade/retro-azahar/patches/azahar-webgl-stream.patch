@@ -1,0 +1,62 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 7c74a21..f5df6a8 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -33,10 +33,24 @@ using VideoCore::SurfaceType;
+ using namespace Common::Literals;
+ using namespace Pica::Shader::Generator;
+ 
++#if defined(__EMSCRIPTEN__)
++// WebGL has no persistent mapping: every draw first updates part of these
++// buffers. Safari's Metal backend then replaces the whole buffer, so that the
++// pending draw keeps the old contents, at a cost proportional to its size:
++// about 7 ms per draw on an iPhone with the desktop sizes. Keep them small; a
++// stream buffer grows when a single request needs more.
++constexpr std::size_t VERTEX_BUFFER_SIZE = 256_KiB;
++constexpr std::size_t INDEX_BUFFER_SIZE = 64_KiB;
++constexpr std::size_t UNIFORM_BUFFER_SIZE = 64_KiB;
++#else
+ constexpr std::size_t VERTEX_BUFFER_SIZE = 16_MiB;
+ constexpr std::size_t INDEX_BUFFER_SIZE = 2_MiB;
+ constexpr std::size_t UNIFORM_BUFFER_SIZE = 8_MiB;
++#endif
+ constexpr std::size_t TEXTURE_BUFFER_SIZE = 2_MiB;
++// Largest single batch accepted for hardware shaders, whatever the stream size.
++constexpr std::size_t MAX_VERTEX_INPUT_SIZE = 16_MiB;
++constexpr std::size_t MAX_INDEX_INPUT_SIZE = 2_MiB;
+ 
+ GLenum MakePrimitiveMode(Pica::PipelineRegs::TriangleTopology topology) {
+     switch (topology) {
+@@ -515,7 +529,7 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+     const GLenum primitive_mode = MakePrimitiveMode(regs.pipeline.triangle_topology);
+     auto [vs_input_index_min, vs_input_index_max, vs_input_size] = AnalyzeVertexArray(is_indexed);
+ 
+-    if (vs_input_size > VERTEX_BUFFER_SIZE) {
++    if (vs_input_size > MAX_VERTEX_INPUT_SIZE) {
+         LOG_WARNING(Render_OpenGL, "Too large vertex input size {}", vs_input_size);
+         return false;
+     }
+@@ -536,7 +550,7 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+         bool index_u16 = regs.pipeline.index_array.format != 0;
+         std::size_t index_buffer_size = regs.pipeline.num_vertices * (index_u16 ? 2 : 1);
+ 
+-        if (index_buffer_size > INDEX_BUFFER_SIZE) {
++        if (index_buffer_size > MAX_INDEX_INPUT_SIZE) {
+             LOG_WARNING(Render_OpenGL, "Too large index input size {}", index_buffer_size);
+             return false;
+         }
+diff --git a/src/video_core/renderer_opengl/gl_stream_buffer.cpp b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+index 440815e..57d733f 100644
+--- a/src/video_core/renderer_opengl/gl_stream_buffer.cpp
++++ b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+@@ -89,6 +89,10 @@ std::tuple<u8*, GLintptr, bool> OGLStreamBuffer::Map(GLsizeiptr size, GLintptr a
+     if (buffer_pos + size > buffer_size) {
+         buffer_pos = 0;
+         invalidate = true;
++        // Start over in fresh storage instead of overwriting data that draws
++        // still waiting in the browser's GPU process refer to.
++        glBindBuffer(gl_target, gl_buffer.handle);
++        glBufferData(gl_target, buffer_size, nullptr, GL_STREAM_DRAW);
+     }
+     mapped_offset = buffer_pos;
+     return std::make_tuple(shadow.data() + buffer_pos, buffer_pos, invalidate);

@@ -1,0 +1,303 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 996af01..c9f3ce7 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -590,7 +590,9 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+     SetupVertexArray(buffer_ptr, buffer_offset, vs_input_index_min, vs_input_index_max);
+     vertex_buffer.Unmap(vs_input_size);
+ 
+-    curr_shader_manager->ApplyTo(state, accurate_mul);
++    if (!curr_shader_manager->ApplyTo(state, accurate_mul)) {
++        return true; // the program is still being built; leave this draw out
++    }
+     state.Apply();
+ 
+     if (is_indexed) {
+@@ -771,11 +773,13 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+         state.draw.vertex_buffer = vertex_buffer.GetHandle();
+         curr_shader_manager->UseTrivialVertexShader();
+         curr_shader_manager->UseTrivialGeometryShader();
+-        curr_shader_manager->ApplyTo(state, accurate_mul);
++        // False while the program is still being built: leave this draw out.
++        const bool program_ready = curr_shader_manager->ApplyTo(state, accurate_mul);
+         state.Apply();
+ 
+         std::size_t max_vertices = 3 * (VERTEX_BUFFER_SIZE / (3 * sizeof(HardwareVertex)));
+-        for (std::size_t base_vertex = 0; base_vertex < vertex_batch.size();
++        for (std::size_t base_vertex = program_ready ? 0 : vertex_batch.size();
++             base_vertex < vertex_batch.size();
+              base_vertex += max_vertices) {
+             const std::size_t vertices = std::min(max_vertices, vertex_batch.size() - base_vertex);
+             const std::size_t vertex_size = vertices * sizeof(HardwareVertex);
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 30a61dc..c465aa4 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -2,6 +2,9 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include <algorithm>
+ #include <mutex>
+ #include <set>
+@@ -16,6 +19,7 @@
+ #include "video_core/renderer_opengl/gl_driver.h"
+ #include "video_core/renderer_opengl/gl_resource_manager.h"
+ #include "video_core/renderer_opengl/gl_shader_disk_cache.h"
++#include "video_core/renderer_opengl/gl_shader_util.h"
+ #include "video_core/renderer_opengl/gl_shader_manager.h"
+ #include "video_core/renderer_opengl/gl_state.h"
+ #include "video_core/shader/generator/glsl_fs_shader_gen.h"
+@@ -326,6 +330,10 @@ public:
+ 
+     FragmentShaders fragment_shaders;
+     std::unordered_map<u64, OGLProgram> program_cache;
++#if defined(__EMSCRIPTEN__)
++    /// Programs still linking in the background, with the time they were requested.
++    std::unordered_map<GLuint, double> linking;
++#endif
+     OGLPipeline pipeline;
+     ShaderDiskCache disk_cache;
+ 
+@@ -428,7 +436,7 @@ void ShaderProgramManager::UseFragmentShader(const Pica::RegsInternal& regs,
+     }
+ }
+ 
+-void ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
++bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+     if (impl->separable) {
+         if (driver.HasBug(DriverBug::ShaderStageChangeFreeze)) {
+             glUseProgramStages(
+@@ -444,6 +452,31 @@ void ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+     } else {
+         const u64 unique_identifier = impl->current.GetConfigHash();
+         OGLProgram& cached_program = impl->program_cache[unique_identifier];
++#if defined(__EMSCRIPTEN__)
++        // A new program takes the browser tens of milliseconds to build, and a
++        // scene change asks for dozens at once. Waiting for each froze the game;
++        // instead link in the background and leave out the draws that need a
++        // program until it is ready. After a second the wait is taken after
++        // all, so that nothing stays undrawn for long.
++        if (cached_program.handle == 0 && ProgramsLinkInBackground()) {
++            cached_program.handle =
++                BeginProgram(std::array{impl->current.vs, impl->current.gs, impl->current.fs});
++            impl->linking.emplace(cached_program.handle, emscripten_get_now());
++            EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
++        }
++        if (const auto it = impl->linking.find(cached_program.handle); it != impl->linking.end()) {
++            const bool linked = IsProgramLinked(cached_program.handle);
++            if (!linked && emscripten_get_now() - it->second < 1000.0) {
++                EM_ASM({ Module.wrcShaders.skipped++; });
++                return false;
++            }
++            if (!linked) {
++                EM_ASM({ Module.wrcShaders.waited++; });
++            }
++            FinishProgram(cached_program.handle, "");
++            impl->linking.erase(it);
++        }
++#endif
+         if (cached_program.handle == 0) {
+             cached_program.Create(false,
+                                   std::array{impl->current.vs, impl->current.gs, impl->current.fs});
+@@ -452,6 +485,7 @@ void ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+         }
+         state.draw.shader_program = cached_program.handle;
+     }
++    return true;
+ }
+ 
+ u64 ShaderProgramManager::GetProgramID() const {
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.h b/src/video_core/renderer_opengl/gl_shader_manager.h
+index 652bec5..2d4a09c 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -52,7 +52,9 @@ public:
+ 
+     void UseFragmentShader(const Pica::RegsInternal& config, const Pica::Shader::UserConfig& user);
+ 
+-    void ApplyTo(OpenGLState& state, bool accurate_mul);
++    /// Returns false when the program for the current shaders is still being
++    /// linked in the background; the caller then leaves the draw out.
++    bool ApplyTo(OpenGLState& state, bool accurate_mul);
+ 
+     u64 GetProgramID() const;
+ 
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index 5c506bb..44c3044 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -2,6 +2,9 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include <array>
+ #include <string>
+ #include <vector>
+@@ -93,6 +96,111 @@ GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug
+     return shader_id;
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++constexpr GLenum COMPLETION_STATUS = 0x91B1; // GL_COMPLETION_STATUS_KHR
++
++bool ProgramsLinkInBackground() {
++    static const bool available = EM_ASM_INT({
++        try {
++            // Module.wrcShaderWait (set by the frontend) restores waiting for each program.
++            return !Module.wrcShaderWait && Module.ctx &&
++                Module.ctx.getExtension('KHR_parallel_shader_compile') ? 1 : 0;
++        } catch (e) {
++            return 0;
++        }
++    }) != 0;
++    return available;
++}
++
++GLuint BeginProgram(std::span<const GLuint> shaders) {
++    const GLuint program_id = glCreateProgram();
++    for (GLuint shader : shaders) {
++        if (shader != 0) {
++            glAttachShader(program_id, shader);
++        }
++    }
++    glLinkProgram(program_id);
++    return program_id;
++}
++
++bool IsProgramLinked(GLuint program) {
++    GLint done = GL_FALSE;
++    glGetProgramiv(program, COMPLETION_STATUS, &done);
++    return done == GL_TRUE;
++}
++
++void FinishProgram(GLuint program_id, const std::string& debug_name) {
++
++    // Check the program
++    GLint result = GL_FALSE;
++    GLint info_log_length;
++    glGetProgramiv(program_id, GL_LINK_STATUS, &result);
++    glGetProgramiv(program_id, GL_INFO_LOG_LENGTH, &info_log_length);
++
++    if (info_log_length > 1) {
++        std::vector<char> program_error(info_log_length);
++        glGetProgramInfoLog(program_id, info_log_length, nullptr, &program_error[0]);
++        if (result == GL_TRUE) {
++            LOG_DEBUG(Render_OpenGL, "Link message for shader {}:\n{}", debug_name,
++                      &program_error[0]);
++        } else {
++            LOG_ERROR(Render_OpenGL, "Error linking shader {}:\n{}", debug_name, &program_error[0]);
++        }
++    } else if (result == GL_FALSE) {
++        LOG_ERROR(Render_OpenGL, "Error linking shader {}: No log produced.", debug_name);
++    }
++
++    GLuint attached[4];
++    GLsizei count = 0;
++    glGetAttachedShaders(program_id, 4, &count, attached);
++    for (GLsizei index = 0; index < count; ++index) {
++        glDetachShader(program_id, attached[index]);
++    }
++
++#if defined(__EMSCRIPTEN__)
++    if (result == GL_TRUE) {
++        glUseProgram(program_id);
++        const auto set_sampler = [&](const char* name, GLint unit) {
++            const GLint loc = glGetUniformLocation(program_id, name);
++            if (loc >= 0) {
++                glUniform1i(loc, unit);
++            }
++        };
++        set_sampler("tex0", 0);
++        set_sampler("tex1", 1);
++        set_sampler("tex2", 2);
++        set_sampler("texture_buffer_lut_lf", 3);
++        set_sampler("texture_buffer_lut_rg", 4);
++        set_sampler("texture_buffer_lut_rgba", 5);
++        set_sampler("tex_normal", 6);
++        set_sampler("tex_color", 7);
++#if defined(__EMSCRIPTEN__)
++        // Shadow maps, read as ordinary textures (see gl_state.cpp, gl_rasterizer.cpp)
++        set_sampler("shadow_texture_px", 8);
++        set_sampler("shadow_texture_nx", 9);
++        set_sampler("shadow_texture_py", 10);
++        set_sampler("shadow_texture_ny", 11);
++        set_sampler("shadow_texture_pz", 12);
++        set_sampler("shadow_texture_nz", 13);
++        set_sampler("shadow_buffer", 14);
++#endif
++
++        const auto set_block = [&](const char* name, GLuint binding) {
++            const GLuint idx = glGetUniformBlockIndex(program_id, name);
++            if (idx != GL_INVALID_INDEX) {
++                glUniformBlockBinding(program_id, idx, binding);
++            }
++        };
++        set_block("vs_pica_data", 0);
++        set_block("vs_data", 1);
++        set_block("fs_data", 2);
++        glUseProgram(0);
++    }
++#endif
++
++}
++#endif
++
+ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+                    const std::string& debug_name) {
+     // Link the program
+@@ -115,6 +223,9 @@ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+     (void)separable_program;
+ #endif
+     glLinkProgram(program_id);
++#if defined(__EMSCRIPTEN__)
++    FinishProgram(program_id, debug_name);
++#else
+ 
+     // Check the program
+     GLint result = GL_FALSE;
+@@ -182,7 +293,8 @@ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+     }
+ #endif
+ 
++#endif
+     return program_id;
+ }
+ 
+-} // namespace OpenGL
++} // namespace OpenGL
+\ No newline at end of file
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.h b/src/video_core/renderer_opengl/gl_shader_util.h
+index 3051a53..fb9c952 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -24,6 +24,23 @@ GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug
+  * @param debug_name debug name to show in logs
+  * @returns Handle of the newly created OpenGL program object
+  */
++#if defined(__EMSCRIPTEN__)
++/// True when the browser links programs in the background
++/// (KHR_parallel_shader_compile) and can say, without waiting, whether one is done.
++bool ProgramsLinkInBackground();
++
++/// Starts linking and returns at once; the program must not be used before
++/// FinishProgram(). Only meaningful when ProgramsLinkInBackground().
++GLuint BeginProgram(std::span<const GLuint> shaders);
++
++/// Non-blocking: has the program started by BeginProgram() finished linking?
++bool IsProgramLinked(GLuint program);
++
++/// Checks the link result and sets up samplers and uniform blocks. Waits for
++/// the link if it is still running.
++void FinishProgram(GLuint program, const std::string& debug_name);
++#endif
++
+ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+                    const std::string& debug_name);
+ 

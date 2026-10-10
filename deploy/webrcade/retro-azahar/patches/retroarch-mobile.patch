@@ -1,0 +1,146 @@
+diff --git a/Makefile.emulatorjs b/Makefile.emulatorjs
+index b5862b3..f8f6c8f 100644
+--- a/Makefile.emulatorjs
++++ b/Makefile.emulatorjs
+@@ -121,7 +121,7 @@ INITIAL_HEAP ?= 134217728
+ 
+ OBJDIR := obj-emscripten
+ 
+-EXPORTED_FUNCTIONS = _main,_malloc,_free,_load_state, \
++EXPORTED_FUNCTIONS = _wrc_webgl_formats_test,_main,_malloc,_free,_load_state, \
+                      _ejs_set_variable,_simulate_input,_shader_enable,_save_state_info,_set_cheat,_cmd_take_screenshot, \
+                      _system_restart,_cmd_savefiles,_get_core_options,_get_core_options_json,_cmd_save_state,_supports_states,_reset_cheat,_toggleMainLoop, \
+                      _save_file_path,_get_disk_count,_set_current_disk,_get_current_disk,_refresh_save_files,_toggle_fastforward,_set_ff_ratio, \
+@@ -131,6 +131,10 @@ EXPORTED_FUNCTIONS = _main,_malloc,_free,_load_state, \
+ 
+ EXPORTS := Browser,callMain,cwrap,getValue,HEAPU8,FS,PATH,ERRNO_CODES,AL,abort,ENV,stringToNewUTF8,UTF8ToString,Browser,EmscriptenSendCommand,EmscriptenReceiveCommandReply,EmulatorJSGetState,EmulatorJSGetMemoryData
+ 
++ifeq ($(TARGET), azahar_libretro.js)
++   EXPORTS := $(EXPORTS),PThread,RWA
++endif
++
+ LIBS   := -s USE_ZLIB=1
+ CFLAGS := -s USE_ZLIB=1
+ 
+@@ -253,7 +257,11 @@ ifeq ($(HAVE_AL), 1)
+ endif
+ 
+ ifeq ($(HAVE_THREADS), 1)
+-   LDFLAGS += -s MAXIMUM_MEMORY=4294967296 -pthread -s PTHREAD_POOL_SIZE=$(PTHREAD_POOL_SIZE)
++   MAXIMUM_MEMORY = 4294967296
++   ifeq ($(TARGET), azahar_libretro.js)
++      MAXIMUM_MEMORY = 1073741824
++   endif
++   LDFLAGS += -s MAXIMUM_MEMORY=$(MAXIMUM_MEMORY) -pthread -s PTHREAD_POOL_SIZE=$(PTHREAD_POOL_SIZE)
+    CFLAGS += -pthread -s SHARED_MEMORY
+ endif
+ 
+diff --git a/emscripten/emulatorjs.js b/emscripten/emulatorjs.js
+index 803e0c8..0902475 100644
+--- a/emscripten/emulatorjs.js
++++ b/emscripten/emulatorjs.js
+@@ -32,6 +32,18 @@ var LibraryEmulatorJS = {
+     EmulatorJSShowKeyboard__sig: 'iiii',
+     EmulatorJSShowKeyboard: function(hintPtr, maxLength, passwordMode) {
+         const hint = (hintPtr && UTF8ToString(hintPtr)) || "";
++        const fn = Module.getInputText;
++        const response = typeof fn === "function"
++            ? fn({ hint: hint, maxLength: maxLength, password: !!passwordMode })
++            : window.prompt(hint || "Enter text:", "");
++        // A synchronous frontend can return without unwinding the CPU/HLE
++        // callback stack. This is required by the Azahar minimal-Asyncify build.
++        if (!response || typeof response.then !== "function") {
++            if (typeof response !== "string") return 0;
++            const ptr = _malloc(lengthBytesUTF8(response) + 1);
++            stringToUTF8(response, ptr, lengthBytesUTF8(response) + 1);
++            return ptr;
++        }
+         return Asyncify.handleSleep(function(wakeUp) {
+             const respond = function(result) {
+                 if (typeof result !== "string") {
+@@ -43,13 +55,7 @@ var LibraryEmulatorJS = {
+                 stringToUTF8(result, ptr, lenBytes);
+                 wakeUp(ptr);
+             };
+-            const fn = Module.getInputText;
+-            if (typeof fn !== "function") {
+-                console.warn("EmulatorJSShowKeyboard: Module.getInputText not set, falling back to prompt()");
+-                respond(window.prompt(hint || "Enter text:", "") || null);
+-                return;
+-            }
+-            Promise.resolve(fn({ hint: hint, maxLength: maxLength, password: !!passwordMode }))
++            Promise.resolve(response)
+                 .then(respond)
+                 .catch(function(err) {
+                     console.error("getInputText threw:", err);
+diff --git a/emscripten/library_rwebaudio.js b/emscripten/library_rwebaudio.js
+index d97bfea..f6fe32e 100644
+--- a/emscripten/library_rwebaudio.js
++++ b/emscripten/library_rwebaudio.js
+@@ -28,7 +28,14 @@ var LibraryRWebAudio = {
+    },
+ 
+    RWebAudioResumeCtx: function() {
+-      if (!RWA.contextRunning) RWA.context.resume();
++      // A phone may require a fresh user gesture. Keep only one resume pending
++      // and handle denial rather than rejecting a Promise on every audio frame.
++      if (!RWA.contextRunning && !RWA.resumePending) {
++         RWA.resumePending = true;
++         RWA.context.resume().catch(function() {}).finally(function() {
++            RWA.resumePending = false;
++         });
++      }
+       return RWA.contextRunning;
+    },
+ 
+@@ -37,7 +44,7 @@ var LibraryRWebAudio = {
+       var ac = window.AudioContext || window.webkitAudioContext;
+       if (!ac) return 0;
+ 
+-      RWA.context = new ac();
++      RWA.context = window.readyAudioContext || new ac();
+       RWA.currentTimeDiff = performance.now() / 1000 - RWA.context.currentTime;
+       RWA.nonblock = false;
+       RWA.endTime = 0;
+diff --git a/emulatorjs/build-emulatorjs.sh b/emulatorjs/build-emulatorjs.sh
+index 376d098..d81c35f 100755
+--- a/emulatorjs/build-emulatorjs.sh
++++ b/emulatorjs/build-emulatorjs.sh
+@@ -74,6 +74,7 @@ needsAsync=("mupen64plus_next" "dosbox_pure" "ppsspp" "azahar" "bsnes" "bluemsx"
+ for f in $(ls -v *_emscripten.bc); do
+   name=`echo "$f" | sed "s/\(_libretro_emscripten\|\).bc$//"`
+   async=0
++  min_async=0
+   sevenZip=1
+   wasm=1
+   gles3=1
+@@ -125,6 +126,18 @@ for f in $(ls -v *_emscripten.bc); do
+     exit 1
+   fi
+ 
++  # Keep startup resources bounded for Safari/iPhone. Extra pthreads can grow
++  # on demand, but do not instantiate 32 WASM workers just to open a game.
++  if [ "$name" = "azahar" ]; then
++    stack_mem=8388608 # 8 MiB main stack
++    heap_mem=268435456 # 256 MiB initial memory; grows as needed
++    pthread=4
++    # The core never suspends through indirect callbacks. Audio yields at the
++    # frontend loop instead, avoiding full Asyncify in the hot CPU/shader paths.
++    async=0
++    min_async=1
++  fi
++
+   echo "-- Building core: $name --"
+   cp -f "$f" ../libretro_emscripten.a
+    
+@@ -151,8 +164,8 @@ for f in $(ls -v *_emscripten.bc); do
+   fi
+ 
+   # Compile core
+-  echo "BUILD COMMAND: make -C ../ -f Makefile.emulatorjs HAVE_7ZIP=$sevenZip HAVE_CHD=$chd HAVE_THREADS=$threads PTHREAD_POOL_SIZE=$pthread ASYNC=$async HAVE_OPENGLES3=$gles3 STACK_SIZE=$stack_mem INITIAL_HEAP=$heap_mem HAVE_AL=$have_al HAVE_RWEBAUDIO=$have_rwebaudio LIGHT_DEBUG=$light_debug TARGET=${name}_libretro.js -j"$(nproc)
+-  make -C ../ -f Makefile.emulatorjs HAVE_7ZIP=$sevenZip HAVE_CHD=$chd HAVE_THREADS=$threads PTHREAD_POOL_SIZE=$pthread ASYNC=$async HAVE_OPENGLES3=$gles3 STACK_SIZE=$stack_mem INITIAL_HEAP=$heap_mem HAVE_AL=$have_al HAVE_RWEBAUDIO=$have_rwebaudio LIGHT_DEBUG=$light_debug TARGET=${name}_libretro.js -j$(nproc) || exit 1
++  echo "BUILD COMMAND: make -C ../ -f Makefile.emulatorjs HAVE_7ZIP=$sevenZip HAVE_CHD=$chd HAVE_THREADS=$threads PTHREAD_POOL_SIZE=$pthread ASYNC=$async MIN_ASYNC=$min_async HAVE_OPENGLES3=$gles3 STACK_SIZE=$stack_mem INITIAL_HEAP=$heap_mem HAVE_AL=$have_al HAVE_RWEBAUDIO=$have_rwebaudio LIGHT_DEBUG=$light_debug TARGET=${name}_libretro.js -j"$(nproc)
++  make -C ../ -f Makefile.emulatorjs HAVE_7ZIP=$sevenZip HAVE_CHD=$chd HAVE_THREADS=$threads PTHREAD_POOL_SIZE=$pthread ASYNC=$async MIN_ASYNC=$min_async HAVE_OPENGLES3=$gles3 STACK_SIZE=$stack_mem INITIAL_HEAP=$heap_mem HAVE_AL=$have_al HAVE_RWEBAUDIO=$have_rwebaudio LIGHT_DEBUG=$light_debug TARGET=${name}_libretro.js -j$(nproc) || exit 1
+ 
+   # Move executable files
+   out_dir="../../EmulatorJS/data/cores"

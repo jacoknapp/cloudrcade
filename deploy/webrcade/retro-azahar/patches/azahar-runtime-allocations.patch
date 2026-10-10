@@ -1,0 +1,30 @@
+diff --git a/src/core/savestate.cpp b/src/core/savestate.cpp
+index 1ad3a47..d3f3822 100644
+--- a/src/core/savestate.cpp
++++ b/src/core/savestate.cpp
+@@ -269,7 +269,7 @@ std::vector<u8> System::SaveStateBuffer() const {
+ 
+ #if defined(__EMSCRIPTEN__)
+     std::memcpy(buffer.data(), &header, sizeof(header));
+-    buffer.shrink_to_fit();
++    // Do not copy the compressed buffer just to trim its temporary capacity.
+     return buffer;
+ #else
+     std::vector<u8> result((u8*)&header, (u8*)&header + sizeof(header));
+diff --git a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+index 2a69783..8665935 100644
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -12,7 +12,12 @@ using ProcTexCombiner = TexturingRegs::ProcTexCombiner;
+ using ProcTexFilter = TexturingRegs::ProcTexFilter;
+ using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
+ 
++#if defined(__EMSCRIPTEN__)
++// Browser shaders are generally kilobytes; std::string grows for larger ones.
++constexpr static std::size_t RESERVE_SIZE = 64 * 1024;
++#else
+ constexpr static std::size_t RESERVE_SIZE = 8 * 1024 * 1024;
++#endif
+ 
+ enum class Semantic : u32 {
+     Position,

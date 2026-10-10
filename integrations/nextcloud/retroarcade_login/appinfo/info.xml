@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+  <id>retroarcade_login</id><name>CloudRcade login handoff</name><summary>Reuse a Nextcloud or Authentik session for trusted clients</summary>
+  <description>Routes RetroArcade and Slate WASM Login Flow v2 requests through the existing SAML provider when a Nextcloud session is not already present. Trusted origins complete authorization through Nextcloud’s native login flow and password-confirmation safeguards, returning to fixed application callbacks.</description>
+  <version>1.5.0</version><licence>agpl</licence><author>CloudRcade contributors</author><namespace>RetroArcadeLogin</namespace>
+  <category>integration</category><dependencies><nextcloud min-version="34" max-version="35"/></dependencies>
+</info>

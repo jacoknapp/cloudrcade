@@ -1,0 +1,368 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index c9f3ce7..920d399 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -232,6 +232,9 @@ RasterizerOpenGL::~RasterizerOpenGL() = default;
+ 
+ void RasterizerOpenGL::TickFrame() {
+     res_cache.TickFrame();
++    if (curr_shader_manager) {
++        curr_shader_manager->RebuildRemembered();
++    }
+ }
+ 
+ void RasterizerOpenGL::LoadDefaultDiskResources(
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index c465aa4..4f431f7 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -331,8 +331,6 @@ public:
+     FragmentShaders fragment_shaders;
+     std::unordered_map<u64, OGLProgram> program_cache;
+ #if defined(__EMSCRIPTEN__)
+-    /// Programs still linking in the background, with the time they were requested.
+-    std::unordered_map<GLuint, double> linking;
+ #endif
+     OGLPipeline pipeline;
+     ShaderDiskCache disk_cache;
+@@ -436,6 +434,44 @@ void ShaderProgramManager::UseFragmentShader(const Pica::RegsInternal& regs,
+     }
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++namespace {
++// Programs built in the background. They belong to no manager: loading a save
++// state replaces the manager, and the game would otherwise wait for (or go
++// without) every program it had already built once more.
++std::unordered_map<u64, GLuint> background_programs;
++/// Those still linking, with the time they were first asked for (< 0: not yet).
++std::unordered_map<GLuint, double> linking;
++/// How far the remembered programs have been rebuilt.
++std::size_t remembered_done = 0;
++} // namespace
++#endif
++
++void ShaderProgramManager::RebuildRemembered() {
++#if defined(__EMSCRIPTEN__)
++    if (impl->separable || !ProgramsLinkInBackground()) {
++        return;
++    }
++    // Some per frame: the browser builds them on its own threads while the
++    // game runs, in the order they were first needed.
++    RememberedPrograms::Entry entry;
++    for (int count = 0; count < 8 && RememberedPrograms::At(remembered_done, entry);) {
++        ++remembered_done;
++        if (entry.vertex == 0) {
++            continue;
++        }
++        GLuint& program = background_programs[entry.id];
++        if (program != 0) {
++            continue;
++        }
++        ++count;
++        program = BeginProgram(std::array{entry.vertex, GLuint{0}, entry.fragment});
++        linking.emplace(program, -1.0);
++        EM_ASM({ Module.wrcShaders.rebuilt = (Module.wrcShaders.rebuilt || 0) + 1; });
++    }
++#endif
++}
++
+ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+     if (impl->separable) {
+         if (driver.HasBug(DriverBug::ShaderStageChangeFreeze)) {
+@@ -451,32 +487,42 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+         state.draw.program_pipeline = impl->pipeline.handle;
+     } else {
+         const u64 unique_identifier = impl->current.GetConfigHash();
+-        OGLProgram& cached_program = impl->program_cache[unique_identifier];
+ #if defined(__EMSCRIPTEN__)
+         // A new program takes the browser tens of milliseconds to build, and a
+         // scene change asks for dozens at once. Waiting for each froze the game;
+         // instead link in the background and leave out the draws that need a
+         // program until it is ready. After a second the wait is taken after
+         // all, so that nothing stays undrawn for long.
+-        if (cached_program.handle == 0 && ProgramsLinkInBackground()) {
+-            cached_program.handle =
+-                BeginProgram(std::array{impl->current.vs, impl->current.gs, impl->current.fs});
+-            impl->linking.emplace(cached_program.handle, emscripten_get_now());
+-            EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
+-        }
+-        if (const auto it = impl->linking.find(cached_program.handle); it != impl->linking.end()) {
+-            const bool linked = IsProgramLinked(cached_program.handle);
+-            if (!linked && emscripten_get_now() - it->second < 1000.0) {
+-                EM_ASM({ Module.wrcShaders.skipped++; });
+-                return false;
++        if (ProgramsLinkInBackground()) {
++            GLuint& program = background_programs[unique_identifier];
++            if (program == 0) {
++                program =
++                    BeginProgram(std::array{impl->current.vs, impl->current.gs, impl->current.fs});
++                linking.emplace(program, emscripten_get_now());
++                RememberedPrograms::NoteProgram(unique_identifier, impl->current.vs,
++                                                impl->current.fs);
++                EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
+             }
+-            if (!linked) {
+-                EM_ASM({ Module.wrcShaders.waited++; });
++            if (const auto it = linking.find(program); it != linking.end()) {
++                if (it->second < 0.0) {
++                    it->second = emscripten_get_now(); // rebuilt ahead of time, first use now
++                }
++                const bool linked = IsProgramLinked(program);
++                if (!linked && emscripten_get_now() - it->second < 1000.0) {
++                    EM_ASM({ Module.wrcShaders.skipped++; });
++                    return false;
++                }
++                if (!linked) {
++                    EM_ASM({ Module.wrcShaders.waited++; });
++                }
++                FinishProgram(program, "");
++                linking.erase(it);
+             }
+-            FinishProgram(cached_program.handle, "");
+-            impl->linking.erase(it);
++            state.draw.shader_program = program;
++            return true;
+         }
+ #endif
++        OGLProgram& cached_program = impl->program_cache[unique_identifier];
+         if (cached_program.handle == 0) {
+             cached_program.Create(false,
+                                   std::array{impl->current.vs, impl->current.gs, impl->current.fs});
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.h b/src/video_core/renderer_opengl/gl_shader_manager.h
+index 2d4a09c..1c3ee1f 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -56,6 +56,9 @@ public:
+     /// linked in the background; the caller then leaves the draw out.
+     bool ApplyTo(OpenGLState& state, bool accurate_mul);
+ 
++    /// Rebuilds a few of the programs remembered from earlier sessions.
++    void RebuildRemembered();
++
+     u64 GetProgramID() const;
+ 
+ private:
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index 44c3044..90f4411 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -9,6 +9,13 @@
+ #include <string>
+ #include <vector>
+ #include <glad/glad.h>
++#include <cstdio>
++#include <cstring>
++#include <deque>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include "common/hash.h"
+ #include "common/assert.h"
+ #include "common/logging/log.h"
+ #include "video_core/renderer_opengl/gl_shader_util.h"
+@@ -72,6 +79,14 @@ GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug
+     glShaderSource(shader_id, static_cast<GLsizei>(src_arr.size()), src_arr.data(), lengths.data());
+     LOG_DEBUG(Render_OpenGL, "Compiling {} shader {}...", debug_type, debug_name);
+     glCompileShader(shader_id);
++#if defined(__EMSCRIPTEN__)
++    RememberedPrograms::NoteShader(shader_id, type, preamble, source);
++    if (ProgramsLinkInBackground()) {
++        // Asking for the result would wait for the compiler; a shader that
++        // failed shows up when its program is linked.
++        return shader_id;
++    }
++#endif
+ 
+     GLint result = GL_FALSE;
+     GLint info_log_length;
+@@ -97,6 +112,160 @@ GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug
+ }
+ 
+ #if defined(__EMSCRIPTEN__)
++namespace RememberedPrograms {
++namespace {
++// Written by the core, kept across sessions by the frontend (IndexedDB).
++constexpr char FILE_PATH[] = "/home/web_user/retroarch/userdata/shadercache/programs.bin";
++// The GLSL depends on this build's generators: never reuse another build's file.
++constexpr char STAMP[] = "WRCP1 " __DATE__ " " __TIME__;
++
++struct Source {
++    GLenum type;
++    std::string text;
++};
++struct Record {
++    u64 id, vertex, fragment;
++};
++struct State {
++    std::FILE* file = nullptr;
++    std::unordered_map<u64, Source> sources;   ///< from the file, not compiled yet
++    std::unordered_map<u64, GLuint> compiled;  ///< shaders rebuilt from the file
++    std::unordered_map<GLuint, u64> hashes;    ///< shaders the game compiled this session
++    std::unordered_set<u64> shaders_on_file;
++    std::unordered_set<u64> programs_on_file;
++    std::vector<Record> records;
++};
++
++template <typename T>
++bool Read(std::FILE* file, T& value) {
++    return std::fread(&value, sizeof(T), 1, file) == 1;
++}
++template <typename T>
++void Write(std::FILE* file, const T& value) {
++    std::fwrite(&value, sizeof(T), 1, file);
++}
++
++State& Get() {
++    static State state;
++    static bool opened = false;
++    if (opened) {
++        return state;
++    }
++    opened = true;
++    bool valid = false;
++    if (std::FILE* file = std::fopen(FILE_PATH, "rb")) {
++        char stamp[sizeof(STAMP)]{};
++        valid = std::fread(stamp, sizeof(stamp), 1, file) == 1 &&
++                std::memcmp(stamp, STAMP, sizeof(STAMP)) == 0;
++        for (u8 kind; valid && Read(file, kind);) {
++            if (kind == 'S') {
++                u64 hash;
++                u32 type, length;
++                if (!Read(file, hash) || !Read(file, type) || !Read(file, length) ||
++                    length > 4 * 1024 * 1024) {
++                    break;
++                }
++                std::string text(length, '\0');
++                if (std::fread(text.data(), 1, length, file) != length) {
++                    break;
++                }
++                state.sources[hash] = Source{static_cast<GLenum>(type), std::move(text)};
++                state.shaders_on_file.insert(hash);
++            } else if (kind == 'P') {
++                Record record;
++                if (!Read(file, record.id) || !Read(file, record.vertex) ||
++                    !Read(file, record.fragment)) {
++                    break;
++                }
++                if (state.programs_on_file.insert(record.id).second) {
++                    state.records.push_back(record);
++                }
++            } else {
++                break;
++            }
++        }
++        std::fclose(file);
++    }
++    // A file from another build, or none: start a new one. Otherwise add to it.
++    state.file = std::fopen(FILE_PATH, valid ? "ab" : "wb");
++    if (state.file && !valid) {
++        std::fwrite(STAMP, sizeof(STAMP), 1, state.file);
++        std::fflush(state.file);
++    }
++    EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0}))
++                 .remembered = $0; }, static_cast<int>(state.records.size()));
++    return state;
++}
++
++GLuint Rebuild(State& state, u64 hash) {
++    if (const auto it = state.compiled.find(hash); it != state.compiled.end()) {
++        return it->second;
++    }
++    const auto it = state.sources.find(hash);
++    if (it == state.sources.end()) {
++        return 0;
++    }
++    const GLuint shader = glCreateShader(it->second.type);
++    const GLchar* text = it->second.text.data();
++    const GLint length = static_cast<GLint>(it->second.text.size());
++    glShaderSource(shader, 1, &text, &length);
++    glCompileShader(shader); // not waited for: the link reports a failure
++    state.compiled.emplace(hash, shader);
++    state.sources.erase(it);
++    return shader;
++}
++} // namespace
++
++void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source) {
++    State& state = Get();
++    std::string text{preamble};
++    text += source;
++    const u64 hash = Common::ComputeHash64(text.data(), text.size());
++    state.hashes[shader] = hash;
++    if (!state.file || !state.shaders_on_file.insert(hash).second) {
++        return;
++    }
++    // Kept as well: the game's own shader objects go when a save state is
++    // loaded, and the programs are then rebuilt from this text.
++    state.sources[hash] = Source{type, text};
++    Write(state.file, u8{'S'});
++    Write(state.file, hash);
++    Write(state.file, static_cast<u32>(type));
++    Write(state.file, static_cast<u32>(text.size()));
++    std::fwrite(text.data(), 1, text.size(), state.file);
++    std::fflush(state.file);
++}
++
++void NoteProgram(u64 id, GLuint vertex, GLuint fragment) {
++    State& state = Get();
++    const auto vs = state.hashes.find(vertex);
++    const auto fs = state.hashes.find(fragment);
++    if (!state.file || vs == state.hashes.end() || fs == state.hashes.end() ||
++        !state.programs_on_file.insert(id).second) {
++        return;
++    }
++    Write(state.file, u8{'P'});
++    Write(state.file, id);
++    Write(state.file, vs->second);
++    Write(state.file, fs->second);
++    std::fflush(state.file);
++    state.records.push_back(Record{id, vs->second, fs->second});
++}
++
++bool At(std::size_t index, Entry& entry) {
++    State& state = Get();
++    if (index >= state.records.size()) {
++        return false;
++    }
++    const Record record = state.records[index];
++    entry = Entry{record.id, Rebuild(state, record.vertex), Rebuild(state, record.fragment)};
++    if (entry.fragment == 0) {
++        entry.vertex = 0;
++    }
++    return true;
++}
++} // namespace RememberedPrograms
++
+ constexpr GLenum COMPLETION_STATUS = 0x91B1; // GL_COMPLETION_STATUS_KHR
+ 
+ bool ProgramsLinkInBackground() {
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.h b/src/video_core/renderer_opengl/gl_shader_util.h
+index fb9c952..6216944 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -33,6 +33,24 @@ bool ProgramsLinkInBackground();
+ /// FinishProgram(). Only meaningful when ProgramsLinkInBackground().
+ GLuint BeginProgram(std::span<const GLuint> shaders);
+ 
++/// A record of the programs a game has used, kept in a file the web frontend
++/// stores between sessions: the GLSL of every shader and which pairs were
++/// linked. At() hands them back in the order they were first used, so that
++/// they can be rebuilt in the background before the game asks for them again.
++/// The list is kept: loading a save state starts a new shader manager, which
++/// goes through it once more.
++namespace RememberedPrograms {
++struct Entry {
++    u64 id;
++    GLuint vertex;
++    GLuint fragment;
++};
++void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source);
++void NoteProgram(u64 id, GLuint vertex, GLuint fragment);
++/// False past the end of the list. `entry.vertex` is 0 for a record that cannot be rebuilt.
++bool At(std::size_t index, Entry& entry);
++} // namespace RememberedPrograms
++
+ /// Non-blocking: has the program started by BeginProgram() finished linking?
+ bool IsProgramLinked(GLuint program);
+ 

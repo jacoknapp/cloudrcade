@@ -1,0 +1,229 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 90bbdec..a71ff29 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -641,14 +641,6 @@ void RasterizerOpenGL::DrawTriangles() {
+ 
+ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+     MICROPROFILE_SCOPE(OpenGL_Drawing);
+-#if defined(__EMSCRIPTEN__)
+-    // Shadow maps are written through image load/store and glMemoryBarrier,
+-    // neither of which WebGL2 has. Drop the pass; shadows are sampled as lit.
+-    if (regs.framebuffer.IsShadowRendering()) {
+-        vertex_batch.clear();
+-        return true;
+-    }
+-#endif
+     SyncDrawState();
+ 
+     const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
+@@ -712,7 +704,45 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+ 
+     // Sync and bind the texture surfaces
+     SyncTextureUnits(framebuffer);
++#if defined(__EMSCRIPTEN__)
++    // WebGL2 has neither image load/store nor framebuffer fetch. The shadow pass
++    // writes the updated map as its colour output and reads the previous value
++    // from a copy of the area it is about to draw. Fragments of one draw that
++    // overlap each other therefore do not see one another.
++    const auto saved_color_mask = state.color_mask;
++    const bool saved_blend = state.blend.enabled;
++    const bool saved_depth_test = state.depth.test_enabled;
++    const bool saved_stencil_test = state.stencil.test_enabled;
++    if (shadow_rendering) {
++        state.color_mask = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
++        state.blend.enabled = false;
++        state.depth.test_enabled = false;
++        state.stencil.test_enabled = false;
++        state.draw.read_framebuffer = framebuffer->Handle();
++    }
++#endif
+     state.Apply();
++#if defined(__EMSCRIPTEN__)
++    if (shadow_rendering) {
++        const GLsizei right = static_cast<GLsizei>(draw_rect.right);
++        const GLsizei top = static_cast<GLsizei>(draw_rect.top);
++        glActiveTexture(GL_TEXTURE14);
++        if (!shadow_copy.handle) {
++            shadow_copy.Create();
++        }
++        glBindTexture(GL_TEXTURE_2D, shadow_copy.handle);
++        if (right > shadow_copy_width || top > shadow_copy_height) {
++            shadow_copy_width = std::max(shadow_copy_width, right);
++            shadow_copy_height = std::max(shadow_copy_height, top);
++            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, shadow_copy_width, shadow_copy_height, 0,
++                         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++        }
++        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, draw_rect.left, draw_rect.bottom, draw_rect.left,
++                            draw_rect.bottom, draw_rect.GetWidth(), draw_rect.GetHeight());
++    }
++#endif
+ 
+     // Sync and bind the shader
+     curr_shader_manager->UseFragmentShader(regs, user_config);
+@@ -753,10 +783,19 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+ 
+     vertex_batch.clear();
+ 
++#if defined(__EMSCRIPTEN__)
++    if (shadow_rendering) {
++        state.color_mask = saved_color_mask;
++        state.blend.enabled = saved_blend;
++        state.depth.test_enabled = saved_depth_test;
++        state.stencil.test_enabled = saved_stencil_test;
++    }
++#else
+     if (shadow_rendering) {
+         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
+                         GL_TEXTURE_UPDATE_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+     }
++#endif
+ 
+     return succeeded;
+ }
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.h b/src/video_core/renderer_opengl/gl_rasterizer.h
+index b529a56..424904e 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.h
++++ b/src/video_core/renderer_opengl/gl_rasterizer.h
+@@ -129,6 +129,12 @@ private:
+     OGLTexture texture_buffer_lut_rg;
+     OGLTexture texture_buffer_lut_rgba;
+     bool emulate_minmax_blend{};
++#if defined(__EMSCRIPTEN__)
++    /// Copy of the shadow map being rendered, read by the shadow pass.
++    OGLTexture shadow_copy;
++    GLsizei shadow_copy_width{};
++    GLsizei shadow_copy_height{};
++#endif
+ };
+ 
+ } // namespace OpenGL
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index ead08b7..5c506bb 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -158,6 +158,16 @@ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+         set_sampler("texture_buffer_lut_rgba", 5);
+         set_sampler("tex_normal", 6);
+         set_sampler("tex_color", 7);
++#if defined(__EMSCRIPTEN__)
++        // Shadow maps, read as ordinary textures (see gl_state.cpp, gl_rasterizer.cpp)
++        set_sampler("shadow_texture_px", 8);
++        set_sampler("shadow_texture_nx", 9);
++        set_sampler("shadow_texture_py", 10);
++        set_sampler("shadow_texture_ny", 11);
++        set_sampler("shadow_texture_pz", 12);
++        set_sampler("shadow_texture_nz", 13);
++        set_sampler("shadow_buffer", 14);
++#endif
+ 
+         const auto set_block = [&](const char* name, GLuint binding) {
+             const GLuint idx = glGetUniformBlockIndex(program_id, name);
+diff --git a/src/video_core/renderer_opengl/gl_state.cpp b/src/video_core/renderer_opengl/gl_state.cpp
+index 0dab5c0..5dd6eed 100644
+--- a/src/video_core/renderer_opengl/gl_state.cpp
++++ b/src/video_core/renderer_opengl/gl_state.cpp
+@@ -288,6 +288,14 @@ void OpenGLState::Apply() const {
+         glBindImageTexture(ImageUnits::ShadowTextureNZ, image_shadow_texture_nz, 0, GL_FALSE, 0,
+                            GL_READ_ONLY, GL_R32UI);
+     }
++#else
++    // No image units in WebGL2: the six shadow maps are sampled from units 8-13.
++    for (std::size_t i = 0; i < image_shadow_texture.size(); ++i) {
++        if (image_shadow_texture[i] != cur_state.image_shadow_texture[i]) {
++            glActiveTexture(static_cast<GLenum>(GL_TEXTURE8 + i));
++            glBindTexture(GL_TEXTURE_2D, image_shadow_texture[i]);
++        }
++    }
+ #endif
+ 
+     // Framebuffer
+diff --git a/src/video_core/renderer_opengl/gl_texture_runtime.cpp b/src/video_core/renderer_opengl/gl_texture_runtime.cpp
+index 8dbcc07..3a1ede4 100644
+--- a/src/video_core/renderer_opengl/gl_texture_runtime.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_runtime.cpp
+@@ -663,6 +663,15 @@ Framebuffer::Framebuffer(TextureRuntime& runtime, const VideoCore::FramebufferPa
+     state.draw.draw_framebuffer = framebuffer.handle;
+     state.Apply();
+ 
++#if defined(__EMSCRIPTEN__)
++    if (shadow_rendering) {
++        // The shadow pass writes its result as a colour here (see gl_rasterizer.cpp).
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
++                               color->Handle(), color_level);
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0,
++                               0);
++    } else
++#endif
+     if (shadow_rendering) {
+         glFramebufferParameteri(GL_DRAW_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_WIDTH,
+                                 color->width * res_scale);
+diff --git a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+index 1fb0fb6..1173e4d 100644
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -866,6 +866,13 @@ uint s = uint(combiner_output.g * float(0xFF));
+ ivec2 image_coord = ivec2(gl_FragCoord.xy);
+ )";
+ 
++#if defined(__EMSCRIPTEN__)
++    out += R"(
++uint new_shadow = UpdateShadow(imageLoad(shadow_buffer, image_coord).x, d, s);
++color = vec4(uvec4(new_shadow, new_shadow >> 8, new_shadow >> 16, new_shadow >> 24) & 0xFFu) / 255.0;
++)";
++    return;
++#endif
+     if (use_fragment_shader_interlock) {
+         out += R"(
+ beginInvocationInterlock();
+@@ -1363,6 +1370,30 @@ void FragmentModule::DefineBindingsGL() {
+     if (use_blend_fallback) {
+         out += "uniform sampler2D tex_color;\n";
+     }
++
++    // WebGL2 has no image load/store. Shadow maps are ordinary RGBA8 textures
++    // here: read with texelFetch, written as the colour output of the shadow
++    // pass, which reads the previous value from a copy made before each draw.
++    const bool shadow_texture =
++        texture_type == TextureType::Shadow2D || texture_type == TextureType::ShadowCube;
++    if (shadow_texture) {
++        for (const char* postfix : {"px", "nx", "py", "ny", "pz", "nz"}) {
++            out += fmt::format("uniform highp sampler2D shadow_texture_{};\n", postfix);
++        }
++    }
++    if (config.framebuffer.shadow_rendering) {
++        out += "uniform highp sampler2D shadow_buffer;\n";
++    }
++    if (shadow_texture || config.framebuffer.shadow_rendering) {
++        out += R"(
++uvec4 ShadowFetch(highp sampler2D image, ivec2 coord) {
++    uvec4 bytes = uvec4(round(texelFetch(image, coord, 0) * 255.0));
++    return uvec4(bytes.r | (bytes.g << 8) | (bytes.b << 16) | (bytes.a << 24));
++}
++#define imageLoad(image, coord) ShadowFetch((image), (coord))
++#define imageSize(image) textureSize((image), 0)
++)";
++    }
+ #else
+     out += "layout(binding = 3) uniform samplerBuffer texture_buffer_lut_lf;\n";
+     out += "layout(binding = 4) uniform samplerBuffer texture_buffer_lut_rg;\n";
+@@ -1489,17 +1520,6 @@ uint UpdateShadow(uint pixel, uint d, uint s) {
+ )";
+     }
+ 
+-#if defined(__EMSCRIPTEN__)
+-    // WebGL2 has no image load/store, which shadow maps are read through. Treat
+-    // every sample as fully lit, so that the shader compiles and the object is
+-    // drawn without its shadow rather than not at all.
+-    if (config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
+-        config.texture.texture0_type == TexturingRegs::TextureConfig::ShadowCube) {
+-        out += "vec4 shadowTexture(vec2 uv, float w) { return vec4(1.0); }\n"
+-               "vec4 shadowTextureCube(vec2 uv, float w) { return vec4(1.0); }\n";
+-        return;
+-    }
+-#endif
+     if (config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
+         config.texture.texture0_type == TexturingRegs::TextureConfig::ShadowCube) {
+         out += R"(

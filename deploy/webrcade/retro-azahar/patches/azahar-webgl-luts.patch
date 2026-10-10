@@ -1,0 +1,231 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index fac3eac..90bbdec 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -81,9 +81,34 @@ GLenum MakeAttributeType(Pica::PipelineRegs::VertexAttributeFormat format) {
+     return GL_UNSIGNED_BYTE;
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++// WebGL2 has no texture buffers. The lookup tables (lighting, fog, procedural
++// textures) are kept in 2D textures of LUT_ROW_TEXELS columns instead, which the
++// fragment shaders index as (i % LUT_ROW_TEXELS, i / LUT_ROW_TEXELS).
++constexpr GLsizei LUT_ROW_TEXELS = 1024;
++constexpr GLsizeiptr LUT_TEXTURE_BYTES = 512 * 1024;
++
++/// Copies the rows holding bytes [offset, offset + size) of a table stream to
++/// its texture of the given texel size.
++void UploadLutRows(GLenum unit, GLuint texture, const u8* base, GLintptr offset, std::size_t size,
++                   GLenum format, std::size_t texel_size) {
++    if (size == 0) {
++        return;
++    }
++    const std::size_t row_bytes = LUT_ROW_TEXELS * texel_size;
++    const GLint first = static_cast<GLint>(offset / row_bytes);
++    const GLint last = static_cast<GLint>((offset + size - 1) / row_bytes);
++    glActiveTexture(unit);
++    glBindTexture(GL_TEXTURE_2D, texture);
++    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
++    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, first, LUT_ROW_TEXELS, last - first + 1, format,
++                    GL_FLOAT, base + first * row_bytes);
++}
++#endif
++
+ [[nodiscard]] GLsizeiptr TextureBufferSize(const Driver& driver, bool is_lf) {
+ #if defined(__EMSCRIPTEN__)
+-    return TEXTURE_BUFFER_SIZE;
++    return LUT_TEXTURE_BYTES;
+ #else
+     // Use the smallest texel size from the texel views
+     // which corresponds to GL_RG32F
+@@ -179,6 +204,20 @@ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore&
+     glTexBuffer(GL_TEXTURE_BUFFER, GL_RG32F, texture_buffer.GetHandle());
+     glActiveTexture(TextureUnits::TextureBufferLUT_RGBA.Enum());
+     glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, texture_buffer.GetHandle());
++#else
++    // state.Apply() above bound the three textures as GL_TEXTURE_2D.
++    const auto allocate = [](GLenum unit, GLenum format, std::size_t texel_size) {
++        glActiveTexture(unit);
++        glTexStorage2D(GL_TEXTURE_2D, 1, format, LUT_ROW_TEXELS,
++                       static_cast<GLsizei>(LUT_TEXTURE_BYTES / (LUT_ROW_TEXELS * texel_size)));
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    };
++    allocate(TextureUnits::TextureBufferLUT_LF.Enum(), GL_RG32F, sizeof(Common::Vec2f));
++    allocate(TextureUnits::TextureBufferLUT_RG.Enum(), GL_RG32F, sizeof(Common::Vec2f));
++    allocate(TextureUnits::TextureBufferLUT_RGBA.Enum(), GL_RGBA32F, sizeof(Common::Vec4f));
+ #endif
+ 
+     // Bind index buffer for hardware shader path
+@@ -947,7 +986,9 @@ void RasterizerOpenGL::SyncAndUploadLUTsLF() {
+     }
+ 
+     std::size_t bytes_used = 0;
++#if !defined(__EMSCRIPTEN__)
+     glBindBuffer(GL_TEXTURE_BUFFER, texture_lf_buffer.GetHandle());
++#endif
+     const auto [buffer, offset, invalidate] =
+         texture_lf_buffer.Map(max_size, sizeof(Common::Vec4f));
+ 
+@@ -985,6 +1026,10 @@ void RasterizerOpenGL::SyncAndUploadLUTsLF() {
+     }
+ 
+     texture_lf_buffer.Unmap(bytes_used);
++#if defined(__EMSCRIPTEN__)
++    UploadLutRows(TextureUnits::TextureBufferLUT_LF.Enum(), texture_buffer_lut_lf.handle,
++                  buffer - offset, offset, bytes_used, GL_RG, sizeof(Common::Vec2f));
++#endif
+ }
+ 
+ void RasterizerOpenGL::SyncAndUploadLUTs() {
+@@ -998,7 +1043,9 @@ void RasterizerOpenGL::SyncAndUploadLUTs() {
+     }
+ 
+     std::size_t bytes_used = 0;
++#if !defined(__EMSCRIPTEN__)
+     glBindBuffer(GL_TEXTURE_BUFFER, texture_buffer.GetHandle());
++#endif
+     const auto [buffer, offset, invalidate] = texture_buffer.Map(max_size, sizeof(Common::Vec4f));
+ 
+     if (invalidate) {
+@@ -1058,6 +1105,13 @@ void RasterizerOpenGL::SyncAndUploadLUTs() {
+     pica.proctex.table_dirty = 0;
+ 
+     texture_buffer.Unmap(bytes_used);
++#if defined(__EMSCRIPTEN__)
++    // One stream, read through two textures of different texel size.
++    UploadLutRows(TextureUnits::TextureBufferLUT_RG.Enum(), texture_buffer_lut_rg.handle,
++                  buffer - offset, offset, bytes_used, GL_RG, sizeof(Common::Vec2f));
++    UploadLutRows(TextureUnits::TextureBufferLUT_RGBA.Enum(), texture_buffer_lut_rgba.handle,
++                  buffer - offset, offset, bytes_used, GL_RGBA, sizeof(Common::Vec4f));
++#endif
+ }
+ 
+ void RasterizerOpenGL::UploadUniforms(bool accelerate_draw) {
+diff --git a/src/video_core/renderer_opengl/gl_state.cpp b/src/video_core/renderer_opengl/gl_state.cpp
+index ab0659e..0dab5c0 100644
+--- a/src/video_core/renderer_opengl/gl_state.cpp
++++ b/src/video_core/renderer_opengl/gl_state.cpp
+@@ -8,6 +8,13 @@
+ 
+ namespace OpenGL {
+ 
++// WebGL2 has no texture buffers; the lookup tables live in 2D textures there.
++#if defined(__EMSCRIPTEN__)
++constexpr GLenum LUT_TEXTURE_TARGET = GL_TEXTURE_2D;
++#else
++constexpr GLenum LUT_TEXTURE_TARGET = GL_TEXTURE_BUFFER;
++#endif
++
+ OpenGLState OpenGLState::cur_state;
+ 
+ OpenGLState::OpenGLState() {
+@@ -223,20 +230,20 @@ void OpenGLState::Apply() const {
+     // Texture buffer LUTs
+     if (texture_buffer_lut_lf.texture_buffer != cur_state.texture_buffer_lut_lf.texture_buffer) {
+         glActiveTexture(TextureUnits::TextureBufferLUT_LF.Enum());
+-        glBindTexture(GL_TEXTURE_BUFFER, texture_buffer_lut_lf.texture_buffer);
++        glBindTexture(LUT_TEXTURE_TARGET, texture_buffer_lut_lf.texture_buffer);
+     }
+ 
+     // Texture buffer LUTs
+     if (texture_buffer_lut_rg.texture_buffer != cur_state.texture_buffer_lut_rg.texture_buffer) {
+         glActiveTexture(TextureUnits::TextureBufferLUT_RG.Enum());
+-        glBindTexture(GL_TEXTURE_BUFFER, texture_buffer_lut_rg.texture_buffer);
++        glBindTexture(LUT_TEXTURE_TARGET, texture_buffer_lut_rg.texture_buffer);
+     }
+ 
+     // Texture buffer LUTs
+     if (texture_buffer_lut_rgba.texture_buffer !=
+         cur_state.texture_buffer_lut_rgba.texture_buffer) {
+         glActiveTexture(TextureUnits::TextureBufferLUT_RGBA.Enum());
+-        glBindTexture(GL_TEXTURE_BUFFER, texture_buffer_lut_rgba.texture_buffer);
++        glBindTexture(LUT_TEXTURE_TARGET, texture_buffer_lut_rgba.texture_buffer);
+     }
+ 
+     // Color buffer
+diff --git a/src/video_core/renderer_opengl/gl_stream_buffer.cpp b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+index 57d733f..0c5b6b6 100644
+--- a/src/video_core/renderer_opengl/gl_stream_buffer.cpp
++++ b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+@@ -25,8 +25,11 @@ OGLStreamBuffer::OGLStreamBuffer(Driver& driver, GLenum target, GLsizeiptr size,
+     gl_buffer.Create();
+ #if defined(__EMSCRIPTEN__)
+     gl_target = FixupTarget(target);
+-    glBindBuffer(gl_target, gl_buffer.handle);
+-    glBufferData(gl_target, size, nullptr, GL_STREAM_DRAW);
++    shadow_only = target == GL_TEXTURE_BUFFER;
++    if (!shadow_only) {
++        glBindBuffer(gl_target, gl_buffer.handle);
++        glBufferData(gl_target, size, nullptr, GL_STREAM_DRAW);
++    }
+     shadow.assign(static_cast<std::size_t>(size), 0);
+     mapped_ptr = shadow.data();
+     (void)driver;
+@@ -72,8 +75,10 @@ GLsizeiptr OGLStreamBuffer::GetSize() const {
+ std::tuple<u8*, GLintptr, bool> OGLStreamBuffer::Map(GLsizeiptr size, GLintptr alignment) {
+ #if defined(__EMSCRIPTEN__)
+     if (size > buffer_size) {
+-        glBindBuffer(gl_target, gl_buffer.handle);
+-        glBufferData(gl_target, size, nullptr, GL_STREAM_DRAW);
++        if (!shadow_only) {
++            glBindBuffer(gl_target, gl_buffer.handle);
++            glBufferData(gl_target, size, nullptr, GL_STREAM_DRAW);
++        }
+         buffer_size = size;
+         shadow.assign(static_cast<std::size_t>(size), 0);
+         mapped_ptr = shadow.data();
+@@ -91,8 +96,10 @@ std::tuple<u8*, GLintptr, bool> OGLStreamBuffer::Map(GLsizeiptr size, GLintptr a
+         invalidate = true;
+         // Start over in fresh storage instead of overwriting data that draws
+         // still waiting in the browser's GPU process refer to.
+-        glBindBuffer(gl_target, gl_buffer.handle);
+-        glBufferData(gl_target, buffer_size, nullptr, GL_STREAM_DRAW);
++        if (!shadow_only) {
++            glBindBuffer(gl_target, gl_buffer.handle);
++            glBufferData(gl_target, buffer_size, nullptr, GL_STREAM_DRAW);
++        }
+     }
+     mapped_offset = buffer_pos;
+     return std::make_tuple(shadow.data() + buffer_pos, buffer_pos, invalidate);
+@@ -132,7 +139,9 @@ std::tuple<u8*, GLintptr, bool> OGLStreamBuffer::Map(GLsizeiptr size, GLintptr a
+ void OGLStreamBuffer::Unmap(GLsizeiptr size) {
+     ASSERT(size <= mapped_size);
+ #if defined(__EMSCRIPTEN__)
+-    if (size > 0) {
++    // A texture-buffer stream must not touch GL_ARRAY_BUFFER: the rasterizer
++    // sets vertex attribute pointers against whatever is bound there.
++    if (size > 0 && !shadow_only) {
+         glBindBuffer(gl_target, gl_buffer.handle);
+         glBufferSubData(gl_target, buffer_pos, size, shadow.data() + buffer_pos);
+     }
+diff --git a/src/video_core/renderer_opengl/gl_stream_buffer.h b/src/video_core/renderer_opengl/gl_stream_buffer.h
+index b6e0c0b..6a0c5b6 100644
+--- a/src/video_core/renderer_opengl/gl_stream_buffer.h
++++ b/src/video_core/renderer_opengl/gl_stream_buffer.h
+@@ -49,6 +49,9 @@ private:
+     // CPU shadow used in place of glMapBufferRange (WebGL2 lacks the
+     // unsynchronized/persistent map subset we depend on).
+     std::vector<u8> shadow;
++    // WebGL2 has no texture buffers. A stream created for one only keeps the
++    // CPU copy; the rasterizer uploads it to a 2D texture.
++    bool shadow_only = false;
+ #endif
+ };
+ 
+diff --git a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+index ece867c..1fb0fb6 100644
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -1343,7 +1343,8 @@ void FragmentModule::DefineBindingsGL() {
+     out += "uniform sampler2D texture_buffer_lut_lf;\n";
+     out += "uniform sampler2D texture_buffer_lut_rg;\n";
+     out += "uniform sampler2D texture_buffer_lut_rgba;\n";
+-    out += "#define texelFetchBuf(s, i) texelFetch((s), ivec2((i), 0), 0)\n";
++    // The tables are laid out in rows of 1024 texels (gl_rasterizer.cpp).
++    out += "#define texelFetchBuf(s, i) texelFetch((s), ivec2((i) & 1023, (i) >> 10), 0)\n";
+     out += "float fma(float a, float b, float c) { return a * b + c; }\n";
+     out += "vec2 fma(vec2 a, vec2 b, vec2 c) { return a * b + c; }\n";
+     out += "vec3 fma(vec3 a, vec3 b, vec3 c) { return a * b + c; }\n";

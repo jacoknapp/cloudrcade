@@ -1,0 +1,86 @@
+# webЯcade: Feed-driven gaming
+
+[![Actions Status](https://github.com/webrcade/webrcade/workflows/Build/badge.svg)](https://github.com/webrcade/webrcade/actions)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Docker Build Status](https://img.shields.io/docker/pulls/webrcade/webrcade)](https://hub.docker.com/r/webrcade/webrcade/)
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/C4gXN2HJAv)
+[![PayPal](https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white)](https://paypal.me/webrcade)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/webrcade)
+
+WebЯcade consists of an intuitive [web-based front end](https://docs.webrcade.com/userguide/) that enables playing popular gaming content entirely within the context of the browser across a [wide variety of platforms](https://docs.webrcade.com/platforms/) (Xbox Series X|S, iOS, Android, Windows, macOS). Gamepads are supported (Bluetooth and USB) for both front-end navigation and while playing games.
+
+The content for playing games (binaries, etc.) and populating the front-end (images, etc.) is collected from [cloud-based resources](https://docs.webrcade.com/feeds/resources/) based on [user-defined feeds](https://docs.webrcade.com/feeds/) (typically created using the [Feed Editor](https://editor.webrcade.com)). Each feed item (game, etc.) has an associated application type. [Application types](https://docs.webrcade.com/apps/) include [emulators](https://docs.webrcade.com/apps/emulators/) (Atari, Sega, Nintendo) and [game engines](https://docs.webrcade.com/apps/engines/) (Classic Doom).
+
+
+<p align="center">
+ <a href="https://play.webrcade.com">
+  <img src="https://docs.webrcade.com/assets/images/platforms/ios/safari-full.png?raw=true" width="97%">
+ </a>
+ <br>
+ <i>webЯcade on Safari for iOS (iPhone)</i>
+</p>
+
+## Play Now.
+
+Play webЯcade now at [play.webrcade.com](https://play.webrcade.com).
+
+## Documentation
+
+The [webЯcade Documentation](https://docs.webrcade.com/) consists of a [User Guide](https://docs.webrcade.com/userguide/), instructions specific to each [Platform](https://docs.webrcade.com/platforms/) (OS, devices) supported by webЯcade, detailed information (button mappings, etc.) for the various [Application Types](https://docs.webrcade.com/apps/) (emulators, etc.), and guidance for developing your own [Feeds](https://docs.webrcade.com/feeds/).
+
+The following steps are recommended for getting started with webЯcade:
+
+* Review the [User Guide](https://docs.webrcade.com/userguide/) in order to familiarize yourself with the webЯcade front-end.
+* Read the documentation for the [Platform](https://docs.webrcade.com/platforms/) (OS, device) you will be using with webЯcade to learn platform-specific details such as how to optimize the experience and how to connect gamepads.
+* Review the documentation for each [Application](https://docs.webrcade.com/apps/) that is launched to determine its keyboard and gamepad mappings as well as any other application-specific notes (an application is the emulator or engine being used to play a particular game, etc.).
+* Use the [Feed Editor](https://editor.webrcade.com) to create your own feeds with games and content of your choosing.
+
+## Default Feed
+
+The default feed consists of high-quality publicly available games and demos across the various [application types](https://docs.webrcade.com/apps/) ([emulators](https://docs.webrcade.com/apps/emulators/), [engines](https://docs.webrcade.com/apps/engines/), etc.) that are supported by webЯcade.
+
+The [default feed AUTHORS page](https://github.com/webrcade/webrcade-default-feed/blob/main/AUTHORS-default-feed.md) includes the list of titles that are included in the default feed, their respective authors, and related links.
+
+## What is (and is not) webЯcade?
+
+The following lists further describe webЯcade in terms of its focus.
+
+**Primary focus:**
+
+* Runs entirely within the web browser leveraging JavaScript, WebAssembly, and the HTML5 gamepad and audio interfaces
+* Adaptive user interface that supports a [wide variety of platforms](https://docs.webrcade.com/platforms/) (Xbox Series X|S, iOS, Android, Windows, macOS)
+* Native gamepad support (Bluetooth and USB) for both front-end navigation and while playing games
+* [User-defined cloud-based feeds](https://docs.webrcade.com/feeds/) identify the resources (images, etc.) required to populate the front-end as well as the content (binaries, etc.) required to play games
+* Each feed item (game, etc.) has an associated application type. [Application types](https://docs.webrcade.com/apps/) include [emulators](https://docs.webrcade.com/apps/emulators/) (Atari, Sega, Nintendo) and [game engines](https://docs.webrcade.com/apps/engines/) (Classic Doom). The quantity and types of applications will continue to expand over time.
+
+**Not focused on:**
+
+* Directly playing locally stored game content (ROMs, etc.)<br>*(Technically possible by using a local web server, but not a primary use case)*
+* The "latest and greatest" emulator features and compatibility<br>*(Primary emphasis is on compatibility with popular game content across a variety of platforms while minimizing resource requirements)*
+* Touch-based (virtual) gamepad controls<br>*(The focus is on native gamepad support via Bluetooth and USB)*
+
+## Support
+
+webЯcade is free and open-source, and will always remain so. If you enjoy the project and would like to help cover some of the ongoing costs (GitHub, hosting, domain, etc.), contributions are greatly appreciated but never expected.
+
+<p>
+  <a href="https://buymeacoffee.com/webrcade"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
+  &nbsp;
+  <a href="https://paypal.me/webrcade"><img src="https://img.shields.io/badge/PayPal-003087?style=for-the-badge&logo=paypal&logoColor=white" alt="Donate via PayPal"></a>
+</p>
+
+## Get Involved
+
+Have a question, suggestion, or just want to chat? Come join the community!
+
+* 💬 **[Discord](https://discord.gg/C4gXN2HJAv)** — Join the webЯcade Discord server to chat, ask questions, and stay up to date.
+* 📋 **[GitHub Issues](https://github.com/webrcade/webrcade/issues)** — Report bugs or request features.
+* 💡 **[GitHub Discussions](https://github.com/webrcade/webrcade/discussions)** — Share ideas or ask questions.
+
+## LICENSE
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.

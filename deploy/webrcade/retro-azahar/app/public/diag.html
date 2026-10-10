@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3DS rendering check</title>
+<body style="background:#111;color:#eee;font:16px -apple-system,sans-serif;padding:24px">
+<p id="status">Starting the 3DS rendering check…</p>
+<script>
+// Starts one run of the on-device rendering check (see src/emulator/diag.js).
+(async () => {
+  const scene = new URLSearchParams(location.search).get('scene') || 'cosmog';
+  const feed = await (await fetch('/content/feeds/combined.json')).json();
+  const item = feed.categories.find((c) => c.title === 'Nintendo 3DS')
+    .items.find((i) => /Ultra Moon/i.test(i.title));
+  localStorage.setItem('wrcad.3ds.diag.v1', scene);
+  const props = btoa(encodeURIComponent(JSON.stringify(
+    { type: '3ds', title: item.title, rom: item.props.rom })));
+  location.replace('./?ctx=standalone&props=' + encodeURIComponent(props));
+})().catch((e) => { document.getElementById('status').textContent = 'Could not start: ' + e; });
+</script>

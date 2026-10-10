@@ -1,0 +1,38 @@
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 4f431f7..25f771c 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -488,11 +488,11 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+     } else {
+         const u64 unique_identifier = impl->current.GetConfigHash();
+ #if defined(__EMSCRIPTEN__)
+-        // A new program takes the browser tens of milliseconds to build, and a
+-        // scene change asks for dozens at once. Waiting for each froze the game;
+-        // instead link in the background and leave out the draws that need a
+-        // program until it is ready. After a second the wait is taken after
+-        // all, so that nothing stays undrawn for long.
++        // A new program takes the browser tens of milliseconds to build. Nothing
++        // is drawn without its program: the first time a game needs one, the
++        // game waits for it. Every program is remembered (RememberedPrograms)
++        // and linked in the background at the start of later sessions, so that
++        // this wait happens once per program and device, not every time.
+         if (ProgramsLinkInBackground()) {
+             GLuint& program = background_programs[unique_identifier];
+             if (program == 0) {
+@@ -504,15 +504,7 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+                 EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
+             }
+             if (const auto it = linking.find(program); it != linking.end()) {
+-                if (it->second < 0.0) {
+-                    it->second = emscripten_get_now(); // rebuilt ahead of time, first use now
+-                }
+-                const bool linked = IsProgramLinked(program);
+-                if (!linked && emscripten_get_now() - it->second < 1000.0) {
+-                    EM_ASM({ Module.wrcShaders.skipped++; });
+-                    return false;
+-                }
+-                if (!linked) {
++                if (!IsProgramLinked(program)) {
+                     EM_ASM({ Module.wrcShaders.waited++; });
+                 }
+                 FinishProgram(program, "");

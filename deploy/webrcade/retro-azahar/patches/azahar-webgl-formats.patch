@@ -1,0 +1,252 @@
+diff --git a/src/video_core/renderer_opengl/gl_blit_helper.cpp b/src/video_core/renderer_opengl/gl_blit_helper.cpp
+index 326e3be..a4d5203 100644
+--- a/src/video_core/renderer_opengl/gl_blit_helper.cpp
++++ b/src/video_core/renderer_opengl/gl_blit_helper.cpp
+@@ -9,6 +9,9 @@
+ #include "video_core/renderer_opengl/gl_driver.h"
+ #include "video_core/renderer_opengl/gl_state.h"
+ #include "video_core/renderer_opengl/gl_texture_runtime.h"
++#ifdef __EMSCRIPTEN__
++#include "video_core/renderer_opengl/webgl_formats.h"
++#endif
+ 
+ #include "video_core/host_shaders/format_reinterpreter/d24s8_to_rgba8_frag.h"
+ #include "video_core/host_shaders/format_reinterpreter/rgba4_to_rgb5a1_frag.h"
+@@ -90,6 +93,13 @@ BlitHelper::~BlitHelper() = default;
+ 
+ bool BlitHelper::ConvertDS24S8ToRGBA8(Surface& source, Surface& dest,
+                                       const VideoCore::TextureCopy& copy) {
++#ifdef __EMSCRIPTEN__
++    return WebFormats::copier().depth_copy(source.Handle(), dest.Handle(),
++        copy.src_level, copy.dst_level, dest.RealExtent().width >> copy.dst_level,
++        dest.RealExtent().height >> copy.dst_level, copy.src_offset.x, copy.src_offset.y,
++        copy.dst_offset.x, copy.dst_offset.y, copy.extent.width, copy.extent.height);
++#else
++
+     OpenGLState prev_state = OpenGLState::GetCurState();
+     SCOPE_EXIT({ prev_state.Apply(); });
+ 
+@@ -143,10 +153,17 @@ bool BlitHelper::ConvertDS24S8ToRGBA8(Surface& source, Surface& dest,
+     state.texture_units[1].sampler = linear_sampler.handle;
+ 
+     return true;
++#endif
+ }
+ 
+ bool BlitHelper::ConvertRGBA4ToRGB5A1(Surface& source, Surface& dest,
+                                       const VideoCore::TextureCopy& copy) {
++#ifdef __EMSCRIPTEN__
++    return WebFormats::copier().rgba_copy(source.Handle(), dest.Handle(),
++        copy.src_level, copy.dst_level, copy.src_offset.x, copy.src_offset.y,
++        copy.dst_offset.x, copy.dst_offset.y, copy.extent.width, copy.extent.height);
++#else
++
+     OpenGLState prev_state = OpenGLState::GetCurState();
+     SCOPE_EXIT({ prev_state.Apply(); });
+ 
+@@ -160,6 +177,7 @@ bool BlitHelper::ConvertRGBA4ToRGB5A1(Surface& source, Surface& dest,
+     Draw(rgba4_to_rgb5a1, dest.Handle(), draw_fbo.handle, 0, dst_rect);
+ 
+     return true;
++#endif
+ }
+ 
+ bool BlitHelper::Filter(Surface& surface, const VideoCore::TextureBlit& blit) {
+diff --git a/src/video_core/renderer_opengl/gl_texture_runtime.cpp b/src/video_core/renderer_opengl/gl_texture_runtime.cpp
+index e193f56..8dbcc07 100644
+--- a/src/video_core/renderer_opengl/gl_texture_runtime.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_runtime.cpp
+@@ -179,9 +179,9 @@ bool TextureRuntime::Reinterpret(Surface& source, Surface& dest,
+     const PixelFormat dst_format = dest.pixel_format;
+     ASSERT_MSG(src_format != dst_format, "Reinterpretation with the same format is invalid");
+     if (src_format == PixelFormat::D24S8 && dst_format == PixelFormat::RGBA8) {
+-        blit_helper.ConvertDS24S8ToRGBA8(source, dest, copy);
++        return blit_helper.ConvertDS24S8ToRGBA8(source, dest, copy);
+     } else if (src_format == PixelFormat::RGBA4 && dst_format == PixelFormat::RGB5A1) {
+-        blit_helper.ConvertRGBA4ToRGB5A1(source, dest, copy);
++        return blit_helper.ConvertRGBA4ToRGB5A1(source, dest, copy);
+     } else {
+         LOG_WARNING(Render_OpenGL, "Unimplemented reinterpretation {} -> {}",
+                     VideoCore::PixelFormatAsString(src_format),
+diff --git a/src/video_core/renderer_opengl/webgl_formats.h b/src/video_core/renderer_opengl/webgl_formats.h
+new file mode 100644
+index 0000000..9f1b58b
+--- /dev/null
++++ b/src/video_core/renderer_opengl/webgl_formats.h
+@@ -0,0 +1,176 @@
++// Browser GPU format reinterpretation. WebGL2 cannot sample stencil textures,
++// so reconstruct the stencil byte with eight additive stencil-test passes.
++#pragma once
++#include <array>
++#include <cstdlib>
++#include <emscripten.h>
++#include "common/scope_exit.h"
++#include "video_core/renderer_opengl/gl_resource_manager.h"
++#include "video_core/renderer_opengl/gl_state.h"
++
++namespace OpenGL::WebFormats {
++constexpr const char* vertex_shader=R"(
++void main(){
++    const vec2 p[3]=vec2[3](vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
++    gl_Position=vec4(p[gl_VertexID],0.,1.);
++})";
++constexpr const char* depth_shader=R"(
++precision highp float;
++precision highp int;
++uniform highp sampler2D image;
++uniform int stencil_bit;
++layout(location=0) out vec4 color;
++void main(){
++    if(stencil_bit!=0){color=vec4(float(stencil_bit)/255.,0.,0.,0.);return;}
++    uint depth=uint(round(texelFetch(image,ivec2(gl_FragCoord.xy),0).r*16777215.));
++    color=vec4(0.,float((depth>>16u)&255u),float((depth>>8u)&255u),float(depth&255u))/255.;
++})";
++constexpr const char* rgba_shader=R"(
++precision highp float;
++precision highp int;
++uniform sampler2D image;
++uniform ivec2 offset;
++uniform int source_level;
++layout(location=0) out vec4 color;
++void main(){
++    uvec4 rgba=uvec4(round(texelFetch(image,ivec2(gl_FragCoord.xy)+offset,source_level)*15.));
++    uvec3 rgb=((rgba.rgb<<uvec3(1u,2u,3u))|(rgba.gba>>uvec3(3u,2u,1u)))&31u;
++    color=vec4(vec3(rgb)/31.,float(rgba.a&1u));
++})";
++
++struct Copier {
++    OGLVertexArray vao;
++    OGLFramebuffer read, scratch, draw;
++    OGLTexture depth, stencil;
++    OGLProgram depth_program, rgba_program;
++    unsigned width=0,height=0;
++    Copier(){vao.Create();read.Create();scratch.Create();draw.Create();}
++    bool program(OGLProgram& p,const char* fragment) {
++        if(!p.handle)p.Create(vertex_shader,fragment);
++        GLint linked=0;glGetProgramiv(p.handle,GL_LINK_STATUS,&linked);
++        return linked==GL_TRUE;
++    }
++    static OpenGLState state() {
++        auto s=OpenGLState::GetCurState();
++        s.cull.enabled=false;s.depth.test_enabled=false;s.depth.write_mask=GL_FALSE;
++        s.stencil.test_enabled=false;s.stencil.write_mask=0;
++        s.stencil.action_stencil_fail=GL_KEEP;s.stencil.action_depth_fail=GL_KEEP;s.stencil.action_depth_pass=GL_KEEP;
++        s.scissor.enabled=false;s.blend.enabled=false;
++        s.color_mask={GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE};
++        s.texture_units[0].sampler=0;
++        s.texture_units[0].target=GL_TEXTURE_2D;
++        return s;
++    }
++    bool depth_copy(GLuint source,GLuint destination,unsigned src_level,unsigned dst_level,
++                    unsigned dst_width,unsigned dst_height,unsigned sx,unsigned sy,
++                    unsigned dx,unsigned dy,unsigned w,unsigned h) {
++        const auto previous=OpenGLState::GetCurState();SCOPE_EXIT({previous.Apply();});
++        if(!program(depth_program,depth_shader))return false;
++        if(width!=dst_width || height!=dst_height) {
++            depth.Release();stencil.Release();depth.Create();stencil.Create();
++            depth.Allocate(GL_TEXTURE_2D,1,GL_DEPTH24_STENCIL8,dst_width,dst_height);
++            stencil.Allocate(GL_TEXTURE_2D,1,GL_DEPTH24_STENCIL8,dst_width,dst_height);
++            auto texture_state=state();
++            for(const GLuint texture:{depth.handle,stencil.handle}) {
++                texture_state.texture_units[0].texture_2d=texture;texture_state.Apply();
++                glActiveTexture(GL_TEXTURE0);
++                glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
++                glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
++                glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_COMPARE_MODE,GL_NONE);
++            }
++            width=dst_width;height=dst_height;
++        }
++        auto s=state();
++        s.draw.vertex_array=vao.handle;s.draw.read_framebuffer=read.handle;s.draw.draw_framebuffer=scratch.handle;s.Apply();
++        glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,source,src_level);
++        glReadBuffer(GL_NONE);
++        const GLenum none=GL_NONE;glDrawBuffers(1,&none);
++        for(const GLuint clone:{depth.handle,stencil.handle}) {
++            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,clone,0);
++            if(glCheckFramebufferStatus(GL_READ_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE || glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++            glBlitFramebuffer(sx,sy,sx+w,sy+h,dx,dy,dx+w,dy+h,GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT,GL_NEAREST);
++        }
++        s.draw.draw_framebuffer=draw.handle;s.draw.shader_program=depth_program.handle;
++        s.texture_units[0].texture_2d=depth.handle;
++        s.viewport={GLint(dx),GLint(dy),GLsizei(w),GLsizei(h)};s.Apply();
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,destination,dst_level);
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,stencil.handle,0);
++        const GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);
++        if(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++        glUniform1i(glGetUniformLocation(depth_program.handle,"image"),0);
++        const GLint bit_location=glGetUniformLocation(depth_program.handle,"stencil_bit");
++        glUniform1i(bit_location,0);glDrawArrays(GL_TRIANGLES,0,3);
++        s.stencil.test_enabled=true;s.stencil.test_func=GL_EQUAL;
++        s.color_mask={GL_TRUE,GL_FALSE,GL_FALSE,GL_FALSE};
++        s.blend.enabled=true;s.blend.rgb_equation=GL_FUNC_ADD;s.blend.a_equation=GL_FUNC_ADD;
++        s.blend.src_rgb_func=s.blend.dst_rgb_func=s.blend.src_a_func=s.blend.dst_a_func=GL_ONE;
++        for(unsigned bit=1;bit<256;bit<<=1) {
++            s.stencil.test_ref=bit;s.stencil.test_mask=bit;s.Apply();
++            glUniform1i(bit_location,bit);glDrawArrays(GL_TRIANGLES,0,3);
++        }
++        return true;
++    }
++    bool rgba_copy(GLuint source,GLuint destination,unsigned src_level,unsigned dst_level,
++                   unsigned sx,unsigned sy,unsigned dx,unsigned dy,unsigned w,unsigned h) {
++        const auto previous=OpenGLState::GetCurState();SCOPE_EXIT({previous.Apply();});
++        if(!program(rgba_program,rgba_shader))return false;
++        auto s=state();s.draw.vertex_array=vao.handle;s.draw.draw_framebuffer=draw.handle;
++        s.draw.shader_program=rgba_program.handle;s.texture_units[0].texture_2d=source;
++        s.viewport={GLint(dx),GLint(dy),GLsizei(w),GLsizei(h)};s.Apply();
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,destination,dst_level);
++        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,0,0);
++        const GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);
++        if(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++        glUniform1i(glGetUniformLocation(rgba_program.handle,"image"),0);
++        glUniform1i(glGetUniformLocation(rgba_program.handle,"source_level"),src_level);
++        glUniform2i(glGetUniformLocation(rgba_program.handle,"offset"),GLint(sx)-GLint(dx),GLint(sy)-GLint(dy));
++        glDrawArrays(GL_TRIANGLES,0,3);return true;
++    }
++};
++inline Copier& copier(){static Copier value;return value;}
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE int wrc_webgl_formats_test() {
++    using namespace OpenGL;
++    const auto previous=OpenGLState::GetCurState();SCOPE_EXIT({previous.Apply();});
++    constexpr unsigned side=16,pixels=side*side;
++    std::array<unsigned,pixels> ds{};
++    std::array<unsigned short,pixels> rgba{};
++    for(unsigned i=0;i<pixels;i++) {
++        const unsigned depth=(i*2654435761u)&0xffffffu;
++        ds[i]=(depth<<8)|i;rgba[i]=static_cast<unsigned short>(i*251u+19u);
++    }
++    OGLTexture input_depth,output_depth,input_rgba,output_rgba;
++    for(auto* texture:{&input_depth,&output_depth,&input_rgba,&output_rgba})texture->Create();
++    input_depth.Allocate(GL_TEXTURE_2D,1,GL_DEPTH24_STENCIL8,side,side);
++    output_depth.Allocate(GL_TEXTURE_2D,1,GL_RGBA8,side,side);
++    input_rgba.Allocate(GL_TEXTURE_2D,1,GL_RGBA4,side,side);
++    output_rgba.Allocate(GL_TEXTURE_2D,1,GL_RGB5_A1,side,side);
++    auto state=WebFormats::Copier::state();state.texture_units[0].texture_2d=input_depth.handle;state.Apply();
++    glTexSubImage2D(GL_TEXTURE_2D,0,0,0,side,side,GL_DEPTH_STENCIL,GL_UNSIGNED_INT_24_8,ds.data());
++    state.texture_units[0].texture_2d=input_rgba.handle;state.Apply();
++    glTexSubImage2D(GL_TEXTURE_2D,0,0,0,side,side,GL_RGBA,GL_UNSIGNED_SHORT_4_4_4_4,rgba.data());
++    if(!WebFormats::copier().depth_copy(input_depth.handle,output_depth.handle,0,0,side,side,0,0,0,0,side,side))return -1;
++    OGLFramebuffer read;read.Create();
++    state=WebFormats::Copier::state();state.draw.read_framebuffer=read.handle;state.Apply();
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,output_depth.handle,0);
++    glReadBuffer(GL_COLOR_ATTACHMENT0);
++    std::array<unsigned char,pixels*4> data{};
++    glReadPixels(0,0,side,side,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
++    for(unsigned i=0;i<pixels;i++) {
++        const unsigned expected[4]={ds[i]&255u,(ds[i]>>24)&255u,(ds[i]>>16)&255u,(ds[i]>>8)&255u};
++        for(unsigned c=0;c<4;c++)if(data[i*4+c]!=expected[c]){
++            EM_ASM({Module.formatFailure=({pixel:$0,component:$1,actual:$2,expected:$3});},i,c,data[i*4+c],expected[c]);
++            return 1000+i*4+c;
++        }
++    }
++    if(!WebFormats::copier().rgba_copy(input_rgba.handle,output_rgba.handle,0,0,0,0,0,0,side,side))return -2;
++    state=WebFormats::Copier::state();state.draw.read_framebuffer=read.handle;state.Apply();
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,output_rgba.handle,0);
++    glReadBuffer(GL_COLOR_ATTACHMENT0);glReadPixels(0,0,side,side,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
++    for(unsigned i=0;i<pixels;i++) {
++        const unsigned expected[4]={((rgba[i]>>11)&31u)*255u/31u,((rgba[i]>>6)&31u)*255u/31u,((rgba[i]>>1)&31u)*255u/31u,(rgba[i]&1u)*255u};
++        for(unsigned c=0;c<4;c++)if(std::abs(int(data[i*4+c])-int(expected[c]))>(c==3?0:1))return 3000+i*4+c;
++    }
++    return 1;
++}

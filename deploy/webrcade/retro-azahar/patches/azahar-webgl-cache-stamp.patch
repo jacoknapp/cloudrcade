@@ -1,0 +1,79 @@
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index 90f4411..166483e 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -116,8 +116,12 @@ namespace RememberedPrograms {
+ namespace {
+ // Written by the core, kept across sessions by the frontend (IndexedDB).
+ constexpr char FILE_PATH[] = "/home/web_user/retroarch/userdata/shadercache/programs.bin";
+-// The GLSL depends on this build's generators: never reuse another build's file.
+-constexpr char STAMP[] = "WRCP1 " __DATE__ " " __TIME__;
++// Names the shader text, not the build: raise the number only when a change to
++// the shader generators makes text recorded earlier wrong for its program id.
++// Both stamps are 27 bytes, which the frontend's merge relies on.
++constexpr char STAMP[27] = "WRCP1 shader text 1";
++// Files written by core revision v15, which stamped them with its build time.
++constexpr char LEGACY_STAMP[27] = "WRCP1 Oct  9 2026 03:03:23";
+ 
+ struct Source {
+     GLenum type;
+@@ -153,10 +157,12 @@ State& Get() {
+     }
+     opened = true;
+     bool valid = false;
++    bool legacy = false;
+     if (std::FILE* file = std::fopen(FILE_PATH, "rb")) {
+         char stamp[sizeof(STAMP)]{};
+-        valid = std::fread(stamp, sizeof(stamp), 1, file) == 1 &&
+-                std::memcmp(stamp, STAMP, sizeof(STAMP)) == 0;
++        valid = std::fread(stamp, sizeof(stamp), 1, file) == 1;
++        legacy = valid && std::memcmp(stamp, LEGACY_STAMP, sizeof(STAMP)) == 0;
++        valid = valid && (legacy || std::memcmp(stamp, STAMP, sizeof(STAMP)) == 0);
+         for (u8 kind; valid && Read(file, kind);) {
+             if (kind == 'S') {
+                 u64 hash;
+@@ -186,10 +192,24 @@ State& Get() {
+         }
+         std::fclose(file);
+     }
+-    // A file from another build, or none: start a new one. Otherwise add to it.
+-    state.file = std::fopen(FILE_PATH, valid ? "ab" : "wb");
+-    if (state.file && !valid) {
++    // No usable file: start a new one. An older stamp: write its contents out
++    // again under the current one. Otherwise add to it.
++    state.file = std::fopen(FILE_PATH, valid && !legacy ? "ab" : "wb");
++    if (state.file && (!valid || legacy)) {
+         std::fwrite(STAMP, sizeof(STAMP), 1, state.file);
++        for (const auto& [hash, source] : state.sources) {
++            Write(state.file, u8{'S'});
++            Write(state.file, hash);
++            Write(state.file, static_cast<u32>(source.type));
++            Write(state.file, static_cast<u32>(source.text.size()));
++            std::fwrite(source.text.data(), 1, source.text.size(), state.file);
++        }
++        for (const Record& record : state.records) {
++            Write(state.file, u8{'P'});
++            Write(state.file, record.id);
++            Write(state.file, record.vertex);
++            Write(state.file, record.fragment);
++        }
+         std::fflush(state.file);
+     }
+     EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0}))
+@@ -293,6 +313,16 @@ GLuint BeginProgram(std::span<const GLuint> shaders) {
+ }
+ 
+ bool IsProgramLinked(GLuint program) {
++    // Test aid: Module.wrcLinkDelay (ms) makes every program look unfinished for
++    // that long, to see on a fast machine what a slow link does to the picture.
++    static const double delay = EM_ASM_DOUBLE({ return Module.wrcLinkDelay || 0; });
++    if (delay > 0.0) {
++        static std::unordered_map<GLuint, double> first_asked;
++        const double now = emscripten_get_now();
++        if (now - first_asked.try_emplace(program, now).first->second < delay) {
++            return false;
++        }
++    }
+     GLint done = GL_FALSE;
+     glGetProgramiv(program, COMPLETION_STATUS, &done);
+     return done == GL_TRUE;

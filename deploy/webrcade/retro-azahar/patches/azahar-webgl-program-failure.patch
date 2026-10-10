@@ -1,0 +1,271 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 920d399..d99cb78 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -572,7 +572,13 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+         return false;
+     }
+ 
+-    return Draw(true, is_indexed);
++    const bool drawn = Draw(true, is_indexed);
++#if defined(__EMSCRIPTEN__)
++    if (!drawn) {
++        EM_ASM({ Module.nativeVertexStats.gpu--; Module.nativeVertexStats.failed++; });
++    }
++#endif
++    return drawn;
+ }
+ 
+ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+@@ -584,6 +590,11 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+         return false;
+     }
+ 
++    // A failed GPU vertex program falls back to the CPU vertex path through
++    // AccelerateDrawBatch's false result. Check before uploading GPU vertices.
++    if (!curr_shader_manager->ApplyTo(state, accurate_mul)) {
++        return false;
++    }
+     state.draw.vertex_buffer = vertex_buffer.GetHandle();
+     state.Apply();
+ 
+@@ -593,9 +604,6 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+     SetupVertexArray(buffer_ptr, buffer_offset, vs_input_index_min, vs_input_index_max);
+     vertex_buffer.Unmap(vs_input_size);
+ 
+-    if (!curr_shader_manager->ApplyTo(state, accurate_mul)) {
+-        return true; // the program is still being built; leave this draw out
+-    }
+     state.Apply();
+ 
+     if (is_indexed) {
+@@ -776,9 +784,12 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+         state.draw.vertex_buffer = vertex_buffer.GetHandle();
+         curr_shader_manager->UseTrivialVertexShader();
+         curr_shader_manager->UseTrivialGeometryShader();
+-        // False while the program is still being built: leave this draw out.
++        // A failed fragment program cannot draw; never bind it or use the
++        // previous draw's program with unrelated uniforms.
+         const bool program_ready = curr_shader_manager->ApplyTo(state, accurate_mul);
+-        state.Apply();
++        if (program_ready) {
++            state.Apply();
++        }
+ 
+         std::size_t max_vertices = 3 * (VERTEX_BUFFER_SIZE / (3 * sizeof(HardwareVertex)));
+         for (std::size_t base_vertex = program_ready ? 0 : vertex_batch.size();
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 25f771c..cb1493d 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -11,6 +11,7 @@
+ #include <span>
+ #include <thread>
+ #include <unordered_map>
++#include <unordered_set>
+ #include <variant>
+ #include "common/hash.h"
+ #include "common/settings.h"
+@@ -442,6 +443,8 @@ namespace {
+ std::unordered_map<u64, GLuint> background_programs;
+ /// Those still linking, with the time they were first asked for (< 0: not yet).
+ std::unordered_map<GLuint, double> linking;
++/// Failed pairs are not tried again during this session, including state loads.
++std::unordered_set<u64> failed_programs;
+ /// How far the remembered programs have been rebuilt.
+ std::size_t remembered_done = 0;
+ } // namespace
+@@ -455,15 +458,19 @@ void ShaderProgramManager::RebuildRemembered() {
+     // Some per frame: the browser builds them on its own threads while the
+     // game runs, in the order they were first needed.
+     RememberedPrograms::Entry entry;
+-    for (int count = 0; count < 8 && RememberedPrograms::At(remembered_done, entry);) {
+-        ++remembered_done;
+-        if (entry.vertex == 0) {
++    u64 id = 0;
++    for (int count = 0; count < 8 && RememberedPrograms::IdAt(remembered_done, id);) {
++        const std::size_t index = remembered_done++;
++        // Fresh game encounters already compiled their shaders. Check their
++        // pair id before At() creates duplicate shader objects from the file.
++        if (failed_programs.contains(id) || background_programs.contains(id)) {
+             continue;
+         }
+-        GLuint& program = background_programs[entry.id];
+-        if (program != 0) {
++        RememberedPrograms::At(index, entry);
++        if (entry.vertex == 0) {
+             continue;
+         }
++        GLuint& program = background_programs[id];
+         ++count;
+         program = BeginProgram(std::array{entry.vertex, GLuint{0}, entry.fragment});
+         linking.emplace(program, -1.0);
+@@ -488,17 +495,29 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+     } else {
+         const u64 unique_identifier = impl->current.GetConfigHash();
+ #if defined(__EMSCRIPTEN__)
++        if (failed_programs.contains(unique_identifier)) {
++            return false;
++        }
+         // A new program takes the browser tens of milliseconds to build. Nothing
+         // is drawn without its program: the first time a game needs one, the
+         // game waits for it. Every program is remembered (RememberedPrograms)
+         // and linked in the background at the start of later sessions, so that
+         // this wait happens once per program and device, not every time.
+-        if (ProgramsLinkInBackground()) {
++        {
+             GLuint& program = background_programs[unique_identifier];
+             if (program == 0) {
+-                program =
+-                    BeginProgram(std::array{impl->current.vs, impl->current.gs, impl->current.fs});
+-                linking.emplace(program, emscripten_get_now());
++                const auto shaders = std::array{impl->current.vs, impl->current.gs, impl->current.fs};
++                if (ProgramsLinkInBackground()) {
++                    program = BeginProgram(shaders);
++                    linking.emplace(program, emscripten_get_now());
++                } else {
++                    program = LoadProgram(false, shaders, "");
++                    if (program == 0) {
++                        failed_programs.insert(unique_identifier);
++                        background_programs.erase(unique_identifier);
++                        return false;
++                    }
++                }
+                 RememberedPrograms::NoteProgram(unique_identifier, impl->current.vs,
+                                                 impl->current.fs);
+                 EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
+@@ -507,8 +526,14 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+                 if (!IsProgramLinked(program)) {
+                     EM_ASM({ Module.wrcShaders.waited++; });
+                 }
+-                FinishProgram(program, "");
++                const bool usable = FinishProgram(program, "");
+                 linking.erase(it);
++                if (!usable) {
++                    failed_programs.insert(unique_identifier);
++                    glDeleteProgram(program);
++                    background_programs.erase(unique_identifier);
++                    return false;
++                }
+             }
+             state.draw.shader_program = program;
+             return true;
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.h b/src/video_core/renderer_opengl/gl_shader_manager.h
+index 1c3ee1f..83ddd03 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -52,8 +52,8 @@ public:
+ 
+     void UseFragmentShader(const Pica::RegsInternal& config, const Pica::Shader::UserConfig& user);
+ 
+-    /// Returns false when the program for the current shaders is still being
+-    /// linked in the background; the caller then leaves the draw out.
++    /// Waits for the current program. Returns false on link failure so the
++    /// accelerated caller can retry the draw with CPU-transformed vertices.
+     bool ApplyTo(OpenGLState& state, bool accurate_mul);
+ 
+     /// Rebuilds a few of the programs remembered from earlier sessions.
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index 166483e..7d95f23 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -272,6 +272,13 @@ void NoteProgram(u64 id, GLuint vertex, GLuint fragment) {
+     state.records.push_back(Record{id, vs->second, fs->second});
+ }
+ 
++bool IdAt(std::size_t index, u64& id) {
++    State& state = Get();
++    if (index >= state.records.size()) return false;
++    id = state.records[index].id;
++    return true;
++}
++
+ bool At(std::size_t index, Entry& entry) {
+     State& state = Get();
+     if (index >= state.records.size()) {
+@@ -328,7 +335,7 @@ bool IsProgramLinked(GLuint program) {
+     return done == GL_TRUE;
+ }
+ 
+-void FinishProgram(GLuint program_id, const std::string& debug_name) {
++bool FinishProgram(GLuint program_id, const std::string& debug_name) {
+ 
+     // Check the program
+     GLint result = GL_FALSE;
+@@ -349,6 +356,31 @@ void FinishProgram(GLuint program_id, const std::string& debug_name) {
+         LOG_ERROR(Render_OpenGL, "Error linking shader {}: No log produced.", debug_name);
+     }
+ 
++    if (result != GL_TRUE) {
++        // Only queried after a failed link, never in an ordinary draw. Keep the
++        // driver error available to the on-device check after shaders detach.
++        EM_ASM({
++            var gl = Module.ctx;
++            var program = GL.programs[$0];
++            var failures = Module.wrcShaderFailures || (Module.wrcShaderFailures = []);
++            if (gl && program) {
++                var failure = ({
++                    log: gl.getProgramInfoLog(program) || 'No program log',
++                    shaders: (gl.getAttachedShaders(program) || []).map(function(shader) {
++                        return { type: gl.getShaderParameter(shader, gl.SHADER_TYPE),
++                            compiled: gl.getShaderParameter(shader, gl.COMPILE_STATUS),
++                            log: gl.getShaderInfoLog(shader) || '',
++                            source: gl.getShaderSource(shader) || '' };
++                    })
++                });
++                if (failures.length < 8) failures.push(failure);
++                if (Module.onShaderFailure) {
++                    try { Module.onShaderFailure(failure); } catch (e) {}
++                }
++            }
++        }, program_id);
++    }
++
+     GLuint attached[4];
+     GLsizei count = 0;
+     glGetAttachedShaders(program_id, 4, &count, attached);
+@@ -396,7 +428,7 @@ void FinishProgram(GLuint program_id, const std::string& debug_name) {
+         glUseProgram(0);
+     }
+ #endif
+-
++    return result == GL_TRUE;
+ }
+ #endif
+ 
+@@ -423,7 +455,10 @@ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,
+ #endif
+     glLinkProgram(program_id);
+ #if defined(__EMSCRIPTEN__)
+-    FinishProgram(program_id, debug_name);
++    if (!FinishProgram(program_id, debug_name)) {
++        glDeleteProgram(program_id);
++        return 0;
++    }
+ #else
+ 
+     // Check the program
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.h b/src/video_core/renderer_opengl/gl_shader_util.h
+index 6216944..32654d4 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -48,6 +48,8 @@ struct Entry {
+ void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source);
+ void NoteProgram(u64 id, GLuint vertex, GLuint fragment);
+ /// False past the end of the list. `entry.vertex` is 0 for a record that cannot be rebuilt.
++/// Reads only the pair identifier, without compiling duplicate shader objects.
++bool IdAt(std::size_t index, u64& id);
+ bool At(std::size_t index, Entry& entry);
+ } // namespace RememberedPrograms
+ 
+@@ -55,8 +57,8 @@ bool At(std::size_t index, Entry& entry);
+ bool IsProgramLinked(GLuint program);
+ 
+ /// Checks the link result and sets up samplers and uniform blocks. Waits for
+-/// the link if it is still running.
+-void FinishProgram(GLuint program, const std::string& debug_name);
++/// the link if it is still running. Returns false if the program cannot be used.
++bool FinishProgram(GLuint program, const std::string& debug_name);
+ #endif
+ 
+ GLuint LoadProgram(bool separable_program, std::span<const GLuint> shaders,

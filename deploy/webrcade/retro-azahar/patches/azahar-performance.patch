@@ -1,0 +1,239 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom.cpp b/src/core/arm/dyncom/arm_dyncom.cpp
+index c9bb66e..8e1d334 100644
+--- a/src/core/arm/dyncom/arm_dyncom.cpp
++++ b/src/core/arm/dyncom/arm_dyncom.cpp
+@@ -32,8 +32,12 @@ void ARM_DynCom::Step() {
+ }
+ 
+ void ARM_DynCom::ClearInstructionCache() {
++#ifdef __EMSCRIPTEN__
++    ResetDyncomTranslationCache();
++#else
+     state->instruction_cache.clear();
+     trans_cache_buf_top = 0;
++#endif
+ }
+ 
+ void ARM_DynCom::InvalidateCacheRange(u32, std::size_t) {
+@@ -41,7 +45,11 @@ void ARM_DynCom::InvalidateCacheRange(u32, std::size_t) {
+ }
+ 
+ void ARM_DynCom::SetPageTable(const std::shared_ptr<Memory::PageTable>& page_table) {
++#ifndef __EMSCRIPTEN__
+     ClearInstructionCache();
++#endif
++    // The web cache follows the memory table when this CPU actually executes.
++    // SetPageTable is also called while scheduling an inactive CPU.
+ }
+ 
+ std::shared_ptr<Memory::PageTable> ARM_DynCom::GetPageTable() const {
+@@ -97,6 +105,9 @@ void ARM_DynCom::SetCP15Register(CP15Register reg, u32 value) {
+ }
+ 
+ void ARM_DynCom::ExecuteInstructions(u64 num_instructions) {
++#ifdef __EMSCRIPTEN__
++    PrepareDyncomTranslationCache(state.get());
++#endif
+     state->NumInstrsToExecute = num_instructions;
+     const u32 ticks_executed = InterpreterMainLoop(state.get());
+     if (timer) {
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+index 862c422..7c32ff6 100644
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -848,10 +848,15 @@ static int InterpreterTranslateBlock(ARMul_State* cpu, std::size_t& bb_start, u3
+     // Save start addr of basicblock in CreamCache
+     ARM_INST_PTR inst_base = nullptr;
+     TransExtData ret = TransExtData::NON_BRANCH;
++#ifdef __EMSCRIPTEN__
++    // A block ends at a 4 KiB page boundary. Reserve more than the maximum
++    // decoded page before starting it, so the shared arena remains bounded.
++    ReserveDyncomTranslationBlock();
++#endif
+     bb_start = trans_cache_buf_top;
+ 
+     u32 phys_addr = addr;
+-    u32 pc_start = cpu->Reg[15];
++    u32 pc_start = GetDyncomInstructionCacheKey(cpu);
+ 
+     while (ret == TransExtData::NON_BRANCH) {
+         u32 inst_size = InterpreterTranslateInstruction(cpu, phys_addr, inst_base);
+@@ -863,7 +868,7 @@ static int InterpreterTranslateBlock(ARMul_State* cpu, std::size_t& bb_start, u3
+         ret = inst_base->br;
+     };
+ 
+-    cpu->instruction_cache[pc_start] = bb_start;
++    GetDyncomInstructionCache(cpu)[pc_start] = bb_start;
+ 
+     return KEEP_GOING;
+ }
+@@ -872,10 +877,15 @@ static int InterpreterTranslateSingle(ARMul_State* cpu, std::size_t& bb_start, u
+     MICROPROFILE_SCOPE(DynCom_Decode);
+ 
+     ARM_INST_PTR inst_base = nullptr;
++#ifdef __EMSCRIPTEN__
++    // A block ends at a 4 KiB page boundary. Reserve more than the maximum
++    // decoded page before starting it, so the shared arena remains bounded.
++    ReserveDyncomTranslationBlock();
++#endif
+     bb_start = trans_cache_buf_top;
+ 
+     u32 phys_addr = addr;
+-    u32 pc_start = cpu->Reg[15];
++    u32 pc_start = GetDyncomInstructionCacheKey(cpu);
+ 
+     InterpreterTranslateInstruction(cpu, phys_addr, inst_base);
+ 
+@@ -883,7 +893,7 @@ static int InterpreterTranslateSingle(ARMul_State* cpu, std::size_t& bb_start, u
+         inst_base->br = TransExtData::SINGLE_STEP;
+     }
+ 
+-    cpu->instruction_cache[pc_start] = bb_start;
++    GetDyncomInstructionCache(cpu)[pc_start] = bb_start;
+ 
+     return KEEP_GOING;
+ }
+@@ -1640,8 +1650,9 @@ DISPATCH: {
+         cpu->Reg[15] &= 0xfffffffc;
+ 
+     // Find the cached instruction cream, otherwise translate it...
+-    auto itr = cpu->instruction_cache.find(cpu->Reg[15]);
+-    if (itr != cpu->instruction_cache.end()) {
++    auto& instruction_cache = GetDyncomInstructionCache(cpu);
++    auto itr = instruction_cache.find(GetDyncomInstructionCacheKey(cpu));
++    if (itr != instruction_cache.end()) {
+         ptr = itr->second;
+     } else if (cpu->NumInstrsToExecute != 1) {
+         if (InterpreterTranslateBlock(cpu, ptr, cpu->Reg[15]) == FETCH_EXCEPTION)
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+index 729c407..5434372 100644
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -2,6 +2,9 @@
+ #include "common/assert.h"
+ #include "common/common_types.h"
+ #include "core/arm/dyncom/arm_dyncom_trans.h"
++#ifdef __EMSCRIPTEN__
++#include "core/arm/dyncom/wasm_translation_cache.h"
++#endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+ #include "core/arm/skyeye_common/vfp/vfp.h"
+@@ -9,6 +12,42 @@
+ char trans_cache_buf[TRANS_CACHE_SIZE];
+ size_t trans_cache_buf_top = 0;
+ 
++#ifdef __EMSCRIPTEN__
++namespace {
++WasmTranslationCache wasm_cache{trans_cache_buf_top, TRANS_CACHE_SIZE};
++}
++
++void ResetDyncomTranslationCache() {
++    wasm_cache.Reset();
++}
++
++void PrepareDyncomTranslationCache(ARMul_State* cpu) {
++    wasm_cache.SelectPageTable(cpu->memory.GetCurrentPageTable());
++}
++
++void ReserveDyncomTranslationBlock() {
++    // At most 2048 Thumb instructions per 4 KiB page, all decoded forms <256 bytes.
++    wasm_cache.ReserveBlock(512 * 1024);
++}
++#endif
++
++std::unordered_map<u32, std::size_t>& GetDyncomInstructionCache(ARMul_State* cpu) {
++#ifdef __EMSCRIPTEN__
++    return wasm_cache.Blocks();
++#else
++    return cpu->instruction_cache;
++#endif
++}
++
++u32 GetDyncomInstructionCacheKey(const ARMul_State* cpu) {
++#ifdef __EMSCRIPTEN__
++    // ARM and Thumb can decode the same aligned address differently.
++    return cpu->Reg[15] | cpu->TFlag;
++#else
++    return cpu->Reg[15];
++#endif
++}
++
+ static void* AllocBuffer(std::size_t size) {
+     std::size_t start = trans_cache_buf_top;
+     trans_cache_buf_top += size;
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.h b/src/core/arm/dyncom/arm_dyncom_trans.h
+index e67df42..9687cab 100644
+--- a/src/core/arm/dyncom/arm_dyncom_trans.h
++++ b/src/core/arm/dyncom/arm_dyncom_trans.h
+@@ -5,6 +5,7 @@
+ #endif
+ 
+ #include <cstddef>
++#include <unordered_map>
+ #include "common/common_types.h"
+ 
+ struct ARMul_State;
+@@ -496,3 +497,13 @@ extern const std::size_t arm_instruction_trans_len;
+ #define TRANS_CACHE_SIZE (64 * 1024 * 2000)
+ extern char trans_cache_buf[TRANS_CACHE_SIZE];
+ extern std::size_t trans_cache_buf_top;
++
++// WASM cores share one translation arena. Reuse decoded blocks for the active
++// process across scheduler/core switches; never retain offsets after resetting it.
++std::unordered_map<u32, std::size_t>& GetDyncomInstructionCache(ARMul_State* cpu);
++u32 GetDyncomInstructionCacheKey(const ARMul_State* cpu);
++#ifdef __EMSCRIPTEN__
++void ResetDyncomTranslationCache();
++void ReserveDyncomTranslationBlock();
++void PrepareDyncomTranslationCache(ARMul_State* cpu);
++#endif
+diff --git a/src/core/arm/dyncom/wasm_translation_cache.h b/src/core/arm/dyncom/wasm_translation_cache.h
+new file mode 100644
+index 0000000..9ca8e99
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_translation_cache.h
+@@ -0,0 +1,43 @@
++// Shared decoded-block cache for the single-threaded WASM CPU scheduler.
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <unordered_map>
++
++namespace Memory {
++struct PageTable;
++}
++
++class WasmTranslationCache {
++public:
++    WasmTranslationCache(std::size_t& arena_top_, std::size_t capacity_)
++        : arena_top(arena_top_), capacity(capacity_) {}
++
++    void Reset() {
++        blocks.clear();
++        arena_top = 0;
++    }
++
++    void SelectPageTable(const std::shared_ptr<Memory::PageTable>& page_table) {
++        if (resident_page_table.lock() != page_table) {
++            Reset();
++            resident_page_table = page_table;
++        }
++    }
++
++    void ReserveBlock(std::size_t reserve) {
++        if (reserve > capacity || arena_top > capacity - reserve) {
++            Reset();
++        }
++    }
++
++    std::unordered_map<std::uint32_t, std::size_t>& Blocks() { return blocks; }
++
++private:
++    std::size_t& arena_top;
++    const std::size_t capacity;
++    std::weak_ptr<Memory::PageTable> resident_page_table;
++    std::unordered_map<std::uint32_t, std::size_t> blocks;
++};

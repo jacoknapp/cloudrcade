@@ -1,0 +1,47 @@
+diff --git a/src/video_core/renderer_opengl/gl_stream_buffer.cpp b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+index 0c5b6b6..18b2893 100644
+--- a/src/video_core/renderer_opengl/gl_stream_buffer.cpp
++++ b/src/video_core/renderer_opengl/gl_stream_buffer.cpp
+@@ -74,6 +74,20 @@ GLsizeiptr OGLStreamBuffer::GetSize() const {
+ 
+ std::tuple<u8*, GLintptr, bool> OGLStreamBuffer::Map(GLsizeiptr size, GLintptr alignment) {
+ #if defined(__EMSCRIPTEN__)
++    if (!shadow_only) {
++        // Each request gets storage of its own (see Unmap): the data always
++        // starts at offset 0 and whatever the buffer held before is gone, which
++        // callers that keep data across requests learn through `invalidate`.
++        if (static_cast<std::size_t>(size) > shadow.size()) {
++            shadow.resize(static_cast<std::size_t>(size));
++            buffer_size = size;
++        }
++        mapped_size = size;
++        buffer_pos = 0;
++        mapped_offset = 0;
++        mapped_ptr = shadow.data();
++        return std::make_tuple(shadow.data(), GLintptr{0}, true);
++    }
+     if (size > buffer_size) {
+         if (!shadow_only) {
+             glBindBuffer(gl_target, gl_buffer.handle);
+@@ -141,11 +155,18 @@ void OGLStreamBuffer::Unmap(GLsizeiptr size) {
+ #if defined(__EMSCRIPTEN__)
+     // A texture-buffer stream must not touch GL_ARRAY_BUFFER: the rasterizer
+     // sets vertex attribute pointers against whatever is bound there.
+-    if (size > 0 && !shadow_only) {
++    if (shadow_only) {
++        buffer_pos += size;
++        return;
++    }
++    // Replace the buffer's storage with exactly this data. Updating part of a
++    // buffer that draws still queued in the browser's GPU process refer to made
++    // Safari copy it on every update (about three per draw); a buffer given new
++    // storage is the case WebGL implementations are built to handle cheaply.
++    if (size > 0) {
+         glBindBuffer(gl_target, gl_buffer.handle);
+-        glBufferSubData(gl_target, buffer_pos, size, shadow.data() + buffer_pos);
++        glBufferData(gl_target, size, shadow.data(), GL_STREAM_DRAW);
+     }
+-    buffer_pos += size;
+ #else
+     if (!coherent && size > 0) {
+         glFlushMappedBufferRange(gl_target, buffer_pos - mapped_offset, size);

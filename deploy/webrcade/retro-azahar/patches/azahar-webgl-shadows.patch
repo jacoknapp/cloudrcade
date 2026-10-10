@@ -1,0 +1,41 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index f5df6a8..fac3eac 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -602,6 +602,14 @@ void RasterizerOpenGL::DrawTriangles() {
+ 
+ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+     MICROPROFILE_SCOPE(OpenGL_Drawing);
++#if defined(__EMSCRIPTEN__)
++    // Shadow maps are written through image load/store and glMemoryBarrier,
++    // neither of which WebGL2 has. Drop the pass; shadows are sampled as lit.
++    if (regs.framebuffer.IsShadowRendering()) {
++        vertex_batch.clear();
++        return true;
++    }
++#endif
+     SyncDrawState();
+ 
+     const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
+diff --git a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+index 4007d02..ece867c 100644
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -1488,6 +1488,17 @@ uint UpdateShadow(uint pixel, uint d, uint s) {
+ )";
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    // WebGL2 has no image load/store, which shadow maps are read through. Treat
++    // every sample as fully lit, so that the shader compiles and the object is
++    // drawn without its shadow rather than not at all.
++    if (config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
++        config.texture.texture0_type == TexturingRegs::TextureConfig::ShadowCube) {
++        out += "vec4 shadowTexture(vec2 uv, float w) { return vec4(1.0); }\n"
++               "vec4 shadowTextureCube(vec2 uv, float w) { return vec4(1.0); }\n";
++        return;
++    }
++#endif
+     if (config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
+         config.texture.texture0_type == TexturingRegs::TextureConfig::ShadowCube) {
+         out += R"(

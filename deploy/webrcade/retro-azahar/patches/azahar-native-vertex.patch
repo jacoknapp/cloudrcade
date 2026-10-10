@@ -1,0 +1,94 @@
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -2,6 +2,9 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include "common/alignment.h"
+ #include "common/assert.h"
+ #include "common/literals.h"
+@@ -473,8 +476,20 @@
+ 
+ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+ #if defined(__EMSCRIPTEN__)
+-    (void)is_indexed;
+-    return false;
++    // WebGL2 has no geometry shaders. Draws that need a PICA geometry shader, or
++    // the quaternion fix-up stage used with fragment lighting, stay on the CPU
++    // vertex path; everything else runs its vertex program on the GPU.
++    const bool needs_cpu =
++        regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No || !regs.lighting.disable;
++    // Diagnostics only: Module.nativeVertexStats = {gpu, lit, geometry, failed}
++    EM_ASM({
++        var stats = Module.nativeVertexStats ||
++            (Module.nativeVertexStats = {gpu: 0, lit: 0, geometry: 0, failed: 0});
++        if ($0) stats.geometry++; else if ($1) stats.lit++; else stats.gpu++;
++    }, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No, !regs.lighting.disable);
++    if (needs_cpu) {
++        return false;
++    }
+ #else
+     if (regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
+         if (regs.pipeline.gs_config.mode != Pica::PipelineRegs::GSMode::Point) {
+@@ -484,17 +499,16 @@
+             return false;
+         }
+     }
++#endif
+ 
+-    if (!SetupVertexShader()) {
+-        return false;
+-    }
+-
+-    if (!SetupGeometryShader()) {
++    if (!SetupVertexShader() || !SetupGeometryShader()) {
++#if defined(__EMSCRIPTEN__)
++        EM_ASM({ Module.nativeVertexStats.gpu--; Module.nativeVertexStats.failed++; });
++#endif
+         return false;
+     }
+ 
+     return Draw(true, is_indexed);
+-#endif
+ }
+ 
+ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+@@ -531,6 +545,27 @@
+             memory.GetPhysicalPointer(regs.pipeline.vertex_attributes.GetPhysicalBaseAddress() +
+                                       regs.pipeline.index_array.offset);
+         std::tie(buffer_ptr, buffer_offset, std::ignore) = index_buffer.Map(index_buffer_size, 4);
++#if defined(__EMSCRIPTEN__)
++        // WebGL2 has no base-vertex draws: the vertex array starts at the smallest
++        // index, so rebase the indices instead.
++        if (index_u16) {
++            const u16* source = reinterpret_cast<const u16*>(index_data);
++            u16* target = reinterpret_cast<u16*>(buffer_ptr);
++            for (u32 i = 0; i < regs.pipeline.num_vertices; ++i) {
++                target[i] = static_cast<u16>(source[i] - vs_input_index_min);
++            }
++        } else {
++            for (u32 i = 0; i < regs.pipeline.num_vertices; ++i) {
++                buffer_ptr[i] = static_cast<u8>(index_data[i] - vs_input_index_min);
++            }
++        }
++        index_buffer.Unmap(index_buffer_size);
++
++        glDrawRangeElements(primitive_mode, 0, vs_input_index_max - vs_input_index_min,
++                            regs.pipeline.num_vertices,
++                            index_u16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE,
++                            reinterpret_cast<const void*>(buffer_offset));
++#else
+         std::memcpy(buffer_ptr, index_data, index_buffer_size);
+         index_buffer.Unmap(index_buffer_size);
+ 
+@@ -538,6 +573,7 @@
+             primitive_mode, vs_input_index_min, vs_input_index_max, regs.pipeline.num_vertices,
+             index_u16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE,
+             reinterpret_cast<const void*>(buffer_offset), -static_cast<GLint>(vs_input_index_min));
++#endif
+     } else {
+         glDrawArrays(primitive_mode, 0, regs.pipeline.num_vertices);
+     }

@@ -1,0 +1,45 @@
+diff --git a/src/citra_libretro/citra_libretro.cpp b/src/citra_libretro/citra_libretro.cpp
+index a6e342e..bd6cedc 100644
+--- a/src/citra_libretro/citra_libretro.cpp
++++ b/src/citra_libretro/citra_libretro.cpp
+@@ -968,7 +968,13 @@ static bool DrainAsyncOperations(Core::System& system) {
+     auto start = std::chrono::steady_clock::now();
+ 
+     while (system.Kernel().AreAsyncOperationsPending()) {
++#ifdef __EMSCRIPTEN__
++        // This runs the game on the browser's only thread; a page frozen for
++        // seconds gets killed on a phone. The frontend retries instead.
++        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(700)) {
++#else
+         if (std::chrono::steady_clock::now() - start > std::chrono::seconds(5)) {
++#endif
+             LOG_ERROR(Frontend, "Timed out waiting for async operations to complete");
+             emu_instance->emu_window->suppressPresentation = false;
+             return false;
+diff --git a/src/core/savestate.cpp b/src/core/savestate.cpp
+index 1ae8bf0..1ad3a47 100644
+--- a/src/core/savestate.cpp
++++ b/src/core/savestate.cpp
+@@ -224,7 +224,11 @@ std::vector<u8> System::SaveStateBuffer() const {
+ #if defined(__EMSCRIPTEN__)
+     // The uncompressed state is larger than the memory left to a browser tab,
+     // let alone two copies of it. Compress it as it is produced.
++    // The header goes in front; leave room for it and reserve enough for most
++    // states at once, so that the result is neither moved nor copied as it grows.
+     std::vector<u8> buffer;
++    buffer.reserve(sizeof(CSTHeader) + 40 * 1024 * 1024);
++    buffer.resize(sizeof(CSTHeader));
+     {
+         Common::Compression::ZSTDWriteBuffer sink{buffer};
+         std::ostream stream{&sink};
+@@ -264,8 +268,8 @@ std::vector<u8> System::SaveStateBuffer() const {
+                 std::min(build_fullname.length(), sizeof(header.build_name) - 1));
+ 
+ #if defined(__EMSCRIPTEN__)
+-    // Without a second vector the size of the state.
+-    buffer.insert(buffer.begin(), (u8*)&header, (u8*)&header + sizeof(header));
++    std::memcpy(buffer.data(), &header, sizeof(header));
++    buffer.shrink_to_fit();
+     return buffer;
+ #else
+     std::vector<u8> result((u8*)&header, (u8*)&header + sizeof(header));

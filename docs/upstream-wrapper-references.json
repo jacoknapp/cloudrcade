@@ -1,0 +1,170 @@
+[
+  {
+    "repository": "webrcade/webrcade-app-common",
+    "referenceCommit": "9a7cf19b64a440df8ca9b22a4136b34dc6e9f3db"
+  },
+  {
+    "repository": "webrcade/webrcade-editor",
+    "referenceCommit": "7f2186da213f6445cafe265f43505e513dbdb1d2"
+  },
+  {
+    "repository": "webrcade/webrcade-app-snes9x",
+    "referenceCommit": "06bc4130901cf937552021391c3e95b134ef3bf5"
+  },
+  {
+    "repository": "webrcade/webrcade-app-genplusgx",
+    "referenceCommit": "49f34fab3cd2487069be20974d94a3d9f4442113"
+  },
+  {
+    "repository": "webrcade/webrcade-app-javatari",
+    "referenceCommit": "974073e9a6437b655946628a5b7df0b9a8ffdb9c"
+  },
+  {
+    "repository": "webrcade/webrcade-app-js7800",
+    "referenceCommit": "56c7e51b1459256f66f600b08c89768a4632479c"
+  },
+  {
+    "repository": "webrcade/webrcade-app-fceux",
+    "referenceCommit": "fcd4ffb544a84cc59fe830a492bdb87d06f94772"
+  },
+  {
+    "repository": "webrcade/webrcade-app-vba-m",
+    "referenceCommit": "7e79717065f9510f93d10d85217390e32d0b3ecc"
+  },
+  {
+    "repository": "webrcade/webrcade-app-mednafen",
+    "referenceCommit": "4a1b81f6267c8d56ee8fe69987c4075a9fa72d03"
+  },
+  {
+    "repository": "webrcade/webrcade-app-fbneo",
+    "referenceCommit": "9603000e253ae8823250daf6759547e1f512f3ed"
+  },
+  {
+    "repository": "webrcade/webrcade-app-parallel-n64",
+    "referenceCommit": "54e726779c000b8c984ae5dd7e6328c700af85da"
+  },
+  {
+    "repository": "webrcade/webrcade-app-beetle-psx",
+    "referenceCommit": "6c9ae6537c879eb1066198b655a6dfc81ecf0a7d"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-genplusgx",
+    "referenceCommit": "7fe5c41aa9e8d90e536b2230253aee7c186d0511"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-pce-fast",
+    "referenceCommit": "5d744787f96dbe2607a04906b37e9bc666e46008"
+  },
+  {
+    "repository": "webrcade/webrcade-app-colem",
+    "referenceCommit": "5428e9e1a7855bae2b32fc6dc8562b022cabbf4c"
+  },
+  {
+    "repository": "webrcade/webrcade-app-beetle-pcfx",
+    "referenceCommit": "b8f2e81b9a11c507a2358c72b5987b76c54547ae"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-a5200",
+    "referenceCommit": "a88c210e14b6d789354f431b246db99a543c01f2"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-neocd",
+    "referenceCommit": "4df42223aad34667b3b4623ffcbbb494fed1e918"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-opera",
+    "referenceCommit": "ce281cc3a088311cee3461a78f8c2b011c9f9ffd"
+  },
+  {
+    "repository": "webrcade/webrcade-app-tyrquake",
+    "referenceCommit": "e105187bdd7f6be2064b46fcce1a2d2778589d61"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-stella-2014",
+    "referenceCommit": "27831008a280f6c60315bda59501abf516a2751d"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-stella",
+    "referenceCommit": "17f4fccc5799f7f14c3cb7b4174d39cf7a86a331"
+  },
+  {
+    "repository": "webrcade/webrcade-app-scummvm",
+    "referenceCommit": "63f16b1f1c75bf6d30ca61f455336436f9ff4d1e"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-commodore-8bit",
+    "referenceCommit": "e80aae06f8b225718f43a71ec250c175ec90c9fe"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-dosbox-pure",
+    "referenceCommit": "ea3406ee2369a952b1f2a3bd677069580814c027"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-fceumm",
+    "referenceCommit": "89d46cf97e0e942396a81c39cdd584ea37f784b3"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-melonds",
+    "referenceCommit": "0df3317838c0b908fac0036ab2e093c531163a46"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mednafen-lynx",
+    "referenceCommit": "bd2e6456fbf6f9b49e4db3673d5fec46f1c67764"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mednafen-ngp",
+    "referenceCommit": "363a99cc7341ea29cd34d476adb61147c138e282"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mednafen-supergrafx",
+    "referenceCommit": "52756bdbbab5e75e87d1a61f4ef52e52dbcb62d7"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mednafen-vb",
+    "referenceCommit": "31ee025c5256dfdba0dbe71547b46f2f37b5b967"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mednafen-wswan",
+    "referenceCommit": "6e61b7fe87b9a2553dd5555a11bf7ee7cc37e7fd"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mgba",
+    "referenceCommit": "0f64817fb86300cb8ea4a9fbf63a252e8265d146"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-pokemini",
+    "referenceCommit": "b735c478475cbbcfbe8364a38868dd59762096c8"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-sameboy",
+    "referenceCommit": "c65bf3c8b0e095bbda74f0ddaadcf32c58441ba6"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-snes9x",
+    "referenceCommit": "2852ed83c643d79c3f6e127bd9d91c1983b38a8f"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-yabause",
+    "referenceCommit": "319f3dc0cf71651940ee6b7aa556139e1ec99b55"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mame-astrocade",
+    "referenceCommit": "991d2eae1732746af26b33a01d889a55bcf92b65"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mame-apple2",
+    "referenceCommit": "5380c9a3bd95d0956cc44d6570cfac4343d67ed9"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mame-apple2gs",
+    "referenceCommit": "660baac2e92bc06c25ea58f70efa4a9ed7bafc6b"
+  },
+  {
+    "repository": "webrcade/webrcade-app-retro-mame-cdi",
+    "referenceCommit": "2bfac12ebd8904e18df8d98f369f1c386a1cabc6"
+  },
+  {
+    "repository": "webrcade/webrcade-app-standalone",
+    "referenceCommit": "62f4fb754d8d5fb5a515ff43886bef8e0cdc3f28"
+  }
+]

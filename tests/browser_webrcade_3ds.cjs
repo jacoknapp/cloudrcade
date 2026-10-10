@@ -1,0 +1,40 @@
+// Real library/3DS iframe smoke using fresh profiles: no personal saves or cloud account.
+// Requires a staged feed with the requested game and Playwright Chromium/WebKit.
+const {chromium,webkit,devices}=require('playwright');const fs=require('fs'),assert=require('assert/strict'),path=require('path'),os=require('os');
+const origin=process.env.WEBRCADE_TEST_ORIGIN||'http://localhost:18082';
+const output=process.env.WEBRCADE_TEST_OUTPUT||fs.mkdtempSync(path.join(os.tmpdir(),'webrcade-3ds-test-'));
+fs.mkdirSync(output,{recursive:true});
+(async()=>{
+const name=process.argv[2]||'webkit',title=process.argv[3]||'Ultra Moon';const engine=name==='webkit'?webkit:chromium;
+const b=await engine.launch({headless:true,...(name==='chromium'?{...(process.env.CHROME?{executablePath:process.env.CHROME}:{}),args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']}:{} )});
+const logs=[],errors=[];
+try {
+const c=await b.newContext({...devices['iPhone 13'],viewport:{width:402,height:874},serviceWorkers:'block',userAgent:devices['iPhone 13'].userAgent.replace(/iPhone OS [\d_]+/,'iPhone OS 27_0_1')});const p=await c.newPage();c.on('page',page=>page.on('pageerror',e=>errors.push(e.stack)));p.on('pageerror',e=>errors.push(e.stack));p.on('console',m=>{logs.push(m.text());});let workers=0;c.on('serviceworker',()=>{});p.on('worker',()=>workers++);
+await p.goto(origin+'/play/?feed='+encodeURIComponent(origin+'/content/feeds/combined.json'));await p.waitForTimeout(2500);const ok=p.getByRole('button',{name:'OK',exact:true});if(await ok.count())await ok.first().click().catch(()=>{});await p.waitForFunction(()=>document.body.innerText.includes('Nintendo 3DS'));assert.equal(await p.locator('#wrcad-touch').count(),0);
+await p.evaluate(title=>{function f(n){if(!n)return null;if(n.stateNode?.browseScreenRef)return n.stateNode;return f(n.child)||f(n.sibling)}const l=f(document.getElementById('root')._reactRootContainer._internalRoot.current);const it=l.state.feed.getUniqueCategories().flatMap(c=>c.items).find(i=>i.title.includes(title));if(!it)throw Error('Missing game');l.browseScreenRef.current.props.onAppSelected(it);},title);
+const iframe=await p.waitForSelector('#webrcade-app-iframe'),frame=await iframe.contentFrame();await frame.waitForFunction(()=>window.emulator?.mainStarted&&window.Module?._get_current_frame_count()>150,null,{timeout:120000});await frame.locator('.kt-pad').waitFor({state:'visible'});assert.equal(await p.locator('#wrcad-touch').count(),0,'parent library must not add a second controller');
+let state=await frame.evaluate(()=>({heap:Module.HEAPU8.byteLength,frames:Module._get_current_frame_count(),cache:emulator.lazyRom?.chunks.size,workers:Module.PThread.runningWorkers.length+Module.PThread.unusedWorkers.length,hardwareConcurrency:navigator.hardwareConcurrency,audio:Module.RWA.context.state,uid:emulator.uid}));assert(state.heap<1024*1024*1024);assert(!state.cache||state.cache<=8);console.log('resource state',JSON.stringify(state));assert(state.workers<=6,'the core starts four workers and may add one or two, not one per CPU: '+state.workers);console.log('PASS',name,title,'native library Play -> iframe, bounded memory/cache/workers',JSON.stringify(state));
+// Finish the native release screen before checking the wrapper's frame pacing.
+// Core startup can already advance frames while this screen awaits a gesture.
+const initialRelease=frame.locator('.release-screen-content');if(await initialRelease.isVisible())await initialRelease.tap();else await frame.locator('.kt-actions button').filter({hasText:/^A$/}).tap();
+await frame.waitForFunction(()=>emulator.loopResumed);
+await frame.evaluate(()=>Module.RWA.context.suspend());await frame.waitForFunction(()=>emulator.frameTiming===1);const release=frame.locator('.release-screen-content');if(await release.isVisible())await release.tap();else await frame.locator('.kt-actions button').filter({hasText:/^A$/}).tap();await p.waitForTimeout(3000);assert.equal(await frame.evaluate(()=>Module.RWA.context.state),'running','tap must resume actual core audio');await frame.waitForFunction(()=>emulator.frameTiming===0);console.log('PASS actual touch gesture resumes audio and audio gates frame pacing');
+await frame.locator('.kt-menu').tap();await frame.waitForFunction(()=>app.isPauseScreen());await p.waitForTimeout(250);assert.equal(await frame.locator('.kt-tab').isVisible(),false);let count=await frame.evaluate(()=>Module._get_current_frame_count());await p.waitForTimeout(300);assert.equal(await frame.evaluate(()=>Module._get_current_frame_count()),count,'native pause must stop frames');await frame.getByText('Resume',{exact:true}).click();await frame.locator('.kt-tab').waitFor({state:'visible'});await frame.waitForFunction(n=>Module._get_current_frame_count()>n,count);
+await frame.evaluate(()=>{Module._simulate_input(0,20,0);const original=Module._simulate_input;window.cstickInputs=[];Module._simulate_input=(...args)=>{cstickInputs.push(args);return original(...args);};});
+const stick=await frame.locator('.kt-c-stick').boundingBox();assert(stick,'C-stick must be visible');await p.mouse.move(stick.x+stick.width*.8,stick.y+stick.height*.5);await p.mouse.down();await p.waitForTimeout(300);assert(await frame.evaluate(()=>cstickInputs.some(i=>i[1]===20&&i[2]>0)),'right C-stick must reach core analog input');assert.equal(await frame.evaluate(()=>emulator.controllers.getController(0).getAxisValue(0,true)),0,'C-stick must not move Circle Pad');await p.mouse.up();await p.waitForTimeout(200);assert.equal(await frame.evaluate(()=>emulator.controllers.getController(0).getAxisValue(1,true)),0);console.log('PASS independent C-stick input and release reaches core');
+const marker='/home/web_user/retroarch/userdata/saves/Azahar/sdmc/iphone-regression.bin';await frame.evaluate(async marker=>{const manager=emulator.getSaveManager();
+FS.writeFile(marker,new Uint8Array([17,27,1]));await emulator.saveState();const files=await manager.loadLocal(emulator.saveStatePath);if(!files?.some(f=>f.name==='sdmc/iphone-regression.bin'))throw Error('Marker absent from local save ZIP');},marker);console.log('PASS native pause/resume and save');
+if(process.env.WEBRCADE_TEST_SAVE_STATES==='1') {
+  await frame.evaluate(()=>{emulator.pause(true);Module._cmd_save_state();});
+  assert(await frame.evaluate(()=>FS.stat('/home/web_user/retroarch/userdata/states/game.state').size>0),'save state must contain data');
+  await frame.evaluate(()=>Module._cmd_load_state());
+  const restoredCount=await frame.evaluate(()=>Module._get_current_frame_count());
+  await frame.evaluate(()=>emulator.pause(false));
+  await frame.waitForFunction(n=>Module._get_current_frame_count()>n+60,restoredCount,{timeout:60000});
+  console.log('PASS save state restore rebuilds the CPU cache and continues executing');
+}
+const url=frame.url();await frame.goto(url);await frame.waitForFunction(()=>window.emulator?.mainStarted,null,{timeout:120000});assert.deepEqual(await frame.evaluate(marker=>Array.from(FS.readFile(marker)),marker),[17,27,1]);console.log('PASS same UID restores local save after app reload');
+await frame.evaluate(async()=>{app.emulator.pause(true);await app.onPreExit();});assert.equal(await frame.evaluate(()=>Module.PThread.runningWorkers.length+Module.PThread.unusedWorkers.length),0);assert.equal(await frame.evaluate(()=>emulator.lazyRom?.chunks.size||0),0);assert.equal(await frame.evaluate(()=>Module.RWA.context.state),'closed');assert.equal(await frame.evaluate(()=>!!emulator.timingAudioContext),false);console.log('PASS exit stops workers, clears ROM cache and closes audio after saving');
+await p.screenshot({path:path.join(output,name+'-native-final.png')});fs.writeFileSync(path.join(output,name+'-native-final.log'),logs.join('\n')+'\n'+errors.join('\n'));assert.equal(errors.length,0,errors.join('\n'));
+} finally {fs.writeFileSync(path.join(output,name+'-native-final.log'),logs.join('\n')+'\n'+errors.join('\n'));await b.close();}
+})().catch(e=>{console.error(e);process.exitCode=1});

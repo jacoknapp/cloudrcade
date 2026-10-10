@@ -1,0 +1,93 @@
+diff --git a/src/apps/applist.js b/src/apps/applist.js
+index 98add9e..34717fe 100644
+--- a/src/apps/applist.js
++++ b/src/apps/applist.js
+@@ -43,6 +43,7 @@ const locScummVm = isDev() ? `${http}${localIp}:3313` : 'app/scummvm/';
+ const locRetroFceumm = isDev() ? `${http}${localIp}:3377` : 'app/retro-fceumm/';
+ const locRetroDosBoxPure = isDev() ? `${http}${localIp}:3333` : 'app/retro-dosbox-pure/';
+ const locRetroSaturn = isDev() ? `${http}${localIp}:3312` : 'app/saturn/';
++const locRetroAzahar = isDev() ? `${http}${localIp}:3445` : 'app/retro-azahar/';
+ const locRetroMelonDS = isDev() ? `${http}${localIp}:3444` : 'app/retro-melonds/';
+ const locRetroPokeMini = isDev() ? `${http}${localIp}:3555` : 'app/retro-pokemini/';
+ const locRetroSnes9x = isDev() ? `${http}${localIp}:3378` : 'app/retro-snes9x/';
+@@ -137,6 +138,7 @@ const APP_TYPE_KEYS = /*Object.freeze(*/{
+   RETRO_MGBA: "retro-mgba-gba",
+   RETRO_PCE_FAST: "retro-pce-fast",
+   //RETRO_PPSSPP: "retro-ppsspp",
++  RETRO_AZAHAR: "retro-azahar",
+   RETRO_MELONDS: "retro-melonds",
+   RETRO_NEOCD: "retro-neocd",
+   RETRO_OPERA: "retro-opera",
+@@ -175,6 +177,7 @@ const APP_TYPE_KEYS = /*Object.freeze(*/{
+   GG: "gg",
+   LNX: "lnx",
+   NDS: "nds",
++  N3DS: "3ds",
+   NEOGEO: "neogeo",
+   NEOGEOCD: "neogeocd",
+   NES: "nes",
+@@ -1355,6 +1358,22 @@ const types = [{
+       mouseSpeed: 0,
+       zoomLevel: 0
+     }
++  }, {
++    key: APP_TYPE_KEYS.RETRO_AZAHAR,
++    alias: APP_TYPE_KEYS.N3DS,
++    name: 'Nintendo 3DS',
++    coreName: 'Retro Azahar',
++    slowExit: true,
++    location: locRetroAzahar,
++    background: 'images/app/nds-background.png',
++    thumbnail: 'images/app/nds-thumb.png',
++    description: "A Libretro core for the Nintendo 3DS based on Azahar. Requires decrypted games.",
++    validate: checkRom,
++    extensions: ['cia', '3ds', 'cci', 'cxi'],
++    multiThreaded: true,
++    defaults: {
++      rom: ''
++    }
+   }, {
+     key: APP_TYPE_KEYS.RETRO_MELONDS,
+     alias: APP_TYPE_KEYS.NDS,
+@@ -1534,6 +1553,7 @@ addAlias(types, APP_TYPE_KEYS.LNX, APP_TYPE_KEYS.RETRO_MEDNAFEN_LYNX);
+ addAlias(types, APP_TYPE_KEYS.NEOGEO, APP_TYPE_KEYS.FBNEO_NEOGEO);
+ addAlias(types, APP_TYPE_KEYS.NEOGEOCD, APP_TYPE_KEYS.RETRO_NEOCD);
+ addAlias(types, APP_TYPE_KEYS.NDS, APP_TYPE_KEYS.RETRO_MELONDS);
++addAlias(types, APP_TYPE_KEYS.N3DS, APP_TYPE_KEYS.RETRO_AZAHAR);
+ addAlias(types, APP_TYPE_KEYS.NES, APP_TYPE_KEYS.RETRO_FCEUMM);
+ addAlias(types, APP_TYPE_KEYS.NGC, APP_TYPE_KEYS.RETRO_MEDNAFEN_NGC);
+ addAlias(types, APP_TYPE_KEYS.NGP, APP_TYPE_KEYS.RETRO_MEDNAFEN_NGP);
+diff --git a/src/app/retrowrapper/index.js b/src/app/retrowrapper/index.js
+index a8eb129..c2b405f 100644
+--- a/src/app/retrowrapper/index.js
++++ b/src/app/retrowrapper/index.js
+@@ -639,3 +639,3 @@ export class RetroAppWrapper extends AppWrapper {
+       if (window.readyAudioContext) {
+-        window.readyAudioContext.resume();
++        window.readyAudioContext.resume().catch(() => {});
+         console.log(window.readyAudioContext);
+@@ -876,3 +876,3 @@ export class RetroAppWrapper extends AppWrapper {
+         window.readyAudioContext = new window.AudioContext();
+-        window.readyAudioContext.resume();
++        window.readyAudioContext.resume().catch(() => {});
+         console.log(window.readyAudioContext);
+diff --git a/src/storage/storage.js b/src/storage/storage.js
+index c0c7e09..9793dce 100644
+--- a/src/storage/storage.js
++++ b/src/storage/storage.js
+@@ -84,2 +84,8 @@ class Storage {
+     if (idxDb) {
++      // Safari can reject ZIP Blob writes. Store their bytes in a tagged record
++      // and reconstruct the Blob on read; existing Blob records remain readable.
++      if (value instanceof Blob) {
++        value = {__webrcadeBlobV1: true, type: value.type,
++          bytes: new Uint8Array(await value.arrayBuffer())};
++      }
+       return new Promise((resolve, reject) => {
+@@ -123,3 +129,5 @@ class Storage {
+         request.onsuccess = (e) => {
+-          resolve(request.result ? request.result : null);
++          const value = request.result;
++          resolve(value && value.__webrcadeBlobV1 === true && value.bytes instanceof Uint8Array ?
++            new Blob([value.bytes], {type: value.type || ''}) : value || null);
+         };

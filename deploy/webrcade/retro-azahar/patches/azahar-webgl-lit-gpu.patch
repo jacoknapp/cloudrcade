@@ -1,0 +1,240 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index a71ff29..996af01 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -518,6 +518,10 @@ bool RasterizerOpenGL::SetupGeometryShader() {
+     // Enable the quaternion fix-up geometry-shader only if we are actually doing per-fragment
+     // lighting and care about proper quaternions. Otherwise just use standard vertex+fragment
+     // shaders
++#if defined(__EMSCRIPTEN__)
++    curr_shader_manager->UseTrivialGeometryShader();
++    return true;
++#endif
+     if (regs.lighting.disable) {
+         curr_shader_manager->UseTrivialGeometryShader();
+     } else {
+@@ -529,17 +533,21 @@ bool RasterizerOpenGL::SetupGeometryShader() {
+ 
+ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+ #if defined(__EMSCRIPTEN__)
+-    // WebGL2 has no geometry shaders. Draws that need a PICA geometry shader, or
+-    // the quaternion fix-up stage used with fragment lighting, stay on the CPU
+-    // vertex path; everything else runs its vertex program on the GPU.
+-    const bool needs_cpu =
+-        regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No || !regs.lighting.disable;
++    // WebGL2 has no geometry shaders. Draws that need a PICA geometry shader stay
++    // on the CPU vertex path; everything else runs its vertex program on the GPU.
++    // Lit draws need no quaternion fix-up stage here: their lighting frame is
++    // interpolated as vectors (glsl_shader_gen.cpp).
++    // Module.wrcLitOnCpu (set by the frontend before start) restores the former
++    // behaviour of running lit draws on the CPU, for comparison on a device.
++    static const bool lit_on_cpu = EM_ASM_INT({ return Module.wrcLitOnCpu ? 1 : 0; }) != 0;
++    const bool needs_cpu = regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No ||
++                           (lit_on_cpu && !regs.lighting.disable);
+     // Diagnostics only: Module.nativeVertexStats = {gpu, lit, geometry, failed}
+     EM_ASM({
+         var stats = Module.nativeVertexStats ||
+             (Module.nativeVertexStats = {gpu: 0, lit: 0, geometry: 0, failed: 0});
+         if ($0) stats.geometry++; else if ($1) stats.lit++; else stats.gpu++;
+-    }, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No, !regs.lighting.disable);
++    }, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No, lit_on_cpu && !regs.lighting.disable);
+     if (needs_cpu) {
+         return false;
+     }
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 786fb3f..30a61dc 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -335,7 +335,13 @@ public:
+ 
+         // Enable the geometry-shader only if we are actually doing per-fragment lighting
+         // and care about proper quaternions. Otherwise just use standard vertex+fragment shaders.
++#if defined(__EMSCRIPTEN__)
++        // No geometry shaders in WebGL2: the vertex shader feeds the fragment
++        // shader directly, also for lit draws (see glsl_shader_gen.cpp).
++        const bool use_geometry_shader = false;
++#else
+         const bool use_geometry_shader = !config.state.lighting_disable;
++#endif
+ 
+         res.use_clip_planes = profile.has_clip_planes;
+         res.use_geometry_shader = use_geometry_shader;
+diff --git a/src/video_core/renderer_opengl/webgl_formats.h b/src/video_core/renderer_opengl/webgl_formats.h
+index 9f1b58b..59cde64 100644
+--- a/src/video_core/renderer_opengl/webgl_formats.h
++++ b/src/video_core/renderer_opengl/webgl_formats.h
+@@ -45,10 +45,17 @@ struct Copier {
+     OGLProgram depth_program, rgba_program;
+     unsigned width=0,height=0;
+     Copier(){vao.Create();read.Create();scratch.Create();draw.Create();}
+-    bool program(OGLProgram& p,const char* fragment) {
+-        if(!p.handle)p.Create(vertex_shader,fragment);
++    // Queries that must answer (link status, uniform locations, framebuffer
++    // status) stall the page in Safari until its GPU process has caught up.
++    // These copies run every frame in some games, so ask once and remember.
++    bool depth_linked=false,rgba_linked=false,depth_checked=false,rgba_checked=false;
++    GLint depth_image=-1,depth_bit=-1,rgba_image=-1,rgba_level=-1,rgba_offset=-1;
++    bool program(OGLProgram& p,const char* fragment,bool& linked_once) {
++        if(p.handle)return linked_once;
++        p.Create(vertex_shader,fragment);
+         GLint linked=0;glGetProgramiv(p.handle,GL_LINK_STATUS,&linked);
+-        return linked==GL_TRUE;
++        linked_once=linked==GL_TRUE;
++        return linked_once;
+     }
+     static OpenGLState state() {
+         auto s=OpenGLState::GetCurState();
+@@ -65,7 +72,8 @@ struct Copier {
+                     unsigned dst_width,unsigned dst_height,unsigned sx,unsigned sy,
+                     unsigned dx,unsigned dy,unsigned w,unsigned h) {
+         const auto previous=OpenGLState::GetCurState();SCOPE_EXIT({previous.Apply();});
+-        if(!program(depth_program,depth_shader))return false;
++        if(!program(depth_program,depth_shader,depth_linked))return false;
++        if(depth_image<0){depth_image=glGetUniformLocation(depth_program.handle,"image");depth_bit=glGetUniformLocation(depth_program.handle,"stencil_bit");}
+         if(width!=dst_width || height!=dst_height) {
+             depth.Release();stencil.Release();depth.Create();stencil.Create();
+             depth.Allocate(GL_TEXTURE_2D,1,GL_DEPTH24_STENCIL8,dst_width,dst_height);
+@@ -78,7 +86,7 @@ struct Copier {
+                 glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+                 glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_COMPARE_MODE,GL_NONE);
+             }
+-            width=dst_width;height=dst_height;
++            width=dst_width;height=dst_height;depth_checked=false;
+         }
+         auto s=state();
+         s.draw.vertex_array=vao.handle;s.draw.read_framebuffer=read.handle;s.draw.draw_framebuffer=scratch.handle;s.Apply();
+@@ -87,7 +95,7 @@ struct Copier {
+         const GLenum none=GL_NONE;glDrawBuffers(1,&none);
+         for(const GLuint clone:{depth.handle,stencil.handle}) {
+             glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,clone,0);
+-            if(glCheckFramebufferStatus(GL_READ_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE || glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++            if(!depth_checked && (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE || glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE))return false;
+             glBlitFramebuffer(sx,sy,sx+w,sy+h,dx,dy,dx+w,dy+h,GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT,GL_NEAREST);
+         }
+         s.draw.draw_framebuffer=draw.handle;s.draw.shader_program=depth_program.handle;
+@@ -96,9 +104,10 @@ struct Copier {
+         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,destination,dst_level);
+         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,stencil.handle,0);
+         const GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);
+-        if(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
+-        glUniform1i(glGetUniformLocation(depth_program.handle,"image"),0);
+-        const GLint bit_location=glGetUniformLocation(depth_program.handle,"stencil_bit");
++        if(!depth_checked && glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++        depth_checked=true;
++        glUniform1i(depth_image,0);
++        const GLint bit_location=depth_bit;
+         glUniform1i(bit_location,0);glDrawArrays(GL_TRIANGLES,0,3);
+         s.stencil.test_enabled=true;s.stencil.test_func=GL_EQUAL;
+         s.color_mask={GL_TRUE,GL_FALSE,GL_FALSE,GL_FALSE};
+@@ -113,17 +122,19 @@ struct Copier {
+     bool rgba_copy(GLuint source,GLuint destination,unsigned src_level,unsigned dst_level,
+                    unsigned sx,unsigned sy,unsigned dx,unsigned dy,unsigned w,unsigned h) {
+         const auto previous=OpenGLState::GetCurState();SCOPE_EXIT({previous.Apply();});
+-        if(!program(rgba_program,rgba_shader))return false;
++        if(!program(rgba_program,rgba_shader,rgba_linked))return false;
++        if(rgba_image<0){rgba_image=glGetUniformLocation(rgba_program.handle,"image");rgba_level=glGetUniformLocation(rgba_program.handle,"source_level");rgba_offset=glGetUniformLocation(rgba_program.handle,"offset");}
+         auto s=state();s.draw.vertex_array=vao.handle;s.draw.draw_framebuffer=draw.handle;
+         s.draw.shader_program=rgba_program.handle;s.texture_units[0].texture_2d=source;
+         s.viewport={GLint(dx),GLint(dy),GLsizei(w),GLsizei(h)};s.Apply();
+         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,destination,dst_level);
+         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,0,0);
+         const GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);
+-        if(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
+-        glUniform1i(glGetUniformLocation(rgba_program.handle,"image"),0);
+-        glUniform1i(glGetUniformLocation(rgba_program.handle,"source_level"),src_level);
+-        glUniform2i(glGetUniformLocation(rgba_program.handle,"offset"),GLint(sx)-GLint(dx),GLint(sy)-GLint(dy));
++        if(!rgba_checked && glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)return false;
++        rgba_checked=true;
++        glUniform1i(rgba_image,0);
++        glUniform1i(rgba_level,src_level);
++        glUniform2i(rgba_offset,GLint(sx)-GLint(dx),GLint(sy)-GLint(dy));
+         glDrawArrays(GL_TRIANGLES,0,3);return true;
+     }
+ };
+diff --git a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+index 1173e4d..2a69783 100644
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -577,9 +577,20 @@ void FragmentModule::WriteLighting() {
+ 
+     // Rotate the surface-local normal by the interpolated normal quaternion to convert it to
+     // eyespace.
++#if defined(__EMSCRIPTEN__)
++    // The vertex stage sends the frame as two vectors instead of a quaternion.
++    out += "vec3 frame_n = normalize(light_frame_n);\n"
++           "vec3 frame_t = normalize(light_frame_t - frame_n * dot(frame_n, light_frame_t));\n"
++           "vec3 frame_b = cross(frame_n, frame_t);\n"
++           "vec3 normal = surface_normal.x * frame_t + surface_normal.y * frame_b + "
++           "surface_normal.z * frame_n;\n"
++           "vec3 tangent = surface_tangent.x * frame_t + surface_tangent.y * frame_b + "
++           "surface_tangent.z * frame_n;\n";
++#else
+     out += "vec4 normalized_normquat = normalize(normquat);\n"
+            "vec3 normal = quaternion_rotate(normalized_normquat, surface_normal);\n"
+            "vec3 tangent = quaternion_rotate(normalized_normquat, surface_tangent);\n";
++#endif
+ 
+     if (lighting.enable_shadow) {
+         std::string shadow_texture =
+@@ -1302,6 +1313,11 @@ void FragmentModule::DefineInterface() {
+         define_input("vec4 normquat", Semantic::Normquat);
+     }
+     define_input("vec3 view", Semantic::View);
++#if defined(__EMSCRIPTEN__)
++    if (!profile.has_separable_shaders) {
++        out += "in vec3 light_frame_n;\nin vec3 light_frame_t;\n";
++    }
++#endif
+ 
+     // Output attributes
+     out += "layout (location = 0) out vec4 color;\n\n";
+diff --git a/src/video_core/shader/generator/glsl_shader_gen.cpp b/src/video_core/shader/generator/glsl_shader_gen.cpp
+index a73b2c8..4b92157 100644
+--- a/src/video_core/shader/generator/glsl_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_shader_gen.cpp
+@@ -73,6 +73,17 @@ static std::string GetVertexInterfaceDeclaration(bool is_output, bool use_clip_p
+     append_variable("float texcoord0_w", ATTRIBUTE_TEXCOORD0_W);
+     append_variable("vec4 normquat", ATTRIBUTE_NORMQUAT);
+     append_variable("vec3 view", ATTRIBUTE_VIEW);
++#if defined(__EMSCRIPTEN__)
++    // WebGL2 has no geometry shaders, which normally flip a vertex quaternion
++    // that lies opposite to its triangle's first one before it is interpolated.
++    // The normal and tangent the quaternion stands for do not have that sign
++    // ambiguity, so they are interpolated instead and lit draws can stay on
++    // the GPU vertex path.
++    if (!separable_shader) {
++        out += fmt::format("{0}vec3 light_frame_n;\n{0}vec3 light_frame_t;\n",
++                           is_output ? "out " : "in ");
++    }
++#endif
+ 
+     if (is_output && separable_shader) {
+         // gl_PerVertex redeclaration is required for separate shader object
+@@ -129,6 +140,14 @@ void main() {
+     }
+     gl_Position = vec4(vtx_pos.x, vtx_pos.y, -vtx_pos.z, vtx_pos.w);
+ )";
++#if defined(__EMSCRIPTEN__)
++    // Lighting frame as two vectors (see GetVertexInterfaceDeclaration).
++    if (!separable_shader) {
++        out += "    { vec4 q = normquat / max(length(normquat), 1e-12);\n"
++               "      light_frame_n = vec3(0.0, 0.0, 1.0) + 2.0 * cross(q.xyz, cross(q.xyz, vec3(0.0, 0.0, 1.0)) + q.w * vec3(0.0, 0.0, 1.0));\n"
++               "      light_frame_t = vec3(1.0, 0.0, 0.0) + 2.0 * cross(q.xyz, cross(q.xyz, vec3(1.0, 0.0, 0.0)) + q.w * vec3(1.0, 0.0, 0.0)); }\n";
++    }
++#endif
+     if (use_clip_planes) {
+         out += R"(
+         gl_ClipDistance[0] = -vtx_pos.z; // fixed PICA clipping plane z <= 0
+@@ -260,6 +279,12 @@ std::string GenerateVertexShader(const ShaderSetup& setup, const PicaVSConfig& c
+         }
+ 
+         out += "    normquat = GetVertexQuaternion();\n";
++#if defined(__EMSCRIPTEN__)
++        // Lighting frame as two vectors (see GetVertexInterfaceDeclaration).
++        out += "    { vec4 q = normquat / max(length(normquat), 1e-12);\n"
++               "      light_frame_n = vec3(0.0, 0.0, 1.0) + 2.0 * cross(q.xyz, cross(q.xyz, vec3(0.0, 0.0, 1.0)) + q.w * vec3(0.0, 0.0, 1.0));\n"
++               "      light_frame_t = vec3(1.0, 0.0, 0.0) + 2.0 * cross(q.xyz, cross(q.xyz, vec3(1.0, 0.0, 0.0)) + q.w * vec3(1.0, 0.0, 0.0)); }\n";
++#endif
+         out += "    vec4 vtx_color = vec4(" + semantic(VSOutputAttributes::COLOR_R) + ", " +
+                semantic(VSOutputAttributes::COLOR_G) + ", " +
+                semantic(VSOutputAttributes::COLOR_B) + ", " +

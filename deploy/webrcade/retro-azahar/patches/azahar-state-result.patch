@@ -1,0 +1,70 @@
+diff --git a/src/citra_libretro/citra_libretro.cpp b/src/citra_libretro/citra_libretro.cpp
+index d7ef6e9..a6e342e 100644
+--- a/src/citra_libretro/citra_libretro.cpp
++++ b/src/citra_libretro/citra_libretro.cpp
+@@ -2,6 +2,9 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include <list>
+ #include <numeric>
+ #include <vector>
+@@ -983,6 +986,16 @@ static bool DrainAsyncOperations(Core::System& system) {
+ 
+ std::optional<std::vector<u8>> savestate = {};
+ 
++/// Tells the web frontend how the last save state request ended:
++/// 1 done, 2 declined because the game is busy (worth retrying), 0 failed.
++static void ReportStateResult(int result) {
++#ifdef __EMSCRIPTEN__
++    EM_ASM({ Module.wrcStateResult = $0; }, result);
++#else
++    (void)result;
++#endif
++}
++
+ size_t retro_serialize_size() {
+     auto& system = Core::System::GetInstance();
+     if (!system.IsPoweredOn())
+@@ -990,15 +1003,18 @@ size_t retro_serialize_size() {
+ 
+     if (!DrainAsyncOperations(system)) {
+         savestate.reset();
++        ReportStateResult(2);
+         return 0;
+     }
+ 
+     try {
+         savestate = system.SaveStateBuffer();
++        ReportStateResult(savestate->empty() ? 0 : 1);
+         return savestate->size();
+     } catch (const std::exception& e) {
+         LOG_ERROR(Frontend, "Error saving state: {}", e.what());
+         savestate.reset();
++        ReportStateResult(0);
+         return 0;
+     }
+ }
+@@ -1019,14 +1035,18 @@ bool retro_unserialize(const void* data, size_t size) {
+         return false;
+ 
+     if (!DrainAsyncOperations(system)) {
++        ReportStateResult(2);
+         return false;
+     }
+ 
+     std::vector<u8> buffer(static_cast<const u8*>(data), static_cast<const u8*>(data) + size);
+     try {
+-        return system.LoadStateBuffer(std::move(buffer));
++        const bool loaded = system.LoadStateBuffer(std::move(buffer));
++        ReportStateResult(loaded ? 1 : 0);
++        return loaded;
+     } catch (const std::exception& e) {
+         LOG_ERROR(Frontend, "Error loading state: {}", e.what());
++        ReportStateResult(0);
+         return false;
+     }
+ }

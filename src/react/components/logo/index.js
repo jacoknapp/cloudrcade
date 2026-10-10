@@ -1,24 +1,10 @@
+// CloudRcade modification, 2026: use configured app branding.
 import React, { Component } from "react";
-import {
-  WebrcadeLogoDarkImage,
-  WebrcadeLogoLargeImage
-} from '@webrcade/app-common'
-
 require("./style.scss");
-
 export default class Logo extends Component {
   render() {
-    const { size } = this.props;
-
-    const logoName = ( size === 'large' ? 'logoLarge' : 'logo');
-    const logo = ( size === 'large' ? WebrcadeLogoLargeImage : WebrcadeLogoDarkImage);
-
-    return (
-      <div className={logoName}>
-        <div className={logoName + '-left-text'}>web</div>
-        <img className={logoName + '-image'} alt="webЯcade" src={logo}></img>
-        <div className={logoName + '-right-text'}>cade</div>
-      </div>
-    );
+    const logoName = this.props.size === 'large' ? 'logoLarge' : 'logo';
+    const name = window.KnappCloudConfig?.appName || 'CloudRcade';
+    return <div className={logoName}><div className={logoName + '-left-text'}>{name}</div></div>;
   }
-};
+}
