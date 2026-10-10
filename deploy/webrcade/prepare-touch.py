@@ -112,7 +112,7 @@ def overlay(relative, source, original, bundle, mains, tmp):
         bundle_url = '/arcade-bundles/' + relative.parts[1] + '/' + bundle_name
         original = original.replace('src="' + mains[0] + '"', 'src="' + bundle_url + '"', 1)
     # The adapter must run before inline webpack bootstrap code, not defer.
-    original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">' + cloud, 1)
+    original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black">' + cloud, 1)
     original = re.sub(r'<title>.*?</title>', '<title>cloudЯcade</title>', original, flags=re.S)
     # Supply icons in the initial HTML as well as the runtime brand adapter.
     original = re.sub(r'<link\b[^>]*rel=["\'](?:icon|apple-touch-icon|manifest)["\'][^>]*>', '', original)

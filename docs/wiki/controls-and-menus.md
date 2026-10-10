@@ -16,6 +16,8 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 
 **Controls on/off** enables/disables the touch game buttons; the edge tab remains available. This choice is remembered in the browser. Turning touch controls off leaves keyboard/gamepad input available.
 
+In portrait, 3DS and vertically stacked DS screens fit above the controls and their touch targets. Opening the drawer keeps the game display in place. Turning controls off restores the available display space.
+
 **Translucence** fades the game controls by up to 80%. The open drawer stays readable. **Mute audio** silences Web Audio output, including achievement sounds, while the emulator's audio clock continues. The app requests mixable ambient audio where supported; your phone may still require you to resume music or a podcast manually. Mute is remembered locally and can sync through Nextcloud.
 
 ## Edit a layout
@@ -25,7 +27,7 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 3. Choose **Save** to keep the layout and resume play. **Cancel** restores the prior layout. **Reset** restores defaults for the current orientation; choose Save afterward to keep that reset.
 4. Rotate the device and repeat if you want a different landscape/portrait layout.
 
-The game pauses during editing. Layouts save per platform and orientation in the browser, including separate GB/GBC/GBA layouts. Positions are screen-relative and clamped to the viewport. Editing works with controls switched off and preserves that visibility choice afterward. You cannot edit before a game is running.
+The game pauses during editing. Layouts save per platform and orientation in the browser, including separate GB/GBC/GBA layouts. Positions are screen-relative and clamped to the viewport; portrait DS/3DS controls stay inside the bottom control area, including restored layouts. Editing works with controls switched off and preserves that visibility choice afterward. You cannot edit before a game is running.
 
 With Nextcloud connected, saved layouts, tab positions, translucence, visibility, mute and DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
 

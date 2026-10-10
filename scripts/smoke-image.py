@@ -112,7 +112,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert html.index('/touch-controls/category-art.js?v=') < html.index('/touch-controls/recently-played.js?v=') < html.index('/touch-controls/mobile.js?v=')
             revision = runpy.run_path('deploy/webrcade/patch-player.py')['player_revision']()
             assert '?wrcad=' + revision in html, 'player URL must include current notes as well as patch code'
-            assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
+            assert 'apple-mobile-web-app-capable' in html
+            assert '<meta name="apple-mobile-web-app-status-bar-style" content="black">' in html
+            assert 'black-translucent' not in html
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
             apple = IconLinks(html).icons
             assert len(apple) == 1 and apple[0]['sizes'] == '180x180', 'Apple icon must exist before JS runs'
@@ -139,6 +141,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/touch-controls/mobile.js' not in app_html, 'mobile library must not load in emulator frames'
             assert '/touch-controls/menus.css?v=' in app_html, 'game menus need the shared mobile UI stylesheet'
             assert len(IconLinks(app_html).icons) == 1, 'emulator initial HTML must include the Apple icon too'
+            assert '<meta name="apple-mobile-web-app-status-bar-style" content="black">' in app_html
+            assert 'black-translucent' not in app_html
         # A second scan discovers newly added files without a container restart.
         (roms / 'nes/roms/second.nes').write_bytes(b'NES\x1a' + bytes(12) + b'second-fixture')
         until(lambda: any(item['title'] == 'second' for item in items()))
