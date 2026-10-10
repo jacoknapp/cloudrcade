@@ -1,11 +1,12 @@
 [
   {
-    "version": "2026.10",
+    "version": "1.0.1",
     "date": "October 10, 2026",
     "title": "Mobile play and a refreshed library",
     "changes": [
       "A compact *mobile library* with search, touch controls and game details. Install as a web app for a full-screen experience.",
       "A centered app icon, a clearer *Recently Played* history icon and distinct console artwork on mobile and desktop.",
+      "Desktop console artwork leaves the system name to the carousel, keeping category labels clear and readable.",
       "*Recently Played restores automatically* when the library opens, including your connected account's cached and cloud history.",
       "Installed web apps use the full display height for the library and games, with your saved touch-button positions preserved.",
       "Installed iPhone/iPad apps request an opaque black system status bar to reduce top-edge fading. Games fill the available display and saved controls remain intact.",

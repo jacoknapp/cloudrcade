@@ -26,6 +26,28 @@ python3 scripts/prepare-core.py
 docker build --target web -t cloudrcade:local .
 ```
 
+Published images support `linux/amd64` and `linux/arm64`. The pinned upstream
+AMD64 image supplies only static browser assets and configuration scripts;
+PHP/Apache, Python, Node and chdman come from the target platform's packages.
+The overlay generator runs on the builder's native architecture. Browser
+JavaScript and WebAssembly run on the player's device on either deployment.
+
+To publish both architectures with a Buildx builder that supports ARM64
+(a native ARM builder or QEMU/binfmt installed on the build host):
+
+```sh
+python3 scripts/prepare-core.py
+docker buildx build --platform linux/amd64,linux/arm64 --target web \
+  --tag YOUR_REGISTRY/cloudrcade:YOUR_VERSION --push .
+```
+
+CI loads and tests each architecture separately, including actual CHD conversion
+and scheduled scanning, before pushing the combined image. For a local ARM64
+test, build with `--platform linux/arm64 --load -t cloudrcade:test-arm64` and run
+`python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64`. Emulation is
+required to run that test on an AMD64 host. These checks verify the server
+runtime; physical ARM hardware and game performance require device testing.
+
 Core changes require Docker, Git, Python 3.12+, rsync and ample build space;
 the Emscripten and Node images are selected by the core build script. First-time
 core builds are substantially slower than ordinary overlay/image updates.

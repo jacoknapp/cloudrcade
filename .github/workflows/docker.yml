@@ -34,6 +34,9 @@ jobs:
           python3 scripts/test.py
       - name: Prepare key-free 3DS app and corresponding source
         run: python3 scripts/prepare-core.py
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -54,23 +57,37 @@ jobs:
           echo "web=$image:sha-$COMMIT" >> "$GITHUB_OUTPUT"
           if [ "$REF_NAME" = master ]; then tag=latest; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
           echo "web_alias=$image:$tag" >> "$GITHUB_OUTPUT"
-      - name: Build app image
+      - name: Build AMD64 app image
         uses: docker/build-push-action@v6
         with:
           context: .
           target: web
+          platforms: linux/amd64
           load: true
           tags: cloudrcade:test
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
-      - name: Verify integrated web app and scheduled feed builder
-        run: python3 scripts/smoke-image.py cloudrcade:test
-      - name: Publish verified app image
+      - name: Verify AMD64 app and scheduled feed builder
+        run: python3 scripts/smoke-image.py cloudrcade:test linux/amd64
+      - name: Build ARM64 app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          platforms: linux/arm64
+          load: true
+          tags: cloudrcade:test-arm64
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Verify ARM64 app and scheduled feed builder under QEMU
+        run: python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64
+      - name: Publish verified AMD64 and ARM64 app images
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           target: web
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.tags.outputs.web }}

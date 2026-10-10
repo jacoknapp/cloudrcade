@@ -60,6 +60,13 @@ Do not delete data or clear browser storage as an initial troubleshooting step. 
 
 The public image is `ghcr.io/jacoknapp/cloudrcade:latest`. Master merges build/publish images; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` tags are also published. Pin a known tag or digest when reproducibility matters.
 
+The image works on Linux AMD64 and Linux ARM64. Use a 64-bit OS on an ARM server
+or Raspberry Pi; a 32-bit ARM OS is not supported. Docker automatically pulls
+the correct variant, so the Compose setup is the same for both. Both variants
+are tested for startup, web serving, library scans and disc conversion before
+they are published. Building your own multi-platform image is covered in
+[build architecture](../architecture.md).
+
 ```sh
 docker compose pull webrcade
 docker compose up -d webrcade
