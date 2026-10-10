@@ -18,15 +18,18 @@ const { chromium, webkit } = require('playwright');
         }));
         await page.goto('http://controller.test/play/app/retro-' + (system === '3ds' ? 'azahar' : 'melonds') + '/');
         const installFixture = async () => {
+          await page.evaluate(() => document.documentElement.setAttribute('data-cr-installed', ''));
           await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,
-            '../deploy/webrcade/touch/assets/controller.css'), 'utf8') });
+            '../deploy/webrcade/touch/assets/viewport.css'), 'utf8') });
+          await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,
+            '../deploy/webrcade/touch/assets/controller.css'), 'utf8')
+            .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px') });
           // Desktop engines do not expose an iPhone's notch/home-indicator insets.
           // Supply those bounds in this fixture, leaving the real layout code intact.
           await page.addStyleTag({content: `
             html, body { margin: 0; background: black; }
             canvas { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
             .kt-ds-origin, .kt-3ds-origin { top: var(--test-top, 59px); bottom: 34px; }
-            #wrcad-touch .kt-pad { bottom: 34px; }
           `});
           await page.evaluate((system) => {
             const canvas = document.createElement('canvas');
@@ -62,10 +65,26 @@ const { chromium, webkit } = require('playwright');
             '../deploy/webrcade/touch/assets/controller.js'), 'utf8') });
           await page.waitForTimeout(300);
         };
-        const saved = {'button-8': [.45, .82], 'button-9': [.6, .86]};
+        const saved = {'button-8': [.45, .82], 'button-9': [.6, .86], 'button-12': [.25, .9]};
         await page.evaluate(({system, saved}) => localStorage.setItem('webrcade.touch.layouts.v1',
           JSON.stringify({[`${system}:portrait`]: saved, [`${system}:landscape`]: saved})), {system, saved});
         await installFixture();
+        const bottom = await page.locator('.kt-menu').boundingBox();
+        assert.equal(874 - bottom.y - bottom.height, 22,
+          'default center buttons leave 22px above the bottom, reclaiming 12px');
+        await page.evaluate(() => {
+          document.documentElement.removeAttribute('data-cr-installed');
+          dispatchEvent(new Event('resize'));
+        });
+        await page.waitForTimeout(100);
+        const browserBottom = await page.locator('.kt-menu').boundingBox();
+        assert.equal(874 - browserBottom.y - browserBottom.height, 34,
+          'ordinary browser keeps the complete home-indicator inset');
+        await page.evaluate(() => {
+          document.documentElement.setAttribute('data-cr-installed', '');
+          dispatchEvent(new Event('resize'));
+        });
+        await page.waitForTimeout(100);
         for (const view of system === '3ds' ? [0, 1, 2] : [0, 2]) {
           await page.evaluate((view) => app.emulator.setView(view), view);
           for (const viewport of [{ width: 874, height: 402 }, { width: 402, height: 874 },

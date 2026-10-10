@@ -56,7 +56,8 @@ const findBrowse = () => {
             if (installed && file.endsWith('.css')) body = body.replaceAll('100dvh','calc(100vh - 60px)');
             // Desktop engines have no phone safe area. Model the existing top
             // inset to check overlay bounds and scope, not the OS blur itself.
-            if (file.endsWith('.css')) body = body.replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '60px');
+            if (file.endsWith('.css')) body = body.replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '60px')
+              .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px');
             await r.fulfill({...(response ? {response} : {}),contentType:file.endsWith('.css')?'text/css':'application/javascript',body});
           });
         }
@@ -118,7 +119,9 @@ const findBrowse = () => {
           assert.equal(await frame.evaluate(()=>innerHeight),Math.round(bounds.height));
           const target = await frame.getByRole('button',{name:'Bottom target'}).boundingBox();
           const bottomGap = bounds.height - target.y - target.height;
-          assert(bottomGap>=11 && bottomGap<=27,'bottom touch target stays near frame edge: '+JSON.stringify({target,bounds,bottomGap}));
+          const expectedGap = (installed ? 22 : 34) + (viewport.width >= 600 ? 14 : 0);
+          assert(Math.abs(bottomGap-expectedGap)<1,
+            'installed target reclaims 12px while browser retains full safe inset: '+JSON.stringify({target,bounds,bottomGap,expectedGap}));
         }
         assert.equal(romRequests,0);
         assert.deepEqual(errors,[]);

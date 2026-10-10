@@ -55,6 +55,10 @@ html.kt-ds-active .touch-overlay-buttons { padding-top: calc(4px + env(safe-area
 #wrcad-touch .kt-editor .kt-save { border-color: #67e5c5; }
 #wrcad-touch.kt-editing .kt-tab, #wrcad-touch.kt-editing .kt-pad button, #wrcad-touch.kt-editing .kt-stick { outline: 2px dashed #67e5c5; outline-offset: 2px; cursor: grab; }
 #wrcad-touch .kt-pad { position: absolute; bottom: max(12px, env(safe-area-inset-bottom)); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); height: 244px; pointer-events: none; opacity: var(--kt-control-opacity, 1); }
+/* Installed apps have no browser toolbar. Bring default controls 12px closer
+ * to the home indicator, retaining at least 12px for the 10px touch expansion.
+ * Saved normalized positions are restored independently by applyLayout(). */
+html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) - 12px)); }
 #wrcad-touch .kt-pad button, #wrcad-touch .kt-stick { pointer-events: auto; }
 #wrcad-touch .kt-pad button { position: relative; }
 #wrcad-touch .kt-hit-area { position: absolute; inset: -10px; border-radius: inherit; touch-action: none; }
