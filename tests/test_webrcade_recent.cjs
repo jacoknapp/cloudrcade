@@ -9,6 +9,7 @@ function fixture({raw = null, denyRead = false, denyWrite = false, rename = {}, 
   const localStorage = {getItem: name => {if (denyRead) throw Error('denied');return name === key ? raw : data.get(name) || null;},
     setItem: (name, value) => {if (denyWrite) throw Error('denied');if (name === key) raw = value;else data.set(name, value);}};
   const window = {WrcadCloudConfig:{storagePrefix:'wrcad'},WrcadCloud: cloud, addEventListener: (name, fn) => events[name] = fn};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/assets/category-art.js'), 'utf8'), {window});
   vm.runInNewContext(source, {window, localStorage, document: {addEventListener() {}}, setTimeout: () => 1, clearTimeout() {}});
   class Browse {
     static ModeEnum = {CATEGORIES: 'categories'};

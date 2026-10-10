@@ -1,0 +1,34 @@
+/* Shared category artwork for the native desktop carousel and mobile cards. */
+(() => {
+  'use strict';
+  const aliases = {nes: 'nes', snes: 'snes', gb: 'gb', gbc: 'gbc', gba: 'gba', n64: 'n64',
+    nds: 'ds', 'retro-melonds': 'ds', genesis: 'genesis', psx: 'psx',
+    'retro-pcsx-rearmed': 'psx', '3ds': '3ds', 'retro-azahar': '3ds'};
+  const artwork = {
+    recent: ['RECENT', '<path d="M49 21A28 28 0 1 1 45 56" fill="none" stroke="#e50914" stroke-width="7" stroke-linecap="round"/><path d="M35 17L49 21L46 35" fill="none" stroke="#e50914" stroke-width="6" stroke-linejoin="round"/><path d="M77 23V43L91 51" fill="none" stroke="#f1f1f1" stroke-width="5" stroke-linecap="round"/><circle cx="111" cy="62" r="15" fill="#e50914"/><path d="M107 54L119 62L107 70Z" fill="#f1f1f1"/>'],
+    nes: ['NES', '<rect x="25" y="17" width="110" height="50" rx="5" fill="#bababa"/><path d="M27 50h106" stroke="#777" stroke-width="3"/><rect x="37" y="29" width="61" height="12" rx="2" fill="#333"/><rect x="107" y="23" width="15" height="31" fill="#e50914"/><rect x="37" y="55" width="18" height="5" fill="#333"/><rect x="61" y="55" width="18" height="5" fill="#333"/>'],
+    snes: ['SNES', '<rect x="27" y="15" width="106" height="54" rx="13" fill="#bdbdbd"/><rect x="50" y="20" width="60" height="20" rx="5" fill="#777"/><path d="M55 30h50" stroke="#333" stroke-width="4"/><rect x="44" y="48" width="20" height="9" fill="#927ac4"/><rect x="98" y="48" width="20" height="9" fill="#927ac4"/>'],
+    gb: ['GB', '<path d="M53 3H108V57Q108 73 92 73H53Q49 73 49 69V7Q49 3 53 3" fill="#c4c4b8"/><rect x="55" y="10" width="47" height="32" rx="3" fill="#6b6c73"/><rect x="63" y="15" width="30" height="22" fill="#9baa68"/><path d="M55 53h14m-7-7v14" stroke="#333" stroke-width="5"/><circle cx="87" cy="57" r="4" fill="#8e3757"/><circle cx="99" cy="51" r="4" fill="#8e3757"/><path d="M84 65l9 3m-5-7l9 3" stroke="#777" stroke-width="2"/>'],
+    gbc: ['GBC', '<path d="M57 3H103Q112 3 112 12V62Q112 74 97 74H63Q48 74 48 62V12Q48 3 57 3" fill="#3595a0"/><path d="M55 10H105V34Q105 45 80 45Q55 45 55 34Z" fill="#292d37"/><rect x="64" y="15" width="32" height="23" fill="#a1af85"/><path d="M55 54h14m-7-7v14" stroke="#292d37" stroke-width="5"/><circle cx="90" cy="58" r="4" fill="#292d37"/><circle cx="103" cy="51" r="4" fill="#292d37"/><path d="M83 65h17" stroke="#276f77" stroke-width="3"/>'],
+    gba: ['GBA', '<rect x="24" y="20" width="112" height="48" rx="18" fill="#927ac4"/><rect x="52" y="25" width="56" height="36" rx="3" fill="#333"/><rect x="57" y="30" width="46" height="26" fill="#a5b28c"/><path d="M31 43h15m-8-7v15" stroke="#333" stroke-width="4"/><circle cx="119" cy="47" r="4" fill="#333"/><circle cx="128" cy="38" r="4" fill="#333"/>'],
+    n64: ['N64', '<path d="M33 27Q47 14 80 14Q113 14 127 27L138 56Q142 70 124 71H36Q18 70 22 56Z" fill="#373a40" stroke="#777" stroke-width="2"/><path d="M50 20Q80 12 110 20L105 38H55Z" fill="#25272c"/><rect x="58" y="22" width="44" height="6" rx="3" fill="#0b0b0b"/><rect x="34" y="39" width="18" height="9" rx="2" fill="#aaa"/><rect x="111" y="39" width="14" height="9" rx="2" fill="#666"/><circle cx="45" cy="60" r="6" fill="#222" stroke="#aaa" stroke-width="2"/><circle cx="68" cy="60" r="6" fill="#222" stroke="#aaa" stroke-width="2"/><circle cx="92" cy="60" r="6" fill="#222" stroke="#aaa" stroke-width="2"/><circle cx="115" cy="60" r="6" fill="#222" stroke="#aaa" stroke-width="2"/><rect x="77" y="38" width="6" height="6" fill="#e50914"/>'],
+    ds: ['DS', '<rect x="44" y="3" width="72" height="32" rx="5" fill="#c2c6cb"/><rect x="53" y="9" width="54" height="21" rx="2" fill="#253b44"/><path d="M44 37H116" stroke="#747c82" stroke-width="3"/><rect x="39" y="39" width="82" height="34" rx="5" fill="#c2c6cb"/><rect x="57" y="44" width="46" height="24" fill="#253b44"/><path d="M43 56h10m-5-5v10" stroke="#444" stroke-width="3"/><circle cx="113" cy="51" r="2" fill="#444"/><circle cx="108" cy="56" r="2" fill="#444"/><circle cx="118" cy="56" r="2" fill="#444"/><circle cx="113" cy="61" r="2" fill="#444"/>'],
+    genesis: ['MD', '<path d="M34 18H121Q136 18 138 31V61Q138 73 122 73H34Q20 73 20 61V31Q20 18 34 18" fill="#242424" stroke="#777" stroke-width="2"/><circle cx="86" cy="40" r="24" fill="#393939" stroke="#999" stroke-width="2"/><path d="M61 26H109" stroke="#0b0b0b" stroke-width="7"/><path d="M65 45H107" stroke="#a29a64" stroke-width="3"/><rect x="29" y="33" width="14" height="6" fill="#ddd"/><rect x="29" y="46" width="14" height="6" fill="#e50914"/><rect x="48" y="65" width="20" height="5" rx="2" fill="#111"/><rect x="87" y="65" width="20" height="5" rx="2" fill="#111"/>'],
+    psx: ['PS', '<rect x="26" y="14" width="108" height="56" rx="8" fill="#bababa"/><circle cx="82" cy="39" r="23" fill="#999" stroke="#777"/><circle cx="42" cy="29" r="6" fill="#70a9bd"/><circle cx="122" cy="55" r="6" fill="#999"/><path d="M58 66h46" stroke="#444" stroke-width="3"/>'],
+    '3ds': ['3DS', '<rect x="39" y="2" width="82" height="34" rx="6" fill="#3da5b5"/><rect x="45" y="7" width="70" height="25" rx="3" fill="#111b21"/><rect x="52" y="10" width="56" height="19" fill="#284d61"/><circle cx="80" cy="5" r="1" fill="#ddd"/><path d="M43 37H117" stroke="#226875" stroke-width="3"/><rect x="35" y="40" width="90" height="34" rx="6" fill="#3da5b5"/><rect x="59" y="45" width="42" height="24" rx="2" fill="#14242e"/><circle cx="47" cy="49" r="5" fill="#ddd"/><path d="M41 63h12m-6-5v10" stroke="#193a42" stroke-width="3"/><circle cx="113" cy="50" r="2" fill="#193a42"/><circle cx="108" cy="55" r="2" fill="#193a42"/><circle cx="118" cy="55" r="2" fill="#193a42"/><circle cx="113" cy="60" r="2" fill="#193a42"/>']
+  };
+  const cache = new Map();
+  function thumbnail(category) {
+    const types = new Set((category?.items || []).filter(item => !item.duplicate).map(item => item.type).filter(Boolean));
+    const key = category?.wrcadRecent ? 'recent' : types.size === 1 ? aliases[[...types][0]] : null;
+    if (!key) return null;
+    if (!cache.has(key)) {
+      const [label, shape] = artwork[key];
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 96"><rect width="160" height="96" fill="#0b0b0b"/>' + shape +
+        '<text x="80" y="90" text-anchor="middle" fill="#ddd" font-family="monospace" font-weight="bold" font-size="12" letter-spacing="3">' + label + '</text></svg>';
+      cache.set(key, 'data:image/svg+xml,' + encodeURIComponent(svg));
+    }
+    return cache.get(key);
+  }
+  window.WrcadCategoryArt = {thumbnail};
+})();

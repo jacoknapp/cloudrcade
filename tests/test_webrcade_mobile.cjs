@@ -3,6 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const query={matches:true,addEventListener(name,fn){this.change=fn;}};
 const document={documentElement:{toggleAttribute(){}},querySelector(){return null;}};
 const window={matchMedia:()=>query};
+vm.runInNewContext(fs.readFileSync('deploy/webrcade/touch/assets/category-art.js','utf8'),{window});
 vm.runInNewContext(fs.readFileSync('deploy/webrcade/touch/assets/mobile.js','utf8'),{window,document,MutationObserver:class{observe(){}}});
 const react={Component:class{},createElement:(type,props,...children)=>({type,ref:props?.ref,props:{...props,children}}),
  cloneElement:(el,props,...children)=>({...el,props:{...el.props,...props,...(children.length?{children}: {})}}),

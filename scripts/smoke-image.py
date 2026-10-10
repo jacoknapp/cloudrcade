@@ -108,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/touch-controls/brand.js' in html and '/cloud-saves/config.php' in html
             assert '/touch-controls/mobile.js?v=' in html and '/touch-controls/mobile.css?v=' in html
             assert '/touch-controls/menus.css?v=' in html
+            assert html.index('/touch-controls/category-art.js?v=') < html.index('/touch-controls/recently-played.js?v=') < html.index('/touch-controls/mobile.js?v=')
             assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
             apple = IconLinks(html).icons

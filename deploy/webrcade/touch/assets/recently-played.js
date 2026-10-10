@@ -125,7 +125,9 @@
         if (key && !index.has(key)) index.set(key, item);
       }
       data = {index, count: feed.getUniqueCategoryCount(),
-        categories: originals.map(category => ({...category, items: feed._expandItems(category.items)}))};
+        categories: originals.map(category => ({...category,
+          thumbnail: category.thumbnail || window.WrcadCategoryArt?.thumbnail(category),
+          items: feed._expandItems(category.items)}))};
       feeds.set(feed, data);
     }
     const keys = readHistory().filter(key => data.index.has(key));
@@ -134,6 +136,7 @@
       data.stamp = stamp;
       data.recent = {
         title: 'Recently Played', wrcadRecent: true,
+        thumbnail: window.WrcadCategoryArt?.thumbnail({wrcadRecent: true}),
         description: keys.length ? 'Your last 20 games, most recently played first. Syncs when connected to Nextcloud.' :
           'Play a game from a system folder below. It will appear here automatically.',
         items: feed._expandItems(keys.map(key => data.index.get(key))),
