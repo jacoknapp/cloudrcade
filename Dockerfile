@@ -21,7 +21,7 @@ COPY --from=upstream /var/www/html/ /var/www/html/
 COPY --from=upstream /var/www/cors.js /var/www/cors.js
 COPY --from=upstream /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf
 COPY --from=upstream /usr/local/bin/generate-certificate.sh /usr/local/bin/setup-https.sh /usr/local/bin/
-LABEL org.opencontainers.image.title="CloudRcade" \
+LABEL org.opencontainers.image.title="cloudRcade" \
       org.opencontainers.image.source="https://github.com/jacoknapp/cloudrcade" \
       org.opencontainers.image.description="Self-hosted webRcade fork with cloud saves and touch controls"
 COPY --from=overlays /out-pages /var/www/touch/pages
@@ -33,7 +33,7 @@ COPY LICENSE LICENSE-third-party NOTICE THIRD_PARTY.md /var/www/html/licenses/
 COPY LICENSES/ /var/www/html/licenses/texts/
 COPY deploy/webrcade/rom-library.conf /etc/apache2/conf-enabled/rom-library.conf
 COPY deploy/webrcade/environment.py deploy/webrcade/refresh-feed.py deploy/webrcade/service.py /usr/local/share/cloudrcade/
-ENV WEBRCADE_APP_NAME=CloudRcade WEBRCADE_STORAGE_PREFIX=cloudrcade \
+ENV WEBRCADE_APP_NAME=cloudЯcade WEBRCADE_STORAGE_PREFIX=cloudrcade \
     NEXTCLOUD_SAVE_FOLDER=CloudRcade WEBRCADE_ENABLE_3DS=true \
     WEBRCADE_ROM_ROOT=/var/www/html/content WEBRCADE_STATE_PATH=/data \
     WEBRCADE_SCAN_ENABLED=true WEBRCADE_SCAN_INTERVAL_SECONDS=21600

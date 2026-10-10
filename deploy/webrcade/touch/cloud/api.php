@@ -29,7 +29,7 @@ function upstream(string $method, string $path, ?array $auth = null, ?string $bo
     $etag = null;
     curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 60,
-        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => cloudConfig()['appName'] . ' cloud saves',
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => (trim((string)getenv('NEXTCLOUD_CLIENT_NAME')) ?: cloudConfig()['appName']) . ' cloud saves',
         CURLOPT_HTTPHEADER => array_merge(['OCS-APIRequest: true'], $headers),
         CURLOPT_HEADERFUNCTION => static function ($ch, $line) use (&$etag) {
             if (stripos($line, 'ETag:') === 0) $etag = trim(substr($line, 5));

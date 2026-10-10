@@ -22,7 +22,7 @@ def cloud_asset(name):
     revision = hashlib.sha256((Path(__file__).parent / 'touch/cloud' / name).read_bytes()).hexdigest()[:16]
     return '/cloud-saves/' + name + '?v=' + revision
 
-INCLUDE = ('<link rel="stylesheet" href="' + controller_asset('controller.css') + '">'
+INCLUDE = ('<script defer src="' + controller_asset('brand.js') + '"></script><link rel="stylesheet" href="' + controller_asset('controller.css') + '">'
            '<script defer src="' + controller_asset('controller.js') + '"></script>'
            '<script defer src="' + controller_asset('offline.js') + '"></script>')
 LIBRARY_INCLUDE = '<script defer src="' + controller_asset('brand.js') + '"></script><script defer src="' + controller_asset('offline.js') + '"></script>'
@@ -104,6 +104,10 @@ def overlay(relative, source, original, bundle, mains, tmp):
         original = original.replace('src="' + mains[0] + '"', 'src="' + bundle_url + '"', 1)
     # The adapter must run before inline webpack bootstrap code, not defer.
     original = original.replace('<head>', '<head>' + cloud, 1)
+    original = re.sub(r'<title>.*?</title>', '<title>cloudЯcade</title>', original, flags=re.S)
+    # Remove stock platform icons; the runtime brand adapter supplies project icons.
+    original = re.sub(r'<link\b[^>]*rel=["\'](?:icon|apple-touch-icon|manifest)["\'][^>]*>', '', original)
+    original = re.sub(r'(<meta\b[^>]*name="description"[^>]*content=")[^"]*(")', r'\1cloudЯcade — games in your browser.\2', original)
     target = ROOT / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     staged = target.with_suffix('.new')

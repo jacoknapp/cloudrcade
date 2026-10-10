@@ -1,4 +1,4 @@
-# CloudRcade
+# cloudRcade
 
 [![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 

@@ -131,7 +131,7 @@ The digital D-pad follows RetroArch's fixed-center eight-way model and default *
 
 ## Nextcloud saves
 
-Nextcloud is controlled by runtime environment variables. Enabling Nextcloud makes **Link** available in Cloud Storage settings; enabling automatic redirect starts login when webRcade opens online. Turning automatic redirect off keeps manual Link and connected save sync working. The browser uses native Nextcloud Login Flow v2; no Authentik installation or custom Nextcloud app is required. First authorization follows the server’s normal sign-in/approval flow. The optional trusted handoff used in this deployment can reuse an existing Nextcloud/Authentik session and grant automatically.
+Nextcloud is controlled by runtime environment variables. `WEBRCADE_APP_NAME` controls the wordmark, browser title and installable app name; the default is **cloudЯcade**, with a backwards R. To rebrand an existing trusted handoff without changing its client identity, set `NEXTCLOUD_CLIENT_NAME` to its original app name. Keep the existing storage prefix and save folder when upgrading. Enabling Nextcloud makes **Link** available in Cloud Storage settings; enabling automatic redirect starts login when webRcade opens online. Turning automatic redirect off keeps manual Link and connected save sync working. The browser uses native Nextcloud Login Flow v2; no Authentik installation or custom Nextcloud app is required. First authorization follows the server’s normal sign-in/approval flow. The optional trusted handoff used in this deployment can reuse an existing Nextcloud/Authentik session and grant automatically.
 
 | Container environment | Portable default | Behavior |
 | --- | --- | --- |

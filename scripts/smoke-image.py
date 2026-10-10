@@ -94,6 +94,12 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         with get('/play/') as response:
             html = response.read().decode()
             assert '/touch-controls/brand.js' in html and '/cloud-saves/config.php' in html
+            assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
+        with get('/cloud-saves/manifest.php') as response:
+            manifest = json.load(response)
+            assert manifest['name'] == 'Release Test Arcade' and manifest['start_url'] == '/play/'
+        with get('/touch-controls/cloudrcade-192.png') as response:
+            assert response.read(8) == b'\x89PNG\r\n\x1a\n'
         with get('/play/app/retro-azahar/') as response:
             assert '/arcade-bundles/retro-azahar/cloud-main.' in response.read().decode()
         # A second scan discovers newly added files without a container restart.

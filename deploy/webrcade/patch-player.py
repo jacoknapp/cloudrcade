@@ -72,7 +72,7 @@ def patch_bundle(raw):
  # CloudRcade modification: replace the upstream logo with the env app name.
  logo=b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:"web"}),Object(O.jsx)("img",{className:t+"-image",alt:"web\\u042fcade",src:n}),Object(O.jsx)("div",{className:t+"-right-text",children:"cade"})]'
  assert patched.count(logo)==1,'Unexpected upstream logo'
- patched=patched.replace(logo,b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:(window.WrcadCloudConfig&&window.WrcadCloudConfig.appName)||"CloudRcade"})]')
+ patched=patched.replace(logo,b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:(window.WrcadCloudConfig&&window.WrcadCloudConfig.appName)||"cloud\\u042fcade"})]')
 
  return re.sub(rb'([\"\'])wrcad(\.[A-Za-z0-9_.-]+)\1', lambda m: b'((window.WrcadCloudConfig&&window.WrcadCloudConfig.storagePrefix)||\"webrcade\")+'+b'\"'+m[2]+b'\"', patched)
 

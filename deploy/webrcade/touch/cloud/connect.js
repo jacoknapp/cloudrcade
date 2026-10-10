@@ -91,7 +91,7 @@
         poll(); return;
       }
       // Use this tab: delayed automatic popups are blocked on mobile browsers.
-      // The Nextcloud handoff accepts this POST only from the RetroArcade origin.
+      // The Nextcloud handoff accepts this POST only from a configured trusted origin.
       const form = document.createElement('form');
       form.method = 'POST'; form.action = data.start;
       const flow = document.createElement('input');

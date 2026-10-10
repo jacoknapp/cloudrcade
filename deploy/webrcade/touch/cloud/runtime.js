@@ -8,6 +8,6 @@
   } else {
     try { config = JSON.parse(localStorage.getItem(key)); } catch (_) {}
   }
-  window.WrcadCloudConfig = {appName:'CloudRcade', storagePrefix:'cloudrcade', saveFolder:'CloudRcade',
+  window.WrcadCloudConfig = {appName:'cloudЯcade', storagePrefix:'cloudrcade', saveFolder:'CloudRcade',
     feedUrl:'/content/feeds/combined.json', enabled:false, autoRedirect:false, accessAllowed:false, server:'', ...config};
 })();
