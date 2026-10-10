@@ -30,7 +30,9 @@ function cloudConfig(): array {
     if (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $folder) || in_array($folder, ['.', '..'], true)) $folder = 'CloudRcade';
     $feed = trim((string)getenv('WEBRCADE_FEED_URL')) ?: '/content/feeds/combined.json';
     if (!preg_match('~^/(?!/)[^\s\\\\]*$~D', $feed) && !validFeedUrl($feed)) $feed = '/content/feeds/combined.json';
-    return ['appName' => trim((string)getenv('WEBRCADE_APP_NAME')) ?: 'cloudЯcade',
+    $icon = __DIR__ . '/../assets/cloudrcade.svg';
+    $iconVersion = is_file($icon) ? substr(hash_file('sha256', $icon), 0, 16) : 'cabinet';
+    return ['appName' => trim((string)getenv('WEBRCADE_APP_NAME')) ?: 'cloudЯcade', 'iconVersion' => $iconVersion,
         'storagePrefix' => $prefix, 'saveFolder' => $folder, 'feedUrl' => $feed,
         'enable3DS' => cloudBool('WEBRCADE_ENABLE_3DS'),
         'n3dsKeysUrl' => cloudBool('WEBRCADE_ENABLE_3DS') && n3dsKeysPath() !== '' ? '/cloud-saves/3ds-keys.php' : '',
