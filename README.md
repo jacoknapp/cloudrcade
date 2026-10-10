@@ -39,8 +39,10 @@ CI authenticates using GitHub's built-in token; no Docker Hub secret is required
 Phones and touch tablets use a full-viewport library in portrait and landscape,
 with the same dark theme, system folders, Recently Played, all-game search,
 feed URL/file import and native settings/cloud saves. Desktop keeps its original
-carousel. Game details open in a touch-friendly panel; Play uses the same native
-launcher and on-demand emulator cores. Large folders show 48 cards per page with
+carousel. The mobile layout uses compact typography, three columns on phones and local
+retro console artwork for system folders, with the original charcoal/red colors.
+Game details open in a touch-friendly panel; Play uses the same native launcher
+and on-demand emulator cores. Large folders show 48 cards per page with
 lazy artwork. The mobile cards, details and search caches are released while a
 game runs, and the native exit flow disposes its emulator frame before returning
 to the library. Save locations and controller preferences are shared with desktop.

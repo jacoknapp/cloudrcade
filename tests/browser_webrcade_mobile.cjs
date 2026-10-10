@@ -56,6 +56,9 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
    await capture(name);
   }
   await fits(390,844,'mobile-phone');
+  assert.equal(await page.locator('.cr-mobile-cards').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),3,'phone grid fits three compact cards');
+  const chromeHeight=await page.locator('.cr-mobile-library').evaluate(el=>['.header-nav','.cr-mobile-toolbar'].reduce((height,selector)=>height+el.querySelector(selector).getBoundingClientRect().height,0));
+  assert(chromeHeight<=150,'phone navigation leaves space for games: '+chromeHeight);
   await page.waitForTimeout(500);assert((await page.locator('meta[name="viewport"]').getAttribute('content')).includes('viewport-fit=cover'),'safe-area viewport survives iOS native setup');
   await fits(844,390,'mobile-landscape');await fits(768,1024,'mobile-tablet');await fits(390,844,'mobile-phone');
   assert.equal(coreRequests.length,0,'library does not preload emulator cores');

@@ -10,7 +10,7 @@ const react={Component:class{},createElement:(type,props,...children)=>({type,re
 const h=react.createElement;
 class Details{render(){}}
 class Slider{static contextType={};}
-let launches=[],settings=0,selected=[];
+let launches=[],settings=0,selected=[],thumbnail='/thumb.png';
 const games=Array.from({length:120},(_,i)=>({title:'Game '+i,type:'nes',props:{uid:'save-'+i,rom:'/content/'+i+'.nes'}}));
 const category={title:'NES',items:games};
 const feed={getCategories:()=>[category],getTitle:()=> 'Synthetic arcade'};
@@ -30,7 +30,7 @@ class Browse {
    h('message',{}),h('div',{className:'header-nav'},h('button',{ref:this.settingsRef,onClick:this.props.onSettings})),
    h(Details,{backgroundSrc:'/art.png',title:this.state.currentItem.title,buttons:h('fragment',{},h('button',{onClick:primary}))}),
    h(Slider,{ref:this.sliderRef,items:this.state.menuMode==='categories'?[category]:[...games,{...games[0],duplicate:true}],
-    getTitle:item=>item.title,getThumbnailSrc:()=>'/thumb.png',getDefaultThumbnailSrc:()=>'/fallback.png'}))));
+    getTitle:item=>item.title,getThumbnailSrc:()=>thumbnail,getDefaultThumbnailSrc:()=>'/fallback.png'}))));
  }
 }
 function all(el,predicate){return (!el||typeof el!=='object')?[]:[...(predicate(el)?[el]:[]),...(el.props?.children||[]).flat(Infinity).flatMap(child=>all(child,predicate))];}
@@ -38,7 +38,11 @@ window.WrcadMobile.install({react,Browse,GamepadEnum:{A:'a'}});
 const browse=new Browse();browse.componentDidMount();browse.output=browse.render();
 function grid(){const el=all(browse.output,el=>el.ref===browse.sliderRef)[0];const instance=new el.type();instance.props=el.props;return instance;}
 let cards=all(grid().render(),el=>el.props?.className==='cr-mobile-card');
-assert.equal(cards.length,1);cards[0].props.onClick();
+assert.equal(cards.length,1);
+assert.equal(all(cards[0],el=>el.type==='img')[0].props.src,'/thumb.png','custom category art stays intact');
+thumbnail='/fallback.png';browse.output=browse.render();
+assert(all(grid().render(),el=>el.type==='img')[0].props.src.startsWith('data:image/svg+xml,'),'default folders use local retro system art');
+thumbnail='/thumb.png';cards[0].props.onClick();
 assert.equal(browse.state.menuMode,'apps','system card invokes native Select');
 cards=all(grid().render(),el=>el.props?.className==='cr-mobile-card');
 assert.equal(cards.length,48,'large feed and slider duplicates do not inflate mounted cards');
