@@ -8,6 +8,7 @@ COPY deploy/webrcade/patch-player.py deploy/webrcade/prepare-touch.py deploy/web
 COPY src/react/screens/releasenotes/notes.json ./release-notes.json
 COPY deploy/webrcade/touch/ ./touch/
 COPY release/3ds/app/ /extra/retro-azahar/
+COPY release/psp/app/ /extra/retro-ppsspp/
 RUN WEBRCADE_SOURCE_ROOT=/source WEBRCADE_PLAYER_OUTPUT=/out-player.js python3 patch-player.py \
  && WEBRCADE_SOURCE_ROOT=/source WEBRCADE_EXTRA_APPS=/extra WEBRCADE_TOUCH_ROOT=/out-pages python3 prepare-touch.py
 
@@ -30,6 +31,8 @@ COPY --from=overlays /out-player.js /var/www/html/play/static/js/main.7ac86965.c
 COPY deploy/webrcade/touch /var/www/touch
 COPY release/3ds/app/ /var/www/touch/apps/retro-azahar/
 COPY release/3ds/sources/ /var/www/html/licenses/sources/
+COPY release/psp/app/ /var/www/touch/apps/retro-ppsspp/
+COPY release/psp/sources/ /var/www/html/licenses/sources/
 COPY LICENSE LICENSE-third-party NOTICE THIRD_PARTY.md /var/www/html/licenses/
 COPY LICENSES/ /var/www/html/licenses/texts/
 COPY deploy/webrcade/rom-library.conf /etc/apache2/conf-enabled/rom-library.conf

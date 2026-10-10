@@ -3,7 +3,8 @@ An independently maintained fork of webRcade (https://github.com/webrcade/webrca
 Original webRcade copyright and Apache-2.0 license notices are retained.
 CloudRcade modifications, 2026: configurable deployment, Nextcloud integration,
 touch controls, offline caching, library/history, clock handling, PlayStation
-streaming, and optional Azahar-based 3DS application and runtime BIOS loading.
+streaming, optional Azahar-based 3DS application and runtime BIOS loading, and
+experimental PPSSPP-based PSP support.
 The scanner runs inside the app at startup and on an env-configured schedule.
 This project is not endorsed by webRcade, Nintendo, or the emulator authors.
 Emulator cores, source patches, dependencies and the Nextcloud app retain their

@@ -10,7 +10,8 @@ upstream project's trademarks. Original notices are retained in source files.
 | webRcade frontend and app wrappers | [Apache-2.0](LICENSE), [upstream](https://github.com/webrcade/webrcade); pinned release runtime digest is in `Dockerfile`. |
 | CloudRcade standalone deployment/browser additions | Apache-2.0; changes are listed in `NOTICE` and tracked in this fork. |
 | Azahar libretro core | [GPL-2.0-or-later](LICENSES/Azahar-GPL-2.0.txt), [EmulatorJS fork](https://github.com/EmulatorJS/azahar/tree/62cfcfb5e488f158f5f7ba83b725bb0ddd04da44); patches and build script are in `deploy/webrcade/retro-azahar`. |
-| RetroArch 3DS runtime | [GPL-3.0-or-later](LICENSES/RetroArch-GPL-3.0.txt), [EmulatorJS fork](https://github.com/EmulatorJS/RetroArch/tree/1eb5edf2b3becf0a7b29520a34545628db0c5416); modified corresponding source is included with the image. |
+| PPSSPP experimental PSP core | [GPL-2.0-or-later](LICENSES/PPSSPP-GPL-2.0.txt), [EmulatorJS fork](https://github.com/EmulatorJS/ppsspp/tree/fa917ebd212e083912d742c830eecb242b6a98ae); pinned build and adapter are in `deploy/webrcade/retro-ppsspp`. FFmpeg and bundled dependencies retain their own notices in corresponding source. |
+| RetroArch 3DS/PSP runtime | [GPL-3.0-or-later](LICENSES/RetroArch-GPL-3.0.txt), [EmulatorJS fork](https://github.com/EmulatorJS/RetroArch/tree/1eb5edf2b3becf0a7b29520a34545628db0c5416); modified corresponding source is included with the image. |
 | Nextcloud handoff app | [AGPL-3.0](integrations/nextcloud/LICENSE); complete source is in `integrations/nextcloud/retroarcade_login`. Keep its app ID/namespace stable when upgrading an existing installation. |
 | Stock bundled emulator cores | Their individual licenses apply; wrapper Apache licenses do not relicense the cores. Follow each [upstream app repository](https://github.com/webrcade) for core source, notices and build references. |
 
@@ -39,3 +40,8 @@ Other JavaScript and system dependencies retain their own package notices and
 licenses. No Nintendo keys, BIOS dumps or games are supplied by this project;
 the 3DS key-scrambler constant is emulator algorithm code, with preset slots
 removed. An operator must provide any runtime BIOS/key material they need.
+
+The PSP build ships its corresponding patched sources, submodules and wrapper
+lockfiles at `/licenses/sources/psp-source.tar.gz`. Its build script pins the
+core, RetroArch, wrapper, scaffold, filesystem dependency and Emscripten.
+No PSP games or BIOS dumps are bundled.

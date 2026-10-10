@@ -103,7 +103,7 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 #wrcad-touch .kt-cbuttons button:nth-child(4) { top: 88px; left: 28px; }
 @media (max-width: 460px) { #wrcad-touch.kt-n64 .kt-pad, #wrcad-touch.kt-3ds .kt-pad { height: 370px; } #wrcad-touch.kt-n64 .kt-cbuttons { bottom: 192px; } }
 @media (max-width: 599px) {
-  #wrcad-touch.kt-n64 .kt-extra-dpad, #wrcad-touch.kt-3ds .kt-extra-dpad { left: 0; bottom: 190px; }
+  #wrcad-touch.kt-n64 .kt-extra-dpad, #wrcad-touch.kt-3ds .kt-extra-dpad, #wrcad-touch.kt-psp .kt-extra-dpad { left: 0; bottom: 190px; }
   #wrcad-touch.kt-dualshock .kt-pad { height: 370px; }
   #wrcad-touch.kt-3ds .kt-c-stick { right: 0; bottom: 204px; }
   #wrcad-touch.kt-dualshock .kt-dpad, #wrcad-touch.kt-dualshock .kt-actions { bottom: 176px; }

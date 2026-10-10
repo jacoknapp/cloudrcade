@@ -1,7 +1,7 @@
 name: Docker release
 on:
   push:
-    branches: [master]
+    branches: [master, beta/psp-core]
     tags: ['v*']
   pull_request:
     branches: [master]
@@ -34,6 +34,8 @@ jobs:
           python3 scripts/test.py
       - name: Prepare key-free 3DS app and corresponding source
         run: python3 scripts/prepare-core.py
+      - name: Build experimental PSP app and corresponding source
+        run: bash deploy/webrcade/retro-ppsspp/build.sh
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -52,7 +54,7 @@ jobs:
         run: |
           image="ghcr.io/${REPOSITORY,,}"
           echo "web=$image:sha-$COMMIT" >> "$GITHUB_OUTPUT"
-          if [ "$REF_NAME" = master ]; then tag=latest; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
+          if [ "$REF_NAME" = master ]; then tag=latest; elif [ "$REF_NAME" = beta/psp-core ]; then tag=beta-psp-core; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
           echo "web_alias=$image:$tag" >> "$GITHUB_OUTPUT"
       - name: Build app image
         uses: docker/build-push-action@v6

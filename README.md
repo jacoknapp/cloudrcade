@@ -18,6 +18,8 @@ Start with [your first game](docs/wiki/quick-start.md#play-your-first-game). The
 - [Nextcloud Link, connection status, Manage and reconnecting](docs/wiki/nextcloud-and-access.md).
 - [Streaming, offline play and 3DS performance](docs/wiki/streaming-offline-and-3ds.md).
 
+PSP support is experimental and off by default. Turn it on in **Settings → Experimental Settings → Enable PSP (experimental)**; no Docker setting is needed. Place PSP games under `roms/psp/roms/`. HTTPS and WebGL2 are required.
+
 <a id="nextcloud-and-sso"></a>
 
 Nextcloud is visible in **Settings → Cloud Storage** when the operator enables it. You can check the account, link it manually and manage the connection. The operator may also configure automatic sign-in. Browser-local saves work without a cloud connection for supported games. The inherited Dropbox option appears only when the upstream runtime supports linking on the current site. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) covers Dropbox shared-file hosting, its inherited account screen and Google Drive source files. Native Dropbox and Drive save synchronization are not supported end to end in this release.
@@ -60,4 +62,4 @@ The release uses a pinned upstream runtime with hash-checked overlays. Editing i
 
 No ROM, BIOS, key set or console backup is supplied. Encrypted 3DS games require your own compatible Citra-format `aes_keys.txt` in an external read-only mount. Runtime keys are never part of offline caches or ordinary save ZIPs.
 
-The frontend and standalone deployment additions use Apache 2.0 with attribution retained. Emulator cores and the optional Nextcloud app have separate licenses, including GPL/AGPL and noncommercial terms. The full bundle is not wholly Apache-licensed or unrestricted for commercial redistribution. Read [privacy and licenses](docs/wiki/privacy-and-licenses.md), [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md). Modified 3DS corresponding source ships at `/licenses/sources/3ds-source.tar.gz` in the image.
+The frontend and standalone deployment additions use Apache 2.0 with attribution retained. Emulator cores and the optional Nextcloud app have separate licenses, including GPL/AGPL and noncommercial terms. The full bundle is not wholly Apache-licensed or unrestricted for commercial redistribution. Read [privacy and licenses](docs/wiki/privacy-and-licenses.md), [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md). Modified 3DS and PSP corresponding source ships at `/licenses/sources/3ds-source.tar.gz` and `/licenses/sources/psp-source.tar.gz` in the image.

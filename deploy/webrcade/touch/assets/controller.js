@@ -155,6 +155,7 @@
     '3ds': ['3ds', 'retro-azahar'],
     genesis: ['genesis', 'genplusgx-md', 'retro-genplusgx-md', 'retro-genesis'],
     psx: ['psx', 'beetle-psx'],
+    psp: ['psp', 'retro-ppsspp'],
   };
   const core = launchProps?.type || emulatorPath;
   const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || emulatorPath;
@@ -285,7 +286,7 @@
       system === 'psx' ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
-  configureDirection(stick, n64 || n3ds ? 'analog' : 'digital');
+  configureDirection(stick, n64 || n3ds || system === 'psp' ? 'analog' : 'digital');
   function addDirection(id, kind, index, className) {
     const element = stick.cloneNode(true);
     element.dataset.layoutId = id;
@@ -294,7 +295,7 @@
     pad.append(element); directions.push(element);
     return element;
   }
-  if (n64 || n3ds) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
+  if (n64 || n3ds || system === 'psp') addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
   if (n3ds) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
   const psxSticks = system === 'psx' ? [
     addDirection('stick-left', 'analog', 0, 'kt-analog-left'),
@@ -428,6 +429,7 @@
   });
   host.classList.toggle('kt-n64', n64);
   host.classList.toggle('kt-3ds', n3ds);
+  host.classList.toggle('kt-psp', system === 'psp');
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
   if (['nes', 'gb', 'gbc', 'gba', 'snes', 'nds'].includes(system)) {
@@ -459,10 +461,16 @@
     $('[data-cid="11"]').hidden = true;
     $('[data-cid="12"]').hidden = true;
   }
-  if (system === 'psx') {
+  if (system === 'psx' || system === 'psp') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
     $('[data-cid="8"]').textContent = 'L1';
     $('[data-cid="9"]').textContent = 'R1';
+    if (system === 'psp') {
+      $('[data-cid="8"]').textContent = 'L';
+      $('[data-cid="9"]').textContent = 'R';
+      $('[data-cid="10"]').hidden = true;
+      $('[data-cid="11"]').hidden = true;
+    }
   }
   // Add hit surfaces after platform labels, which replace each button's content.
   // Near misses stay out of native game touch handling. Menu still needs a direct
