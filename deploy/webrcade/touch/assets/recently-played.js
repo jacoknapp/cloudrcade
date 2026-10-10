@@ -265,4 +265,9 @@
   window.addEventListener('focus', () => schedule(0));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(0); });
   window.WrcadRecent = {install, sync};
+  // The bridge loads before this adapter, so its startup sync cannot reach us.
+  // Restore this account's cached history before Browse renders, then fetch the
+  // cloud history without requiring focus, another launch or a manual action.
+  activate();
+  schedule(0);
 })();

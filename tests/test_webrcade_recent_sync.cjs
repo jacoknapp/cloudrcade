@@ -25,6 +25,24 @@ function client(uid = 'alice') {
   };
 }
 (async () => {
+  // A fresh linked browser restores cloud history without a focus/visibility event.
+  server.set('startup', {revision:1, doc:{version:1, entries:[{key:key(8),playedAt:100}]}});
+  const cold = fixture({cloud:client('startup')});
+  assert.equal(cold.recent().length, 0);
+  await cold.startup();
+  assert.equal(cold.recent()[0].title, 'Game 8');
+  assert.equal(cold.browse.state.currentItem.title, 'Recently Played');
+  // The mirror may be absent or belong to the previous account. The account
+  // cache is restored immediately even if Nextcloud is currently unavailable.
+  const stored = new Map([
+    ['wrcad.recently-played.sync.v1.owner', JSON.stringify('previous')],
+    ['wrcad.recently-played.sync.v1.' + JSON.stringify('cached'), JSON.stringify([{key:key(9),playedAt:100}])],
+  ]);
+  const offline = client('cached');offline.offline = true;
+  const cached = fixture({cloud:offline, raw:JSON.stringify([key(10)]), data:stored});
+  assert.deepEqual(JSON.parse(cached.raw()), [key(9)]);
+  await cached.startup();assert.equal(offline.recentStatus, 'pending');
+  assert.equal(cached.recent()[0].title, 'Game 9');
   const ca = client(), a = fixture({cloud: ca, raw: JSON.stringify([key(0), key(1)])});
   await a.sync();
   assert.deepEqual(server.get('alice').doc.entries.map(e => e.key), [key(0), key(1)]);

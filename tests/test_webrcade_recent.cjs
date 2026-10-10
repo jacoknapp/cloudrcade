@@ -6,11 +6,14 @@ const source = fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/as
 const key = 'wrcad.recently-played.v1';
 function fixture({raw = null, denyRead = false, denyWrite = false, rename = {}, cloud, data = new Map()} = {}) {
   const events = {};
+  const timers = [];
   const localStorage = {getItem: name => {if (denyRead) throw Error('denied');return name === key ? raw : data.get(name) || null;},
     setItem: (name, value) => {if (denyWrite) throw Error('denied');if (name === key) raw = value;else data.set(name, value);}};
   const window = {WrcadCloudConfig:{storagePrefix:'wrcad'},WrcadCloud: cloud, addEventListener: (name, fn) => events[name] = fn};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/assets/category-art.js'), 'utf8'), {window});
-  vm.runInNewContext(source, {window, localStorage, document: {addEventListener() {}}, setTimeout: () => 1, clearTimeout() {}});
+  vm.runInNewContext(source, {window, localStorage, document: {addEventListener() {}},
+    setTimeout: (fn, delay) => {timers.push({fn, delay});return timers.length;},
+    clearTimeout: id => {if (timers[id - 1]) timers[id - 1].cleared = true;}});
   class Browse {
     static ModeEnum = {CATEGORIES: 'categories'};
     static getDerivedStateFromProps(props, state) {return props.feed !== state?.feed ? {feed: props.feed, menuMode: 'apps'} : null;}
@@ -39,6 +42,7 @@ function fixture({raw = null, denyRead = false, denyWrite = false, rename = {}, 
   const exit = () => {library.state.mode = 'browse';library.componentDidUpdate({}, {mode: 'app'});};
   const recent = () => feed.getCategories().find(c => c.wrcadRecent)?.items || [];
   return {items, feed, browse, launch, exit, recent, original, data, sync: window.WrcadRecent.sync,
+    startup: () => timers.find(timer => timer.delay === 0 && !timer.cleared)?.fn(),
     raw: () => raw, storage: value => {raw = value;events.storage({key});}};
 }
 {

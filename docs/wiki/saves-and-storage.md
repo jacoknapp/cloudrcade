@@ -50,6 +50,8 @@ Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, the pu
 
 Recently Played merges each game's latest timestamp across connected devices and keeps the newest 20 matching entries. Local history imports on first connection; account changes do not import another account's history. Reconnection, reload and returning to the tab refresh history.
 
+On startup, the app restores the connected account's cached history immediately and loads its Nextcloud history automatically. Cached entries remain available when that request fails or you are offline; matching games appear as soon as the feed is ready.
+
 Controller settings merge preferences and per-platform/orientation layouts independently. Explicit later edits win for the same setting/layout. Save publishes a layout; Cancel does not. Arriving cloud preferences do not discard unsaved layout drags. Offline edits retry for the account to which they belong.
 
 ## Clocks and 3DS auxiliary data
