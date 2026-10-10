@@ -18,17 +18,18 @@
     '3ds': ['3DS', '<rect x="39" y="2" width="82" height="34" rx="6" fill="#3da5b5"/><rect x="45" y="7" width="70" height="25" rx="3" fill="#111b21"/><rect x="52" y="10" width="56" height="19" fill="#284d61"/><circle cx="80" cy="5" r="1" fill="#ddd"/><path d="M43 37H117" stroke="#226875" stroke-width="3"/><rect x="35" y="40" width="90" height="34" rx="6" fill="#3da5b5"/><rect x="59" y="45" width="42" height="24" rx="2" fill="#14242e"/><circle cx="47" cy="49" r="5" fill="#ddd"/><path d="M41 63h12m-6-5v10" stroke="#193a42" stroke-width="3"/><circle cx="113" cy="50" r="2" fill="#193a42"/><circle cx="108" cy="55" r="2" fill="#193a42"/><circle cx="118" cy="55" r="2" fill="#193a42"/><circle cx="113" cy="60" r="2" fill="#193a42"/>']
   };
   const cache = new Map();
-  function thumbnail(category) {
+  function thumbnail(category, withLabel = true) {
     const types = new Set((category?.items || []).filter(item => !item.duplicate).map(item => item.type).filter(Boolean));
     const key = category?.wrcadRecent ? 'recent' : types.size === 1 ? aliases[[...types][0]] : null;
     if (!key) return null;
-    if (!cache.has(key)) {
+    const cacheKey = key + (withLabel ? ':label' : ':plain');
+    if (!cache.has(cacheKey)) {
       const [label, shape] = artwork[key];
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 96"><rect width="160" height="96" fill="#0b0b0b"/>' + shape +
-        '<text x="80" y="90" text-anchor="middle" fill="#ddd" font-family="monospace" font-weight="bold" font-size="12" letter-spacing="3">' + label + '</text></svg>';
-      cache.set(key, 'data:image/svg+xml,' + encodeURIComponent(svg));
+        (withLabel ? '<text x="80" y="90" text-anchor="middle" fill="#ddd" font-family="monospace" font-weight="bold" font-size="12" letter-spacing="3">' + label + '</text>' : '') + '</svg>';
+      cache.set(cacheKey, 'data:image/svg+xml,' + encodeURIComponent(svg));
     }
-    return cache.get(key);
+    return cache.get(cacheKey);
   }
   window.WrcadCategoryArt = {thumbnail};
 })();

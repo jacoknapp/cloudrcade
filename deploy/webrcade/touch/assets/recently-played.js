@@ -194,8 +194,19 @@
     const current = browse.state.currentItem;
     if (element.ref === browse.button1Ref && current?.wrcadRecent && !current.items.length)
       return react.cloneElement(element, {disabled: true, onClick: undefined});
-    if (element.ref === browse.sliderRef)
-      return react.cloneElement(element, {lastItemTitle: current?.title});
+    if (element.ref === browse.sliderRef) {
+      const props = {lastItemTitle: current?.title};
+      if (!document.documentElement?.hasAttribute?.('data-cr-mobile')) {
+        const getThumbnailSrc = element.props.getThumbnailSrc;
+        props.getThumbnailSrc = item => {
+          const src = getThumbnailSrc(item);
+          const art = window.WrcadCategoryArt;
+          // The desktop carousel renders its own title over the thumbnail.
+          return src && src === art?.thumbnail(item) ? art.thumbnail(item, false) : src;
+        };
+      }
+      return react.cloneElement(element, props);
+    }
     const props = {};
     if (element.props.buttons) props.buttons = decorateCategories(element.props.buttons, browse);
     const children = element.props.children;
