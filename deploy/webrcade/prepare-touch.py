@@ -52,7 +52,7 @@ def overlay(relative, source, original, bundle, mains, tmp):
         cloud += '<link rel="stylesheet" href="' + controller_asset('mobile.css') + '"><script src="' + controller_asset('mobile.js') + '"></script>'
         # The upstream filename hash does not change when we patch it.
         # Give each local patch revision a new URL to bypass old caches.
-        revision = hashlib.sha256(Path(__file__).with_name('patch-player.py').read_bytes()).hexdigest()[:16]
+        revision = runpy.run_path(str(Path(__file__).with_name('patch-player.py')))['player_revision']()
         original = original.replace('src="' + mains[0] + '"',
             'src="' + mains[0] + '?wrcad=' + revision + '"', 1)
     # Emulator builds concatenate these classes inside one module, so

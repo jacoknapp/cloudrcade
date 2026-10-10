@@ -8,6 +8,7 @@ import hashlib
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import runpy
 import ssl
 import subprocess
 import sys
@@ -109,12 +110,19 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/touch-controls/mobile.js?v=' in html and '/touch-controls/mobile.css?v=' in html
             assert '/touch-controls/menus.css?v=' in html
             assert html.index('/touch-controls/category-art.js?v=') < html.index('/touch-controls/recently-played.js?v=') < html.index('/touch-controls/mobile.js?v=')
+            revision = runpy.run_path('deploy/webrcade/patch-player.py')['player_revision']()
+            assert '?wrcad=' + revision in html, 'player URL must include current notes as well as patch code'
             assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
             apple = IconLinks(html).icons
             assert len(apple) == 1 and apple[0]['sizes'] == '180x180', 'Apple icon must exist before JS runs'
             with get(apple[0]['href']) as icon:
                 assert icon.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()
+        with get('/play/static/js/main.7ac86965.chunk.js') as response:
+            player = response.read().decode()
+            notes = json.loads(Path('src/react/screens/releasenotes/notes.json').read_text())
+            assert json.dumps(notes, ensure_ascii=True, separators=(',', ':')) in player, 'published player must embed the current fork notes'
+            assert 'WEB\\u042fCADE UPDATED' not in player, 'old upstream notes heading must not be rendered'
         for path in ['/apple-touch-icon.png', '/apple-touch-icon-precomposed.png']:
             with get(path) as response:
                 assert response.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()

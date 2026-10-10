@@ -8,6 +8,8 @@ Keyboard and gamepad input remain available alongside touch controls. Use the em
 
 Use the native pause menu to change game settings, consult controls, manage available state slots, resume, or exit. On touch devices, use the controller's **Menu** button. Tapping an empty part of the game is not the pause shortcut. Menus use compact black/red panels on mobile; portrait actions stack and landscape uses two columns. Settings keep their page arrows and OK/Cancel buttons in the same place as you switch pages; longer content scrolls inside the panel. The touch controller's drawer retains its blue/aqua styling.
 
+The startup **Updated** popup shows current cloudЯcade changes and streaming/shader notes. On mobile, its notes scroll above a fixed footer; **Don't show again** and **OK** stay separate and tappable in portrait or landscape. Choosing Don't show again and then OK remembers your preference in this browser. The optional update popup waits for the library and does not open over another active dialog or a running game.
+
 ## Open the touch drawer
 
 While a game is running, tap the **‹** edge tab or pull it inward. The tab is hidden in the library, during loading and in the native pause menu. Opening the drawer hides game buttons so you can use the panel without accidental input.

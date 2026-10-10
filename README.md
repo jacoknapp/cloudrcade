@@ -55,6 +55,8 @@ in portrait and use two columns in landscape. Settings navigation and action
 buttons stay in place across pages while longer content scrolls inside. The touch controller and its
 pop-out retain their original blue/aqua styling.
 The loading logo and status fit mobile viewports and remain visible during slow loads.
+The startup update popup shows current fork notes, with compact mobile text and
+separate fixed controls for **Don't show again** and **OK**.
 Background offline-worker updates make no protected requests during sign-in;
 the loaded app warms its library and feed afterward.
 Game details open in a touch-friendly panel; Play uses the same native launcher

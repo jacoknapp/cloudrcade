@@ -200,7 +200,9 @@ export class Webrcade extends Component {
         if (initial) {
           if (!settings.getHideVersionInfo()) {
             setTimeout(() => {
-              this.ctx.showReleaseNotes(true);
+              if (this.state.mode === this.ScreenEnum.BROWSE && !this.ctx.isDialogOpen()) {
+                this.ctx.showReleaseNotes(true);
+              }
             }, 0);
           }
         }

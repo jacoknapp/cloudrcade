@@ -5,6 +5,7 @@ FROM python:3.12-alpine AS overlays
 COPY --from=upstream /var/www/html/play /source/play
 WORKDIR /work
 COPY deploy/webrcade/patch-player.py deploy/webrcade/prepare-touch.py deploy/webrcade/patch-clock-core.py deploy/webrcade/patch-psx-stream.py ./
+COPY src/react/screens/releasenotes/notes.json ./release-notes.json
 COPY deploy/webrcade/touch/ ./touch/
 COPY release/3ds/app/ /extra/retro-azahar/
 RUN WEBRCADE_SOURCE_ROOT=/source WEBRCADE_PLAYER_OUTPUT=/out-player.js python3 patch-player.py \

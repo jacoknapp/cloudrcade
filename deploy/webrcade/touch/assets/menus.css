@@ -36,7 +36,22 @@
   ._E4PtH ._6miOA:only-child { grid-column: 1 / -1; }
   ._QxYEW button:focus-visible, ._QxYEW [tabindex]:focus-visible { outline: 2px solid #e50914; outline-offset: -2px; }
   ._QxYEW ._6miOA img { width: 18px; height: 18px; }
-  .release-screen-dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .release-screen-dialog { width: min(440px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right))); min-height: 0; height: auto; max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); background: #0b0b0b; border: 1px solid #e50914; border-radius: 8px; box-sizing: border-box; opacity: 1; animation: none; }
+  .release-screen-heading { flex-shrink: 0; padding: 14px 16px; background: #141414; border-bottom: 1px solid #e50914; color: #eee; font: 700 17px/1.3 Quicksand, sans-serif; letter-spacing: .08em; overflow-wrap: anywhere; }
+  .release-screen-content { flex: 1 1 auto; min-height: 0; padding: 16px; overscroll-behavior: contain; }
+  .release-item { margin-bottom: 0; }
+  .release-meta { gap: 8px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
+  .release-title { font-size: 20px; line-height: 1.3; margin-bottom: 16px; }
+  .change-item { font-size: 14px; line-height: 1.5; padding-left: 16px; margin-bottom: 12px; }
+  .change-item:last-child { margin-bottom: 0; }
+  .change-item::before { color: #e50914; font-size: 14px; }
+  .sub-change-list { padding: 8px 0 0 12px; }
+  .sub-change-item { font-size: 14px; line-height: 1.5; margin-bottom: 8px; }
+  .release-screen-buttons { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: #141414; border-top: 1px solid #252525; }
+  .release-buttons-left-group { padding: 0; transform: none; gap: 8px; align-items: center; min-width: 0; }
+  .dont-show-again-text { font-size: 13px; line-height: 1.3; margin: 0; }
+  .release-buttons-centered { position: static; left: auto; transform: none; flex-shrink: 0; }
+  .release-screen-buttons ._6miOA { min-width: 60px; min-height: 44px; margin: 0; padding: 8px 14px; font: 600 14px/1.3 Quicksand, sans-serif; border: 1px solid #e50914; border-radius: 4px; background: #b0070f; color: #fff; box-sizing: border-box; }
   ._36jkv { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; border-bottom: 1px solid #252525; }
   ._1YZKt { width: auto; margin: 0; min-height: 40px; font: 14px/1.4 Quicksand, sans-serif; align-items: flex-start; }
   ._1YZKt:first-child { align-items: center; }

@@ -5,9 +5,9 @@ import {
   Resources,
   Screen,
   WebrcadeContext,
-  ReleaseData,
   TEXT_IDS
 } from '@webrcade/app-common';
+import ReleaseNotes from './notes.json';
 
 require("./style.scss");
 
@@ -102,14 +102,15 @@ export default class ReleaseNotesScreen extends Screen {
     let { notes, onClose } = this.props;
     const { focusGrid, okButtonRef, dontShowSwitchRef, screenContext, screenStyles } = this;
 
-    notes = ReleaseData;
+    notes = ReleaseNotes;
+    const appName = window.WrcadCloudConfig?.appName || 'cloudЯcade';
 
     return (
       <WebrcadeContext.Provider value={screenContext}>
         <div className={screenStyles['screen-transparency']}/>
-        <div className="release-screen-dialog">
+        <div className="release-screen-dialog" role="dialog" aria-modal="true" aria-label={appName + ' updates'}>
           <div className="release-screen-heading">
-            WEBЯCADE UPDATED
+            {appName + ' updated'}
           </div>
 
           <div className="release-screen-content" ref={this.contentRef}>
@@ -140,7 +141,7 @@ export default class ReleaseNotesScreen extends Screen {
           </div>
 
           <div className="release-screen-buttons">
-            <div class="release-buttons-left-group">
+            <div className="release-buttons-left-group">
               <Switch
                 ref={dontShowSwitchRef}
                 onPad={e => focusGrid.moveFocus(e.type, dontShowSwitchRef)}
@@ -149,7 +150,7 @@ export default class ReleaseNotesScreen extends Screen {
               />
               <div className="dont-show-again-text">Don't show again</div>
             </div>
-            <div class="release-buttons-centered">
+            <div className="release-buttons-centered">
               <ImageButton
                 ref={okButtonRef}
                 label={Resources.getText(TEXT_IDS.OK)}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Patch the pinned library for N64 defaults and the Recently Played adapter."""
-import hashlib,os,subprocess,re
+import hashlib,json,os,subprocess,re
 from pathlib import Path
 IMAGE='webrcade/webrcade@sha256:77789de80c2963d58631b57306335638eec8f6425c66b7d6868576f0ea5f7a49'
 ASSET='/var/www/html/play/static/js/main.7ac86965.chunk.js'
@@ -8,6 +8,15 @@ ASSET='/var/www/html/play/static/js/main.7ac86965.chunk.js'
 EXPECTED_SHA='fc22663804c2fe3445a63487eceb428001ae858c14f5ad879f39d44ff2ddc13d'
 old=b'Promise.resolve(e.loadBool(e.EXP_APPS_PROP,e.expApps))'
 new=b'Promise.resolve(e.loadBool("wrcad.n64.enabled.v1",false)).then(function(done){if(done)return e.loadBool(e.EXP_APPS_PROP,e.expApps);return e.saveBool(e.EXP_APPS_PROP,true).then(function(){return e.saveBool("wrcad.n64.enabled.v1",true)}).then(function(){return true})})'
+def release_notes_path():
+ # Docker stages the same canonical source file beside this patcher.
+ staged=Path(__file__).with_name('release-notes.json')
+ return staged if staged.is_file() else Path(__file__).parent.parent.parent/'src/react/screens/releasenotes/notes.json'
+
+def player_revision():
+ # Notes-only releases must also invalidate the patched library bundle URL.
+ return hashlib.sha256(Path(__file__).read_bytes()+release_notes_path().read_bytes()).hexdigest()[:16]
+
 def patch_bundle(raw):
  assert hashlib.sha256(raw).hexdigest()==EXPECTED_SHA,'Unexpected upstream player bundle'
  assert raw.count(old)==1
@@ -74,6 +83,23 @@ def patch_bundle(raw):
  logo=b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:"web"}),Object(O.jsx)("img",{className:t+"-image",alt:"web\\u042fcade",src:n}),Object(O.jsx)("div",{className:t+"-right-text",children:"cade"})]'
  assert patched.count(logo)==1,'Unexpected upstream logo'
  patched=patched.replace(logo,b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:(window.WrcadCloudConfig&&window.WrcadCloudConfig.appName)||"cloud\\u042fcade"})]')
+
+ # Supply our notes before the native dialog's first render, with no old-content flash.
+ notes_marker=b'return e=l.y,Object(O.jsxs)(l.K.Provider,'
+ heading=b'children:"WEB\\u042fCADE UPDATED"'
+ dialog=b'className:"release-screen-dialog",children:'
+ assert patched.count(notes_marker)==patched.count(heading)==patched.count(dialog)==1,'Unexpected release notes dialog'
+ notes=json.dumps(json.loads(release_notes_path().read_text()),ensure_ascii=True,separators=(',',':')).encode()
+ name=b'((window.WrcadCloudConfig&&window.WrcadCloudConfig.appName)||"cloud\\u042fcade")'
+ patched=patched.replace(notes_marker,b'return e='+notes+b',Object(O.jsxs)(l.K.Provider,').replace(
+  heading,b'children:'+name+b'+" updated"').replace(
+  dialog,b'className:"release-screen-dialog",role:"dialog","aria-modal":!0,"aria-label":'+name+b'+" updates",children:')
+ for group in (b'release-buttons-left-group',b'release-buttons-centered'):
+  patched=patched.replace(b'class:"'+group+b'"',b'className:"'+group+b'"')
+ # The optional startup notes must not stack over an alert/settings dialog or a game.
+ startup_notes=b'setTimeout((()=>{this.ctx.showReleaseNotes(!0)}),0)'
+ assert patched.count(startup_notes)==1,'Unexpected startup notes timer'
+ patched=patched.replace(startup_notes,b'setTimeout((()=>{this.state.mode===this.ScreenEnum.BROWSE&&!this.ctx.isDialogOpen()&&this.ctx.showReleaseNotes(!0)}),0)')
 
  return re.sub(rb'([\"\'])wrcad(\.[A-Za-z0-9_.-]+)\1', lambda m: b'((window.WrcadCloudConfig&&window.WrcadCloudConfig.storagePrefix)||\"webrcade\")+'+b'\"'+m[2]+b'\"', patched)
 

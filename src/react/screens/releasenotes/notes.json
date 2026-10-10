@@ -1,0 +1,15 @@
+[
+  {
+    "version": "2026.10",
+    "date": "October 10, 2026",
+    "title": "Mobile play and a refreshed library",
+    "changes": [
+      "A compact *mobile library* with search, touch controls and game details. Install as a web app for a full-screen experience.",
+      "A centered app icon, a clearer *Recently Played* history icon and distinct console artwork on mobile and desktop.",
+      "*Nextcloud saves* with optional automatic sign-in when enabled. Recently Played and controller layouts sync when connected.",
+      "An integrated folder scanner and feed builder, with startup scans and scheduled refreshes when enabled.",
+      "*PlayStation discs and larger 3DS ROMs stream during play* and require an internet connection.",
+      "*3DS shaders cache as they are created.* New shaders can briefly hitch, especially when many appear at once on mobile."
+    ]
+  }
+]

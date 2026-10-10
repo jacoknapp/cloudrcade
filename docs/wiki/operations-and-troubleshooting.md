@@ -49,6 +49,8 @@ To return to a previous runtime, set `WEBRCADE_IMAGE` to its recorded tag/digest
 
 The release image combines pinned upstream compiled assets with hash-checked overlays. Editing inherited `src/` alone does not update those shipped assets. Upstream upgrades need matching bundle hooks/hashes, core patches, license/source provenance and regression checks.
 
+The startup update popup is an exception: [current notes](../../src/react/screens/releasenotes/notes.json) are shared by the source frontend and the patched release player. Update this file for a user-visible release. The image embeds the notes before the popup's first render; notes-only changes also receive a new player script URL. [The browser check](../../tests/browser_webrcade_updates.cjs) verifies the mobile footer, first paint and remembered dismissal in Chromium and WebKit.
+
 ```sh
 python3 scripts/check-release.py
 python3 scripts/test.py
