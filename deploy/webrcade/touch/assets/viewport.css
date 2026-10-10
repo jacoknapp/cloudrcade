@@ -8,18 +8,22 @@ html[data-cr-installed] { --cr-viewport-height: 100vh; height: 100vh; }
   html[data-cr-installed] { --cr-viewport-height: 100lvh; height: 100lvh; }
 }
 html[data-cr-installed] body { height: 100%; margin: 0; padding: 0; }
-/* Give WebKit an opaque fixed surface at the status-bar boundary. The effect
- * is an iOS rendering workaround, not a status-bar API; see the original
- * device experiment: https://tips.ojapp.app/en/ios-27-pwa-top-blur-workaround-2/
- * It covers only the existing safe area, never reserves game/control space. */
-html[data-cr-installed][data-cr-status-top]::before {
-  content: '';
+/* WebKit samples a fixed box's declared color above its 10px thin-border
+ * threshold. Empty text-clipped paint adds no visible bar or layout inset.
+ * Opaque status mode is also required: black-translucent bypasses the native
+ * color-extension path. Original device/source investigation:
+ * https://zenn.dev/uakihir0/articles/260920-ios27-pwa-blur */
+#cr-status-top { display: none; }
+html[data-cr-installed][data-cr-status-top] #cr-status-top {
+  display: block;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: env(safe-area-inset-top, 0px);
+  height: 11px;
   background: #000;
+  -webkit-background-clip: text;
+  background-clip: text;
   z-index: 2147483647;
   pointer-events: none;
 }

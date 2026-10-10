@@ -6,9 +6,14 @@
   const fullscreen = matchMedia('(display-mode: fullscreen)');
   const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  // Only the outer Apple web app owns the system status area. Painting its
-  // safe area avoids broad system shading without insetting the game frame.
+  // Only the outer Apple web app owns the system status area. The fixed color
+  // candidate must be a real element; it paints no content or extra bar.
   document.documentElement.toggleAttribute('data-cr-status-top', appleTouch && window === window.top);
+  if (appleTouch && window === window.top && !document.getElementById('cr-status-top')) {
+    const strip = document.createElement('div');
+    strip.id = 'cr-status-top'; strip.setAttribute('aria-hidden', 'true');
+    document.body.prepend(strip);
+  }
   const installedMode = () => {
     let inherited = false;
     try { inherited = window !== window.top && window.top.document.documentElement.hasAttribute('data-cr-installed'); } catch (_) {}
@@ -34,7 +39,7 @@
     link.rel = rel; link.href = href; link.type = type; document.head.append(link);
   }
   for (const [key, value] of [['apple-mobile-web-app-capable', 'yes'],
-    ['apple-mobile-web-app-status-bar-style', 'black-translucent'],
+    ['apple-mobile-web-app-status-bar-style', 'black'],
     ['apple-mobile-web-app-title', name], ['theme-color', '#000000']]) {
     let meta = document.querySelector('meta[name="' + key + '"]');
     if (!meta) { meta = document.createElement('meta'); meta.name = key; document.head.append(meta); }

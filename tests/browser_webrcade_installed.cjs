@@ -26,6 +26,9 @@ const findBrowse = () => {
       for (const [mode, device] of [['browser','iPhone 13'], ['standalone','iPhone 13'],
         ['legacy-ios','iPhone 13'], ['standalone','Pixel 5']]) {
         const installed = mode !== 'browser';
+        const opaqueApple = installed && device === 'iPhone 13';
+        const availableViewport = viewport => ({width:viewport.width,
+          height:viewport.height - (opaqueApple && viewport.width < viewport.height ? 60 : 0)});
         const context = await browser.newContext({...devices[device], ignoreHTTPSErrors:true, serviceWorkers:'block'});
         await context.addInitScript(mode => {
           Object.defineProperty(navigator, 'standalone', {configurable:true, value:mode === 'legacy-ios' && window === window.top});
@@ -56,29 +59,34 @@ const findBrowse = () => {
             if (installed && file.endsWith('.css')) body = body.replaceAll('100dvh','calc(100vh - 60px)');
             // Desktop engines have no phone safe area. Model the existing top
             // inset to check overlay bounds and scope, not the OS blur itself.
-            if (file.endsWith('.css')) body = body.replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '60px')
+            if (file.endsWith('.css')) body = body.replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, opaqueApple ? '0px' : '60px')
               .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px');
             await r.fulfill({...(response ? {response} : {}),contentType:file.endsWith('.css')?'text/css':'application/javascript',body});
           });
         }
         if (stage) await context.route('**/play/', async r => {
           const response = await r.fetch();
-          await r.fulfill({response,body:(await response.text()).replace('<head>','<head><link rel="stylesheet" href="/touch-controls/viewport.css">')});
+          const html = (await response.text())
+            .replace('apple-mobile-web-app-status-bar-style" content="black-translucent"', 'apple-mobile-web-app-status-bar-style" content="black"')
+            .replace('<head>','<head><link rel="stylesheet" href="/touch-controls/viewport.css">');
+          await r.fulfill({response,body:html});
         });
         await context.route('**/play/app/**', async r => {
           if (r.request().resourceType() !== 'document') return r.fallback();
           const response = await r.fetch();
           await r.fulfill({response,contentType:'text/html',body:`<!doctype html><html><head>
             <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+            <meta name="apple-mobile-web-app-status-bar-style" content="black">
             <link rel="stylesheet" href="/touch-controls/viewport.css">
             <link rel="stylesheet" href="/touch-controls/controller.css">
             <script defer src="/touch-controls/brand.js"></script>
             <style>html,body{margin:0;background:black;height:100%;overflow:hidden}</style></head>
-            <body><div id="wrcad-touch"><div class="kt-pad"><div class="kt-center"><button>Bottom target</button></div></div></div>
+            <body><div id="cr-status-top" aria-hidden="true"></div><div id="wrcad-touch"><div class="kt-pad"><div class="kt-center"><button>Bottom target</button></div></div></div>
             <script>window.addEventListener('load',()=>{frameElement.style.display='block';parent.postMessage('appLoaded','*')});</script></body></html>`});
         });
         const page = await context.newPage(), errors = [];
         page.on('pageerror', e => {errors.push(e.message);console.log('JS',e.message);});
+        await page.setViewportSize(availableViewport({width:393,height:852}));
         await page.goto(origin+'/play/', {waitUntil:'domcontentloaded'});
         await page.waitForFunction('('+findBrowse.toString()+')()?.state.feed');
         const updates = page.locator('.release-screen-dialog');
@@ -86,23 +94,32 @@ const findBrowse = () => {
         await updates.getByRole('button',{name:'OK',exact:true}).click();
         const checkStatusTop = async (document, expected) => {
           const surface = await document.evaluate(() => {
-            const s = getComputedStyle(document.documentElement, '::before');
-            return {content:s.content, position:s.position, height:s.height,
-              top:s.top, color:s.backgroundColor, pointer:s.pointerEvents};
+            const el = document.getElementById('cr-status-top');
+            if (!el) return {display:'none'};
+            const s = getComputedStyle(el);
+            return {display:s.display, position:s.position, height:s.height,
+              top:s.top, color:s.backgroundColor, pointer:s.pointerEvents, clip:s.backgroundClip,
+              hidden:el.getAttribute('aria-hidden'), text:el.textContent};
           });
-          if (expected) assert.deepEqual(surface, {content:'""',position:'fixed',height:'60px',
-            top:'0px',color:'rgb(0, 0, 0)',pointer:'none'});
-          else assert(['none','normal'].includes(surface.content), 'no status surface outside outer installed Apple app');
+          if (expected) assert.deepEqual(surface, {display:'block',position:'fixed',height:'11px',
+            top:'0px',color:'rgb(0, 0, 0)',pointer:'none',clip:'text',hidden:'true',text:''});
+          else assert.equal(surface.display, 'none', 'no active status surface outside outer installed Apple app');
+          assert.equal(await document.locator('meta[name="apple-mobile-web-app-status-bar-style"]').getAttribute('content'), 'black');
         };
         await checkStatusTop(page, installed && device === 'iPhone 13');
         const expectedHeight = h => h - (installed && process.env.EXPECT_BROKEN ? 60 : 0);
         for (const viewport of [{width:393,height:852},{width:852,height:393},{width:320,height:568}]) {
-          await page.setViewportSize(viewport);await page.waitForTimeout(100);
+          const available = availableViewport(viewport);
+          await page.setViewportSize(available);await page.waitForTimeout(100);
           const bounds = await page.locator('.cr-mobile-library').boundingBox();
-          assert(Math.abs(bounds.y)<1 && Math.abs(bounds.height-expectedHeight(viewport.height))<1,
+          assert(Math.abs(bounds.y)<1 && Math.abs(bounds.height-expectedHeight(available.height))<1,
             mode+' library fills expected viewport: '+JSON.stringify(bounds));
+          if (opaqueApple) {
+            const header = await page.locator('.cr-mobile-library .header-nav').boundingBox();
+            assert(Math.abs(header.y)<1, 'OS-owned status area is counted once, with no extra safe-area header padding');
+          }
         }
-        await page.setViewportSize({width:393,height:852});
+        await page.setViewportSize(availableViewport({width:393,height:852}));
         await page.getByRole('button',{name:'NES',exact:true}).click();
         await page.getByRole('button',{name:'Viewport game',exact:true}).click();
         await page.getByRole('dialog').getByRole('button').filter({hasText:/^\s*PLAY\s*$/}).click();
@@ -110,12 +127,13 @@ const findBrowse = () => {
         const frame = await (await page.locator('#webrcade-app-iframe').elementHandle()).contentFrame();
         await checkStatusTop(frame, false);
         // A tap at the system boundary must still reach the underlying game.
-        assert.equal(await page.evaluate(() => document.elementFromPoint(10, 30)?.id), 'webrcade-app-iframe');
+        assert.equal(await page.evaluate(() => document.elementFromPoint(innerWidth/2, 4)?.id), 'webrcade-app-iframe');
         for (const viewport of [{width:393,height:852},{width:852,height:393},{width:320,height:568}]) {
-          await page.setViewportSize(viewport);await page.waitForTimeout(100);
+          const available = availableViewport(viewport);
+          await page.setViewportSize(available);await page.waitForTimeout(100);
           const bounds = await page.locator('#webrcade-app-iframe').boundingBox();
           assert(Math.abs(bounds.x)<1 && Math.abs(bounds.y)<1 && Math.abs(bounds.width-viewport.width)<1 &&
-            Math.abs(bounds.height-expectedHeight(viewport.height))<1,mode+' native frame fills expected viewport: '+JSON.stringify(bounds));
+            Math.abs(bounds.height-expectedHeight(available.height))<1,mode+' native frame fills expected viewport: '+JSON.stringify(bounds));
           assert.equal(await frame.evaluate(()=>innerHeight),Math.round(bounds.height));
           const target = await frame.getByRole('button',{name:'Bottom target'}).boundingBox();
           const bottomGap = bounds.height - target.y - target.height;
@@ -125,7 +143,7 @@ const findBrowse = () => {
         }
         assert.equal(romRequests,0);
         assert.deepEqual(errors,[]);
-        console.log('PASS',engine.name(),device,mode,'status surface scope/touch passthrough and library/native iframe/bottom touch target across portrait, landscape and small phone',
+        console.log('PASS',engine.name(),device,mode,'opaque metadata/color-candidate scope/touch passthrough, OS status counted once and library/native iframe/bottom touch target across portrait, landscape and small phone',
           installed && process.env.EXPECT_BROKEN ? '(reproduced 60px gap)' : '(no reserved bottom strip)');
         await context.close();
       }

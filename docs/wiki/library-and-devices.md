@@ -48,7 +48,7 @@ The manifest requests fullscreen with a standalone fallback. The app supports no
 
 Installed mode uses full display sizing for the library and game frame; ordinary browser tabs follow the visible area as browser bars change. After an update, fully close and reopen the installed app to load the new page. A dark strip below the controls is not reserved controller space; report it with your device/OS and a screenshot if it persists.
 
-On installed iPhone/iPad apps, the existing status-bar safe area has a solid black background to reduce iOS shading into the header or game. It does not reduce the game frame or move your saved controls. The system effect varies by iOS version; report persistent fading with your device/OS and a screenshot.
+Installed iPhone/iPad apps request an opaque black system status bar to reduce iOS shading into the header or game. The page fills the available display below it, with no extra top padding when iOS owns that area. Saved controller layouts remain intact. The system effect varies by iOS version; report persistent fading with your device/OS and a screenshot.
 
 ## Device expectations
 

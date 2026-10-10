@@ -164,6 +164,24 @@ const { chromium, webkit } = require('playwright');
         await page.reload(); await installFixture();
         assert.deepEqual(await shoulder.boundingBox(), persisted, 'reload respects a saved button above the default pad');
         assert.deepEqual(await page.locator('canvas').boundingBox(), withControls, 'reload keeps the full screen display');
+        // Opaque Apple status mode gives the OS the top59px and reports zero
+        // page top inset. The useful game display must stay the same physical
+        // size, with no second59px reservation or extra bottom controller gap.
+        const storedLayout = await page.evaluate(() => localStorage.getItem('webrcade.touch.layouts.v1'));
+        await page.setViewportSize({width:393, height:852-59});
+        await page.evaluate(() => {
+          document.documentElement.style.setProperty('--test-top', '0px');
+          app.emulator.updateScreenSize();
+        });
+        await page.waitForTimeout(200);
+        const opaqueCanvas = await page.locator('canvas').boundingBox();
+        assert(Math.abs(opaqueCanvas.y)<.5 && Math.abs(opaqueCanvas.width-withControls.width)<.5 &&
+          Math.abs(opaqueCanvas.height-withControls.height)<.5,
+          'OS-owned status area counted once; useful game aspect/size retained');
+        const menu = await page.locator('.kt-menu').boundingBox();
+        assert.equal(793-menu.y-menu.height,22, 'opaque status mode retains the smaller installed bottom gap');
+        assert.equal(await page.evaluate(() => localStorage.getItem('webrcade.touch.layouts.v1')), storedLayout,
+          'status mode never rewrites saved controller coordinates');
         await page.close();
         console.log('PASS', engine.name(), system, 'full safe viewport, saved L/R positions, free drag/save/reload/cancel, views/rotation, controls off/on and drawing-buffer ownership');
       }

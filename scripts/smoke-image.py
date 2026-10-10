@@ -113,7 +113,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert html.index('/touch-controls/category-art.js?v=') < html.index('/touch-controls/recently-played.js?v=') < html.index('/touch-controls/mobile.js?v=')
             revision = runpy.run_path('deploy/webrcade/patch-player.py')['player_revision']()
             assert '?wrcad=' + revision in html, 'player URL must include current notes as well as patch code'
-            assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
+            assert 'apple-mobile-web-app-status-bar-style" content="black"' in html and 'black-translucent' not in html
+            assert '<div id="cr-status-top" aria-hidden="true"></div>' in html
             assert 'viewport-fit=cover' in html, 'initial library HTML must request the full viewport'
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
             apple = IconLinks(html).icons
@@ -145,7 +146,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/touch-controls/mobile.js' not in app_html, 'mobile library must not load in emulator frames'
             assert '/touch-controls/menus.css?v=' in app_html, 'game menus need the shared mobile UI stylesheet'
             assert len(IconLinks(app_html).icons) == 1, 'emulator initial HTML must include the Apple icon too'
-            assert 'black-translucent' in app_html and 'viewport-fit=cover' in app_html, 'initial game HTML must request the full viewport too'
+            assert 'apple-mobile-web-app-status-bar-style" content="black"' in app_html and 'black-translucent' not in app_html
+            assert '<div id="cr-status-top" aria-hidden="true"></div>' in app_html
+            assert 'viewport-fit=cover' in app_html, 'initial game HTML must request the full viewport too'
         # A second scan discovers newly added files without a container restart.
         (roms / 'nes/roms/second.nes').write_bytes(b'NES\x1a' + bytes(12) + b'second-fixture')
         until(lambda: any(item['title'] == 'second' for item in items()))

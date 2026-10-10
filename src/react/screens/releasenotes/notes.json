@@ -8,7 +8,7 @@
       "A centered app icon, a clearer *Recently Played* history icon and distinct console artwork on mobile and desktop.",
       "*Recently Played restores automatically* when the library opens, including your connected account's cached and cloud history.",
       "Installed web apps use the full display height for the library and games, with your saved touch-button positions preserved.",
-      "Installed iPhone/iPad apps have a solid black status-bar background to reduce top-edge fading, without reserving extra game space.",
+      "Installed iPhone/iPad apps request an opaque black system status bar to reduce top-edge fading. Games fill the available display and saved controls remain intact.",
       "*Nextcloud saves* with optional automatic sign-in when enabled. Recently Played and controller layouts sync when connected.",
       "An integrated folder scanner and feed builder, with startup scans and scheduled refreshes when enabled.",
       "*PlayStation discs and larger 3DS ROMs stream during play* and require an internet connection.",
