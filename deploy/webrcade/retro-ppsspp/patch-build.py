@@ -27,7 +27,9 @@ replace(work/'RetroArch/emscripten/library_rwebaudio.js',
 
 common = work/'webrcade-app-common'
 apps = common/'src/apps/applist.js'
-replace(apps, '//RETRO_PPSSPP: "retro-ppsspp",', 'RETRO_PPSSPP: "retro-ppsspp",')
+# Include the line boundary: the uncommented text alone is also a substring
+# of the commented declaration, which would incorrectly look already patched.
+replace(apps, '\n  //RETRO_PPSSPP: "retro-ppsspp",', '\n  RETRO_PPSSPP: "retro-ppsspp",')
 replace(apps, '  NDS: "nds",', '  NDS: "nds",\n  PSP: "psp",')
 replace(apps, 'const types = [{', '''const types = [{
     key: APP_TYPE_KEYS.RETRO_PPSSPP, alias: APP_TYPE_KEYS.PSP,

@@ -25,7 +25,8 @@ const config={appName:'PSP Test',storagePrefix:'psp_test',enabled:false,autoRedi
     page.on('pageerror',e=>errors.push(e.stack));page.on('console',m=>{logs.push(m.text());if(process.env.PSP_TEST_DEBUG)console.log(m.text());});
     await page.route('**/cloud-saves/config.php',r=>r.fulfill({contentType:'application/javascript',
       body:'window.WrcadCloudConfig='+JSON.stringify(config)+';'}));
-    const props={title:'PSP homebrew',type:'psp',rom:new URL(rom,origin).href};
+    // The library resolves the PSP alias to this canonical core identifier.
+    const props={title:'PSP homebrew',type:'retro-ppsspp',rom:new URL(rom,origin).href};
     const url=origin+'/play/app/retro-ppsspp/?ctx=standalone&props='+encodeURIComponent(Buffer.from(encodeURIComponent(JSON.stringify(props))).toString('base64'));
     await page.goto(url);
     await page.waitForFunction(()=>window.emulator?.mainStarted&&window.Module?._get_current_frame_count()>120,null,{timeout:180000});

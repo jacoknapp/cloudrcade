@@ -45,8 +45,11 @@ output directory so previously cached/open games keep matching JS/WASM files.
 
 Validation uses `tests/test_webrcade_psp.cjs` for adapter boundaries,
 `tests/browser_webrcade_psp_settings.cjs` for native opt-in behavior, and
-`tests/browser_webrcade_psp.cjs` for the compiled core's lifecycle. The last
-test requires `PSP_TEST_ROM` pointing at an open-source homebrew demo or an
+`tests/browser_webrcade_psp.cjs` for the compiled core's lifecycle.
+`tests/browser_webrcade_psp_launch.cjs` verifies the mobile library's category,
+game details and Play flow in Chromium and WebKit, including the canonical
+`retro-ppsspp` core registration. Both launch tests require `PSP_TEST_ROM`
+pointing at an open-source homebrew demo or an
 operator-owned game on a disposable instance. The pinned upstream
 `pspautotests/demos/sprite.pbp` works as a homebrew fixture. Browser tests
 use Playwright, fresh local storage and no cloud account.

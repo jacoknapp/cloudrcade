@@ -8,6 +8,7 @@ import hashlib
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 import runpy
 import ssl
 import subprocess
@@ -139,6 +140,10 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/arcade-bundles/retro-ppsspp/cloud-main.' in psp_html
             assert '/touch-controls/controller.js?v=' in psp_html
             assert 'viewport-fit=cover' in psp_html
+        psp_main = re.search(r'src="([^"]*/arcade-bundles/retro-ppsspp/cloud-main\.[^"]+\.js)"', psp_html)
+        assert psp_main, 'PSP wrapper script is missing'
+        with get(psp_main.group(1)) as response:
+            assert b'RETRO_PPSSPP:"retro-ppsspp"' in response.read(), 'PSP canonical app type is missing'
         with get('/play/app/retro-ppsspp/js/experimental-v1/ppsspp_libretro.wasm') as response:
             assert response.read(4) == b'\0asm'
         with get('/play/app/retro-ppsspp/assets/manifest.json') as response:
