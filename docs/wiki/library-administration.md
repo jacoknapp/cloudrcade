@@ -2,7 +2,50 @@
 
 [Wiki home](README.md) · [Quick start](quick-start.md) · [Streaming and 3DS](streaming-offline-and-3ds.md)
 
+## Who manages the files
+
+This page is for the operator. Players browse the resulting system folders; they do not need to create server directories. The scanner reads files on your server and creates the library listing. It does not download games, scan personal Dropbox/Drive accounts or provide BIOS files.
+
+Three locations are easy to confuse:
+
+| Location | Contains | Example |
+| --- | --- | --- |
+| Server's ROM directory | Original game and BIOS files supplied by the operator | `roms/nes/roms/Example.nes` |
+| Server's data directory | Generated feeds, scan records and converted discs | `data/feeds/combined.json` |
+| Player's browser/Nextcloud | That player's progress and preferences | Browser-local storage or their configured Nextcloud save folder |
+
+A directory named `roms` inside a system folder is where its games go. A directory named `bios` holds that system's BIOS/firmware. A **feed** is a JSON list of file URLs; it does not contain the games themselves. Do not put player saves in the server's ROM directory.
+
 ## ROM directory layout
+
+For the default configuration, create only the system folders you need. This example shows a few systems; use the table below for all supported folder names:
+
+```text
+cloudrcade/
+├── .env                         Your deployment settings (keep private)
+├── compose.yaml                 Starts the application container
+├── roms/                        Original library: read-only in the app
+│   ├── nes/
+│   │   └── roms/Example.nes
+│   ├── snes/
+│   │   └── roms/Example.sfc
+│   ├── nds/
+│   │   ├── roms/Example.nds
+│   │   └── bios/                bios7.bin, bios9.bin, firmware.bin
+│   ├── psx/
+│   │   ├── roms/                CHD/PBP or CUE plus its BIN tracks
+│   │   └── bios/                Required validated PlayStation BIOS
+│   └── 3DS/
+│       ├── Games/Example.3ds    3DS games may be directly here or nested
+│       └── bios/                Your external aes_keys.txt, if needed
+├── data/                        Writable generated data
+│   ├── feeds/combined.json     Created by a successful scan
+│   └── derived/                Converted discs; originals stay in roms/
+├── managed/                     Optional externally managed game files
+└── config/                      Optional external metadata credentials
+```
+
+**Do not add `roms/3DS/roms/` merely to match the other systems.** The 3DS scanner searches beneath `3DS/` directly, including subfolders. The `3DS/bios/` directory is mounted separately for runtime keys. Use the exact system spelling: `segaMD` and `3DS` are case-sensitive examples.
 
 The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at `/var/www/html/content`. The scanner's `WEBRCADE_ROM_ROOT` uses that container path. Most systems scan recursively below `<folder>/roms`; 3DS scans below `3DS` directly. Folder spelling and case matter on case-sensitive filesystems.
 
@@ -20,6 +63,16 @@ The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at
 | `3DS` | Nintendo 3DS | `.cia`, `.3ds`, `.cci` |
 
 These are the integrated scanner's supported formats, not an exhaustive list of formats/apps possible in a hand-written webRcade feed. A matching extension does not guarantee a valid or compatible game. The scanner validates 3DS headers and application titles, excludes updates/DLC/system titles and known unsupported seed-protected titles, and applies operator exclusions. It also routes `.smc` files directly under `nes/roms` to SNES for compatibility with a misfiled library.
+
+## Add your first game or another game
+
+1. Identify its system and supported file extension in the table above. A ZIP containing a game needs extraction for this scanner; `.zip` is not one of its listed input formats.
+2. Copy the file under that system's ROM directory, for example `roms/gb/roms/Example.gb`. You can use subfolders to organize games. For a PlayStation CUE, keep its referenced track files available alongside it or at the paths the CUE names.
+3. Supply required BIOS files using the next section. Grant the container read access to originals and write access to `data/`.
+4. Wait for the next scan or run the command under [Scanner lifecycle and output](#scanner-lifecycle-and-output).
+5. Read the logs and `data/last-scan.json`. Reload the library's operator feed, open the system folder and test the new game.
+
+For a game stored in Drive, first follow [Google Drive setup](saves-and-storage.md#google-drive-setup). If you want direct Dropbox hosting instead of copying files to the server, use a [custom feed](#a-small-feed-example); the integrated scanner does not enumerate shared cloud links.
 
 ## BIOS files
 
@@ -56,6 +109,30 @@ Paths above use `WEBRCADE_HOST_PATH=./data`. Apache serves feeds through an alia
 
 CUE input is converted to a derived CHD using its referenced track bytes. Original CUE/BIN files remain unchanged. Missing tracks or conversion errors stop feed publication. Allow adequate data-directory space and scan time for large disc collections. The scanner deduplicates identical content; duplicates may increase the scanned count without increasing entries.
 
+## A small feed example
+
+You normally let the scanner create the Default feed. Use your own feed when you need to list directly hosted files, such as a Dropbox ROM. Here is a minimal NES feed:
+
+```json
+{
+  "title": "My games",
+  "categories": [{
+    "title": "NES",
+    "items": [{
+      "title": "Example",
+      "type": "nes",
+      "props": {"rom": "https://files.example.com/games/Example.nes"}
+    }]
+  }]
+}
+```
+
+Replace the example URL with a tested direct ROM URL; for Dropbox use its direct shared link. Save this text as `my-games.json`, then open **Feeds → Add → FILE** and select it. Alternatively, host the JSON as a reachable direct file and use **Add → URL**. Load the resulting feed entry to browse it.
+
+The title controls the visible name; `categories` create system folders; `items` list games; `type` selects an emulator; `props.rom` points to game bytes. This simple example needs no artwork. Other systems can need different properties, BIOS or disc lists: follow the [upstream feed format](https://docs.webrcade.com/feeds/format/) rather than guessing from NES.
+
+The feed's host and each ROM's host need suitable HTTPS/access/CORS behavior. A browser needs permission to fetch the file from a different website (**CORS**); being able to open a preview page is not enough. Linking Nextcloud does not grant access to a Dropbox/Drive ROM. Do not hand-edit `data/feeds/combined.json` for lasting custom entries: the next successful scanner run regenerates it. Keep your custom feed separately.
+
 ## Optional Gaseous metadata
 
 Metadata is disabled by default. Without it, filenames supply titles. With a supported Gaseous database, matching rows can supply titles, descriptions and IGDB cover URLs. Most systems match hashes; 3DS matches filenames to avoid hashing multi-gigabyte files.
@@ -79,4 +156,4 @@ Alternatively, add a read-only shared MariaDB socket-directory mount to your own
 
 `WEBRCADE_REQUIRED_ROM_DIR` requires a particular directory below the scanner root. `WEBRCADE_REQUIRE_ROM_MOUNT` optionally requires the root to be a mountpoint. Use these when they match your storage layout so an absent share does not look like a valid replacement library.
 
-`WEBRCADE_ENABLE_3DS=false` omits 3DS from generated feeds. `WEBRCADE_3DS_SKIP_DIRS` and `WEBRCADE_3DS_SKIP_NAMES` are pipe-separated directory components and filename stems to exclude. These are scanner settings; a player's experimental 3DS setting is separate. Recreate the container after environment changes and run/review a scan.
+`WEBRCADE_ENABLE_3DS=false` omits 3DS from generated feeds. `WEBRCADE_3DS_SKIP_DIRS` and `WEBRCADE_3DS_SKIP_NAMES` are pipe-separated directory components and filename stems to exclude. These are operator settings. They control 3DS feed inclusion and app registration; the browser's inherited Experimental apps preference and 3DS diagnostic settings are separate. Recreate the container after environment changes and run/review a scan.

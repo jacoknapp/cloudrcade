@@ -2,6 +2,17 @@
 
 [Wiki home](README.md) · [Library administration](library-administration.md) · [Saves](saves-and-storage.md)
 
+## Before you play
+
+For an ordinary cartridge game, the browser usually downloads the required game bytes before play. For a streamed disc/large ROM, it reads additional bytes as you progress. Offline play depends on complete cached files, not just seeing the title in your library.
+
+| Scenario | What to expect |
+| --- | --- |
+| Ordinary game with all required files already cached | May work offline; test it on the same browser/profile first |
+| Streamed PlayStation disc or 3DS ROM over 512 MiB | Keep the server/internet connection available during play |
+| Encrypted 3DS cold launch needing runtime keys | Keys are fetched separately and never cached; do not count on offline launch |
+| Offline gameplay with Nextcloud linked | Cloud transfer still needs a connection; preserve local regular-save backups and check upload later |
+
 ## Streamed games require a connection
 
 **PlayStation disc streaming and streamed 3DS ROMs require an active internet connection during play.** They fetch game bytes on demand. Startup success does not mean the rest of the file is available offline; keep access to the server throughout play. Network latency or a missing chunk can briefly pause emulation.
@@ -36,7 +47,7 @@ Worker installation performs no protected fetches during sign-in. Caching starts
 
 ## 3DS setup
 
-The release image includes the key-free Azahar-based app. Enable scanner registration with `WEBRCADE_ENABLE_3DS=true` (the root example default). The browser also has a **Nintendo 3DS** experimental setting. Supply supported application files under `roms/3DS/`; updates, DLC, unsupported seed-protected games and operator exclusions are filtered by the scanner.
+The release image includes the key-free Azahar-based app. Enable scanner registration with `WEBRCADE_ENABLE_3DS=true` (the root example default). This registers the 3DS app and exposes its **Experimental Settings** page; [readout and CPU-lighting diagnostics](controls-and-menus.md#experimental-settings-and-defaults) start off. The inherited Experimental apps browser preference is separate. Supply supported application files under `roms/3DS/`; updates, DLC, unsupported seed-protected games and operator exclusions are filtered by the scanner.
 
 Encrypted games need your own compatible Citra-format `aes_keys.txt`. The root Compose example uses:
 

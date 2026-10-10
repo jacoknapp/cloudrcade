@@ -2,6 +2,31 @@
 
 [Wiki home](README.md) · [Quick start](quick-start.md) · [Configuration example](../../.env.example)
 
+## Player troubleshooting
+
+Start here if you use an arcade someone else runs. You do not need to edit `.env` or run Docker commands. Keep the browser/profile that holds your progress while investigating.
+
+| Problem | Try this | If it still fails |
+| --- | --- | --- |
+| I cannot find my games | Open **Feeds** and load the intended feed; clear search and return to system folders | Ask the operator whether the scan finished and that game is supported |
+| I cannot link Nextcloud | Check **Settings → Cloud Storage**; use Link and the connection page's visible sign-in link | Give the operator the visible error; a cloud account alone does not enable this site |
+| I see Manage/Connected but my save failed | Restore connection/sign-in, check the account, and follow [save recovery](saves-and-storage.md#offline-saves-and-recovery) | Keep local data; ask for help with conflicts or revoked credentials |
+| My other device has older progress | Finish saving/exiting on the first device; link the same Nextcloud account before launching on the second | Check for first-device upload errors and changed game/feed identity |
+| Recently Played is empty | Check the correct account/feed and allow cloud refresh; only games matching this feed appear | Preserve cached history; report account/feed details without credentials |
+| I cannot see touch buttons | Launch a game; wait for loading; resume from pause; open the edge tab and turn Controls on | Check that the device/browser is detected as touch |
+| Buttons are uncomfortable | Open the touch drawer → Edit layout → drag → Save; repeat in the other orientation | See [layout editing](controls-and-menus.md#edit-a-layout) |
+| There is no sound | Tap a control/menu, check Mute audio, volume and output device | Report game/browser/device; browsers can require a gesture |
+| A streamed game stops or pauses | Restore the connection to the game server | Ask the operator to check file/range responses; uncached chunks need access |
+| 3DS hitches on a new scene | Let new shaders compile; repeat visits can reuse observed shaders | Speed varies by game/device; see [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) |
+| A Drive/Dropbox feed link fails | Confirm it is a feed JSON file, not a folder/preview page; use the documented setup route | Ask the feed author to test direct file access and browser permissions |
+| Offline launch fails | Try online in the same browser/profile; fully load/test required assets | A partly streamed game or uncached 3DS keys cannot be fixed by installing the app |
+
+When asking for help, share the game title, selected feed, device/browser, what you clicked and exact error text. Do not share account passwords, app credentials, key files or raw browser-storage dumps. A screenshot of status with personal account details hidden can help.
+
+## Operator troubleshooting and configuration
+
+The rest of this page is for the person running the service. See [quick start](quick-start.md#prepare-the-deployment) for the first installation and [library administration](library-administration.md) for input directories.
+
 ## Configuration reference
 
 The root Compose file reads `.env`. URL, branding, cloud and scanner settings are runtime configuration; recreate the service to change its environment. Editing `.env` without recreation does not update a running container. Keep the operator file out of Git.
@@ -27,7 +52,7 @@ The root Compose example leaves ROMs, managed content, derived content, external
 
 Preserve the app's writable data directory, including feeds, derived discs, identity/hash maps and metadata state. Preserve operator configuration separately in secure storage. ROMs, BIOS, runtime keys and TLS material belong to their own backups according to your deployment. Keep secret files out of source and build context.
 
-Back up Nextcloud saved files through your Nextcloud backup procedure. Browser-only saves/preferences live on each player device; a server-data backup does not capture them. Before origin/namespace/account/core migrations, preserve local progress and verify a restoration path for the relevant app. Record the current image tag/digest so a code rollback can use the exact former runtime.
+Back up Nextcloud saved files through your Nextcloud backup procedure. If you keep ROM source backups in Google Drive or Dropbox, that is a separate backup of those files; verify their restore/download path and keep it separate from player save synchronization. Browser-only saves/preferences live on each player device; a server-data backup does not capture them. Before origin/namespace/account/core migrations, preserve local progress and verify a restoration path for the relevant app. Record the current image tag/digest so a code rollback can use the exact former runtime.
 
 Do not delete data or clear browser storage as an initial troubleshooting step. Pending local saves can be the newest available progress.
 

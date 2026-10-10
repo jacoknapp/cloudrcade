@@ -2,150 +2,62 @@
 
 [![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 
-**cloudЯcade** (cloudRcade, with a backwards R) is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade)
-with Nextcloud saves, editable mobile controls, offline caching, Recently Played,
-clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app.
-It preserves upstream history and credits; it is not an official webRcade release.
+**cloudЯcade** (cloudRcade, with a backwards R) lets you play a supplied game library in a web browser. It is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade), with Nextcloud saves, editable touch controls, Recently Played, offline caching, clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app. It preserves upstream history and credits; it is not an official webRcade release.
 
-## User and operator wiki
+<a id="mobile-and-installed-web-app"></a>
 
-The [Git-tracked wiki](docs/wiki/README.md) covers [everyday use](docs/wiki/library-and-devices.md),
-[controls and game menus](docs/wiki/controls-and-menus.md), [saves](docs/wiki/saves-and-storage.md),
-[Nextcloud and SSO](docs/wiki/nextcloud-and-access.md), and
-[deployment, upgrades and troubleshooting](docs/wiki/operations-and-troubleshooting.md).
-Start with its [quick start](docs/wiki/quick-start.md) for a first installation.
+## I want to play
 
-## Run with Docker
+Ask the person running your arcade for its website address and any required account. Open the site, complete sign-in, open a system folder, select a game and choose **Play**. You do not need Docker or your own ROM folders to use somebody else's arcade.
+
+Start with [your first game](docs/wiki/quick-start.md#play-your-first-game). Then read:
+
+- [Library, search, feeds and installing the web app](docs/wiki/library-and-devices.md).
+- [Keyboard, gamepad, touch buttons and editing your layout](docs/wiki/controls-and-menus.md).
+- [Where progress is saved, save states and changing devices](docs/wiki/saves-and-storage.md).
+- [Nextcloud Link, connection status, Manage and reconnecting](docs/wiki/nextcloud-and-access.md).
+- [Streaming, offline play and 3DS performance](docs/wiki/streaming-offline-and-3ds.md).
+
+<a id="nextcloud-and-sso"></a>
+
+Nextcloud is visible in **Settings → Cloud Storage** when the operator enables it. You can check the account, link it manually and manage the connection. The operator may also configure automatic sign-in. Browser-local saves work without a cloud connection for supported games. The inherited Dropbox option appears only when the upstream runtime supports linking on the current site. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) covers Dropbox shared-file hosting, its inherited account screen and Google Drive source files. Native Dropbox and Drive save synchronization are not supported end to end in this release.
+
+<a id="internet-connection-for-streamed-games"></a>
+
+**Keep a connection while playing streamed PlayStation discs or large 3DS ROMs.** Loading the first screen does not download the whole game. **3DS shaders cache as they are created:** new shaders can cause hitches, and many new shaders together can cause longer pauses. Performance varies by game, browser and device.
+
+<a id="run-with-docker"></a>
+
+## I want to run an arcade
+
+You supply Docker with Compose, an HTTPS gateway, games you are entitled to use, any required BIOS/keys, and optional cloud accounts. The image supplies the application and integrated library scanner.
 
 ```sh
 git clone https://github.com/jacoknapp/cloudrcade.git
 cd cloudrcade
 cp .env.example .env
 mkdir -p roms/nes/roms roms/3DS/bios data/feeds data/derived managed config
-# Edit .env for your public HTTPS origin, paths, cloud options and branding.
+# Set your HTTPS origin and paths in .env; add a supported game under roms/nes/roms/.
 docker compose up -d
 ```
 
-Open your configured HTTPS origin. The default listener is `127.0.0.1:8443`;
-place it behind your HTTPS gateway or change the bind address for your network.
-ROMs and BIOS are supplied by the operator and mounted read-only. Most systems
-use `roms/<system>/roms/` and `roms/<system>/bios/`; 3DS games can live below
-`roms/3DS/`. The scanner writes feeds and derived discs into `data/`, preserving
-the ROM originals. The same app container scans at startup and refreshes every six hours. Set
-`WEBRCADE_SCAN_ENABLED` and `WEBRCADE_SCAN_INTERVAL_SECONDS` to control it.
-The initial library can be empty while the first scan runs. Request an immediate
-refresh with `docker compose exec webrcade python3 /usr/local/share/cloudrcade/service.py scan`.
-Optional metadata integration is disabled by default.
+The default listener is `127.0.0.1:8443`. Finish gateway setup and verify the first scan using [Docker quick start](docs/wiki/quick-start.md#prepare-the-deployment). The library can initially be empty while scanning. Scans run at startup and every six hours by default; ROMs and external BIOS files are mounted read-only.
 
-The single image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `master`
-builds and publishes it; pull requests build and validate without publishing.
-Commit-specific `sha-<full-commit>` tags and `v*` release tags are also published.
-CI authenticates using GitHub's built-in token; no Docker Hub secret is required.
+[Folder layout and adding games](docs/wiki/library-administration.md) explains every scanner system directory, BIOS files, generated feeds and derived discs. [Operations](docs/wiki/operations-and-troubleshooting.md) covers environment variables, backup, upgrades and troubleshooting. [Nextcloud and access](docs/wiki/nextcloud-and-access.md#enable-a-server) covers manual linking, optional automatic login and SSO. All deployment URLs, flags, names, namespaces and paths remain environment-controlled.
 
-## Mobile and installed web app
+The release image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `master` builds and publishes it; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` release tags are also published.
 
-Phones and touch tablets use a full-viewport library in portrait and landscape,
-with the same dark theme, system folders, Recently Played, all-game search,
-feed URL/file import and native settings/cloud saves. Desktop keeps its original
-carousel. The mobile layout uses compact typography, three columns on phones and local
-retro console artwork for system folders, with the original charcoal/red colors.
-Feeds has its own header button, separate from system-folder navigation.
-Settings and in-game menus use compact black/red panels; pause actions stack
-in portrait and use two columns in landscape. Settings navigation and action
-buttons stay in place across pages while longer content scrolls inside. The touch controller and its
-pop-out retain their original blue/aqua styling.
-Game frames fill the mobile viewport. Touch controls can overlap the game and
-retain your saved positions; moving or hiding controls never shrinks the display.
-The loading logo and status fit mobile viewports and remain visible during slow loads.
-The startup update popup shows current fork notes, with compact mobile text and
-separate fixed controls for **Don't show again** and **OK**.
-Background offline-worker updates make no protected requests during sign-in;
-the loaded app warms its library and feed afterward.
-Game details open in a touch-friendly panel; Play uses the same native launcher
-and on-demand emulator cores. Large folders show 48 cards per page with
-lazy artwork. The mobile cards, details and search caches are released while a
-game runs, and the native exit flow disposes its emulator frame before returning
-to the library. Save locations and controller preferences are shared with desktop.
+<a id="user-and-operator-wiki"></a>
+<a id="development-and-licensing"></a>
 
-Use your browser's **Install app** or **Add to Home Screen** action for an app
-without browser navigation bars. The manifest requests `fullscreen`, with a
-`standalone` fallback, and supports notches/home indicators without locking
-orientation. iOS controls its system status bar and can keep it visible in a
-Home Screen app; a site cannot guarantee hiding OS UI on every device. Existing
-installations may need to be reopened or reinstalled to pick up a changed display
-mode. See [WebKit's Home Screen guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
-and [status-bar limitation](https://bugs.webkit.org/show_bug.cgi?id=301994).
+## Documentation and development
 
-## Internet connection for streamed games
+The [wiki home](docs/wiki/README.md) explains basic terms and provides a route for players and operators. Advanced references are [runtime configuration and implementation](deploy/webrcade/README.md), [build architecture](docs/architecture.md) and [3DS core setup](deploy/webrcade/retro-azahar/README.md).
 
-**PlayStation and Nintendo 3DS ROM/disc streaming requires an active internet
-connection during play.** Game data is fetched as needed. PlayStation CHD/PBP
-discs stream through HTTP byte ranges; the 3DS loader streams ROMs larger than
-512 MiB. Keep the connection available for uncached portions of the file.
-Partially streamed files are not complete offline games. Offline play requires
-all required game, emulator and BIOS assets to have been fully downloaded and
-cached; runtime 3DS keys are fetched separately and are never cached.
+The release uses a pinned upstream runtime with hash-checked overlays. Editing inherited frontend source alone does not update the shipped image. Run `python3 scripts/check-release.py` and `python3 scripts/test.py` for release checks; see the operations guide for build and browser-test prerequisites.
 
-**3DS caches shaders as they are created.** The first encounter with a new
-shader can cause hitching. Encountering many new shaders at once can cause
-larger pauses, especially on mobile devices; cached shaders reduce repeat work.
+<a id="3ds-bios-and-keys"></a>
 
-## Nextcloud and SSO
+No ROM, BIOS, key set or console backup is supplied. Encrypted 3DS games require your own compatible Citra-format `aes_keys.txt` in an external read-only mount. Runtime keys are never part of offline caches or ordinary save ZIPs.
 
-Set `NEXTCLOUD_URL` and `NEXTCLOUD_ENABLED=true` to make Nextcloud available.
-Set `NEXTCLOUD_AUTO_REDIRECT=true` to start login automatically. These flags are
-independent: disabling automatic login leaves the **Link** button available.
-Other cloud choices retain their normal setup flow.
-
-If Authentik protects the app, allow the static offline worker to update without
-sign-in using the exact path expression `^/touch-controls/offline-worker\.js$`.
-See the [proxy configuration and verification](deploy/webrcade/README.md#offline-play)
-to prevent background updates from interrupting the sign-in redirect.
-Allow the [static app icon paths](deploy/webrcade/README.md#app-icons) too, so
-Safari can fetch the full-size icon from its native share and Home Screen UI.
-
-For automatic authorization with an existing Nextcloud/Authentik session,
-install the [optional Nextcloud handoff app](integrations/nextcloud/README.md),
-configure its exact trusted origin/client and existing SAML provider, then set
-`NEXTCLOUD_HANDOFF=true`. The default native Nextcloud flow retains Nextcloud's
-approval screen. Existing SSO can pass through without another login; the
-identity provider can still require authentication or MFA when its policy does.
-
-Denied access returns to the library and displays: “No access has been enabled
-for Nextcloud. Please enable your own cloud instance.” Optional access-header
-hints are configured through the environment; Nextcloud still authorizes grants.
-URLs, feature flags, origins, paths, app name, storage namespace and save folder
-come from `.env`. Keep the namespace and save folder stable when upgrading to
-preserve the selected save locations. Existing deployments can keep their
-previous branding and namespace by setting those variables explicitly.
-
-## 3DS BIOS and keys
-
-The release includes a key-free 3DS emulator. Encrypted games need your own
-compatible Citra-format `aes_keys.txt` in the mounted BIOS directory selected
-by `WEBRCADE_3DS_BIOS_PATH`. `WEBRCADE_3DS_KEYS_FILE` selects its container path.
-Decrypted games can run without it. No key set, BIOS, ROM or console backup is
-provided. Builds remove upstream preset keys before compilation.
-
-The authorized browser reads the mounted keys into emulator memory at runtime;
-the endpoint uses `no-store` and same-origin restrictions. Keys are excluded
-from source control, build contexts, offline assets and ordinary battery-save
-ZIPs. See [3DS setup and limitations](deploy/webrcade/retro-azahar/README.md#runtime-decryption-keys).
-
-## Development and licensing
-
-See [configuration and features](deploy/webrcade/README.md),
-[build architecture](docs/architecture.md), and [third-party licenses](THIRD_PARTY.md).
-The release uses a pinned upstream runtime with hash-checked overlays; inherited
-frontend source edits require an explicit source-build upgrade or overlay port.
-Run `python3 scripts/check-release.py` and `python3 scripts/test.py` to validate
-portable source and synthetic tests. Browser/native-core tests are documented
-in their headers and require your own staged deployment/build sources.
-
-The frontend and our standalone deployment additions use Apache 2.0, with
-upstream attribution retained. Emulator cores and the optional Nextcloud app
-have separate licenses, including GPL/AGPL and noncommercial terms. The full
-core bundle must not be treated as wholly Apache-licensed or unrestricted for
-commercial redistribution. The modified 3DS corresponding source ships in the
-image at `/licenses/sources/3ds-source.tar.gz`. See [LICENSE](LICENSE),
-[NOTICE](NOTICE), and [THIRD_PARTY.md](THIRD_PARTY.md).
+The frontend and standalone deployment additions use Apache 2.0 with attribution retained. Emulator cores and the optional Nextcloud app have separate licenses, including GPL/AGPL and noncommercial terms. The full bundle is not wholly Apache-licensed or unrestricted for commercial redistribution. Read [privacy and licenses](docs/wiki/privacy-and-licenses.md), [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md). Modified 3DS corresponding source ships at `/licenses/sources/3ds-source.tar.gz` in the image.

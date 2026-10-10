@@ -2,13 +2,19 @@
 
 [Wiki home](README.md) · [Nextcloud boundaries](nextcloud-and-access.md#credential-boundaries) · [Third-party notices](../../THIRD_PARTY.md)
 
+## Before connecting or sharing files
+
+Nextcloud **Link** approves a browser connection for game progress. Nextcloud **Manage → Disconnect this browser** revokes it while leaving remote files intact. The arcade shows connection/account status; check it on shared devices. Keep your browser profile trusted because it holds saves and the remembered credential.
+
+Dropbox ROM/feed sharing and Google Drive file sharing are separate from save synchronization. People who can fetch a shared file URL can obtain that file. Do not put private BIOS/key material in shared links or public feeds. Google also explains that shared-file owner information can be visible in its [sharing help](https://support.google.com/drive/answer/2494822).
+
 ## Data handled by the app
 
 cloudЯcade stores local progress, controller preferences, Recently Played and eligible offline assets in browser storage. Nextcloud connection credentials are also retained by the browser when linked. These belong to the site's origin and profile; another origin/browser does not share them automatically.
 
 When linked, the app sends supported saves, state slots, controller preferences, history and relevant 3DS auxiliary data to the configured user's Nextcloud folder. The server bridge enforces folder confinement for its requests; the native app credential retains Nextcloud's standard account access. Cloud login uses temporary PHP session state, and regular WebDAV credentials are supplied per request rather than kept as permanent server account configuration.
 
-The scanner reads operator-mounted ROMs/BIOS and optional database metadata, and writes feeds, cached identities and derived discs. Optional IGDB cover URLs can cause browsers to request artwork from that external host. Imported feeds can point to other hosts; those hosts receive the player's asset requests under their own policies. Your gateway/identity provider can also maintain its own access logs and sessions.
+The scanner reads operator-mounted ROMs/BIOS and optional database metadata, and writes feeds, cached identities and derived discs. Optional IGDB cover URLs can cause browsers to request artwork from that external host. Imported feeds can point to other hosts, including Dropbox direct links; those hosts receive the player's asset requests under their own policies. A downloaded Drive source file served from the arcade is fetched from the arcade during play, rather than automatically synchronizing to Drive. Your gateway/identity provider can also maintain its own access logs and sessions.
 
 3DS shader-link diagnostics can record game title, core revision, GPU/browser information, compiler logs and generated shader sources. Reports are bounded and may persist locally and sync to the connected cloud account. Review diagnostics before sharing them publicly. They are troubleshooting data, not a ROM or account credential export.
 

@@ -2,34 +2,53 @@
 
 [Project README](../../README.md) · [Source repository](https://github.com/jacoknapp/cloudrcade)
 
-cloudЯcade is a self-hosted browser arcade based on webRcade. A feed describes your games; the browser loads the appropriate emulator when you launch one. The Docker image also builds feeds from an operator-supplied ROM library. Games, BIOS files, decryption keys, Nextcloud accounts and an HTTPS gateway are supplied separately.
-
-This wiki lives in Git with the code. The project README gives the release overview and short installation instructions; these pages explain everyday use and operating a deployment. Examples use generic hosts and the root repository's Compose service name, `webrcade`, even though the app and image are named cloudЯcade/cloudrcade. A custom Compose deployment may use a different service name.
+cloudЯcade is a website for playing an operator-supplied game library in your browser. Start with the route below that fits you. You do not need to understand server configuration to play.
 
 ## Start here
 
-| Task | Guide |
+**Players:** get the website address from its operator, follow [your first game](quick-start.md#play-your-first-game), then read [controls](controls-and-menus.md) and [saves](saves-and-storage.md). If you want the same progress on another device, use the visible [Nextcloud connection screens](nextcloud-and-access.md#link-as-a-player) before launching on that device.
+
+**Operators:** you are the person installing and maintaining the arcade. Follow [Docker quick start](quick-start.md#prepare-the-deployment), [folder layout](library-administration.md#rom-directory-layout) and [operations](operations-and-troubleshooting.md). Players need your arcade URL, their account instructions and an explanation of which cloud options you have enabled.
+
+| I need to… | Read |
 | --- | --- |
-| Start a Docker deployment and launch your first game | [Quick start](quick-start.md) |
-| Browse, search, switch feeds, install the web app | [Library and devices](library-and-devices.md) |
-| Use touch, keyboard and gamepad controls; pause or edit layouts | [Controls and game menus](controls-and-menus.md) |
-| Preserve progress, understand save states and recover failed uploads | [Saves and storage](saves-and-storage.md) |
-| Link Nextcloud, configure automatic login, or operate SSO | [Nextcloud and access](nextcloud-and-access.md) |
-| Add ROMs/BIOS, understand scanner output and metadata | [Library administration](library-administration.md) |
-| Understand streamed games, offline caching and 3DS limitations | [Streaming, offline and 3DS](streaming-offline-and-3ds.md) |
-| Configure, build, upgrade, back up and diagnose the app | [Operations and troubleshooting](operations-and-troubleshooting.md) |
-| Review data handling and redistribution conditions | [Privacy and licenses](privacy-and-licenses.md) |
+| Launch my first game, or install my first server | [Quick start](quick-start.md) |
+| Browse folders, search, switch feeds or install the web app | [Library and devices](library-and-devices.md) |
+| Use keyboard/gamepad/touch, pause or move buttons | [Controls and game menus](controls-and-menus.md) |
+| Set up local storage, Nextcloud, Dropbox or Drive; use state slots or recover progress | [Saves and storage](saves-and-storage.md) |
+| See Nextcloud status, Link, Manage, disconnect or reconnect | [Nextcloud and access](nextcloud-and-access.md) |
+| Add games/BIOS and understand the server's directories | [Library administration](library-administration.md) |
+| Prepare offline play or understand PlayStation/3DS streaming | [Streaming, offline and 3DS](streaming-offline-and-3ds.md) |
+| Configure, back up, upgrade or fix the server | [Operations and troubleshooting](operations-and-troubleshooting.md) |
+| Understand stored data, runtime keys and license terms | [Privacy and licenses](privacy-and-licenses.md) |
 
-## Choose your role
+## Words used in these guides
 
-**Players:** obtain the arcade URL from its operator, open it in a browser, complete any site sign-in, select a system folder and a game, then choose **Play**. Read the controls and saves guides before relying on progress across devices. Installing the web app is optional.
+| Word | Meaning |
+| --- | --- |
+| Operator | The person running the website and supplying the library, cloud configuration and access policy |
+| Player | Someone opening the website to play; a player may also be its operator |
+| ROM/disc image | A game's data file; use content you have permission to use |
+| BIOS/firmware | Console system files some emulators need; supplied separately from games |
+| Emulator/core | Software that runs a console's games inside the browser |
+| Feed | A JSON document listing games, systems, artwork and file URLs; it points to game files rather than containing them |
+| System folder | A library category such as NES or PlayStation; the browser view of a feed |
+| In-game save | Progress written by the game's own save menu or memory card system |
+| Save state/slot | An emulator snapshot of a particular moment; separate from the game's own save |
+| Browser profile | The particular browser user/profile that owns local saves, credentials and cached files |
+| Installed web app/PWA | A shortcut that opens the same website in an app-style window |
+| SSO | Single sign-on: an existing identity-provider session can help sign into the arcade/Nextcloud |
 
-**Operators:** start with Docker quick start, then library administration and operations. Nextcloud and SSO are optional. A local-only arcade can use browser-local saves, but remote device access and service workers require a suitable secure browser context. The public deployment should use HTTPS.
+## Who supplies what
 
-**Contributors:** see [build architecture](../architecture.md), [runtime implementation documentation](../../deploy/webrcade/README.md) and [third-party attribution](../../THIRD_PARTY.md). The shipped frontend comes from a pinned upstream runtime plus verified overlays; inherited frontend source edits alone do not change the release image.
+The release supplies the browser app, emulator integration and integrated scanner. The operator supplies Docker, HTTPS/access configuration, ROMs, BIOS/keys and any optional metadata or Nextcloud server. Players supply their own allowed cloud account and approve the connection when needed.
 
-## What to expect
+[Cloud choices](saves-and-storage.md#choose-a-storage-option) explains the difference between progress synchronization and hosting source files. Nextcloud synchronizes supported progress, controller preferences and Recently Played. It does not copy the ROM library to your cloud account. Offline caching stores eligible files actually loaded by a browser; it does not download every game. Streaming needs access to uncached bytes during play.
 
-Desktop uses the upstream carousel. Phones and touch tablets use the compact library and native game launcher. Emulator performance and compatibility vary by system, game, browser and device. Linux browser automation is useful regression evidence, but it does not establish full-speed playback or compatibility on a physical phone.
+Desktop uses a carousel; phones and touch tablets use a compact full-viewport library. Games and controls vary by system. Speed and compatibility depend on the game, device and browser, particularly for 3DS. Test the game and its save behavior on the device you intend to use.
 
-Nextcloud adds account-scoped saves, controller preferences and Recently Played synchronization. It does not synchronize your ROM collection. Offline caching stores eligible assets actually loaded by the browser; it does not pre-download every game. Streamed PlayStation discs and 3DS ROMs need a connection for uncached data, and external 3DS keys are never cached.
+## About these pages
+
+These pages live in Git alongside the code. Generic examples use `arcade.example.com` and the root Compose service name `webrcade`; a custom deployment may use another service name. Folder examples use the root `.env.example` defaults. Follow your operator's paths if they differ.
+
+Contributors can continue with [architecture](../architecture.md), [runtime implementation](../../deploy/webrcade/README.md) and [third-party attribution](../../THIRD_PARTY.md). The release uses a pinned upstream runtime plus verified overlays; inherited frontend source edits alone do not update the released image.

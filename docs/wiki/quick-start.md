@@ -2,6 +2,21 @@
 
 [Wiki home](README.md) · [Project README](../../README.md)
 
+## Play your first game
+
+These steps are for using an existing arcade. If you are installing the server yourself, continue to [Prepare the deployment](#prepare-the-deployment).
+
+1. Open the arcade URL your operator gave you. Complete the website's sign-in if one appears.
+2. If you want cloud progress, open **Settings → Cloud Storage** before starting. For an enabled Nextcloud server, choose **Link**, finish its approval, and check that Status says **Connected**. If the site links automatically, still check the account shown. See [the connection walkthrough](nextcloud-and-access.md#link-as-a-player).
+3. Open a system folder, select a game, and choose **Play**. Wait for the loading screen to finish; the browser downloads the emulator and required game files.
+4. Use touch buttons, a connected gamepad or the keyboard. On touch, **Menu** opens the pause menu. For other devices, use the emulator's **View Controls** guide to find its controls and pause shortcut.
+5. Save using the game's own save function if it has one. Open the native pause menu and exit back to the library. Allow saving to finish and read any error before closing the tab.
+6. Reopen the game and check your progress before relying on it. If you plan to switch devices, follow [Moving to another device](saves-and-storage.md#moving-to-another-device).
+
+You can play supported games without linking cloud storage; their local progress belongs to this browser/profile. Installing the web app is optional and does not itself move saves into the cloud. A game that does not have its own save function may offer emulator state slots; see [the difference](saves-and-storage.md#in-game-saves-and-save-states).
+
+If something fails, use [player troubleshooting](operations-and-troubleshooting.md#player-troubleshooting) and tell the operator the game, device/browser and visible error. Do not clear browser data to try to fix missing progress.
+
 ## Prepare the deployment
 
 You need Docker with Compose, space for ROMs and writable app data, and an HTTPS origin reachable by your players. Start with a small game library to check the deployment before adding large discs or optional integrations.

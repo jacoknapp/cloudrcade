@@ -1,10 +1,54 @@
 # Nextcloud and access
 
-[Wiki home](README.md) · [Saves](saves-and-storage.md) · [Operations](operations-and-troubleshooting.md)
+[Wiki home](README.md) · [Cloud choices and saves](saves-and-storage.md) · [Operations](operations-and-troubleshooting.md)
+
+Nextcloud is optional cloud storage for your progress. It is visible in the arcade: **Settings → Cloud Storage** shows a Nextcloud row, a **Link** or **Manage** button, and a connection status when the operator enables it. A separate connection page handles sign-in, approval and disconnection. Linking the arcade website and signing into Nextcloud are related but separate steps.
+
+## Link as a player
+
+1. Open the arcade and complete any website sign-in.
+2. Open **Settings** and move to **Cloud Storage**. On smaller screens, use the settings page arrows to reach it.
+3. Find **Nextcloud**. **Link** means this browser has no connection; choose it. If it says **Manage**, read the Status/account first: this browser already remembers a connection.
+4. On the connection page, finish Nextcloud sign-in and approve access. The ordinary native flow opens a separate Nextcloud tab while the arcade page waits. If no tab opens, choose **Open Nextcloud sign-in ↗** on the page. **Use Nextcloud password instead ↗** is another visible option when an SSO route needs a manual fallback.
+5. After approval, return to the waiting arcade tab if necessary. It finishes the connection and returns to the original library/game URL.
+6. Open Cloud Storage again and check Status. It should read **Connected** (with your name when available) and **automatic saves**. Confirm the account before loading valuable progress.
+
+You do not enter a server URL or choose a cloud save directory in these player settings. The operator sets the Nextcloud server and folder. If the Nextcloud row is absent or access is denied, ask the operator which cloud choices this site offers. Having a Nextcloud account elsewhere does not automatically connect it to this arcade.
+
+## What the visible screens mean
+
+| What you see | Meaning and next action |
+| --- | --- |
+| **Link** and **Disconnected · saves stay on this browser** | No connected Nextcloud account in this browser; Link before launching if you want cloud progress |
+| **Manage** and **Connected … · automatic saves** | A connection is remembered; check the displayed name and any save errors |
+| **Finish sign-in and approval in Nextcloud…** | The connection page is waiting for the Nextcloud tab; finish approval or use its visible sign-in link |
+| **Finishing your Nextcloud connection…** | The arcade is receiving the approved connection; let it complete |
+| **No access has been enabled for Nextcloud…** | The configured service or your access is unavailable; contact the operator |
+| A cloud/save error during play or exit | The latest transfer may have failed; preserve this browser's data and read [save recovery](saves-and-storage.md#offline-saves-and-recovery) |
+
+A remembered connection is not proof that a recent save uploaded successfully. An expired/revoked credential or network outage can still cause an error. Check errors before moving to another device.
+
+## Automatic login and manual linking
+
+The operator may enable automatic login. In that case, opening the arcade online can take you through the connection page without choosing Link. Existing valid credentials are reused; an existing Nextcloud/SSO session may avoid another password prompt. Nextcloud approval, sign-in or MFA can still appear according to the configured flow and account policy.
+
+Automatic login and Nextcloud availability are separate settings. Turning automatic login off leaves **Link**, **Manage** and connected save synchronization available. Automatic attempts are limited to once per tab to avoid sign-in loops. Explicit Disconnect pauses automatic reconnection in this browser until you choose Link again.
+
+With the ordinary native flow, Nextcloud shows its approval screen. An operator can install the [optional trusted handoff](#optional-trusted-handoff) for configured clients; that can authorize through an existing session in the same tab. The connection/status screens remain part of the user experience.
+
+## Manage, disconnect and reconnect
+
+Choose **Manage** in Cloud Storage to open the connection page. It shows the account (when available), the configured folder, **Disconnect this browser** and **Back to games**. Choose Back to games to return without changing the connection.
+
+Disconnect revokes the browser's Nextcloud app credential and removes its connection. Your existing remote save files remain in Nextcloud. It does not copy account-scoped progress into an unlinked or different-account profile. You can also revoke a credential through Nextcloud's account settings.
+
+To reconnect, return to **Settings → Cloud Storage → Nextcloud → Link** and complete approval again. Use the same server/account to reach the same cloud progress. If you reconnect or change accounts while a game is running, exit and reopen that game before using its cloud saves. Do not clear site data: that also removes local saves and pending recovery records.
+
+For another device, link that browser separately to the same Nextcloud account before launching. Follow [Moving to another device](saves-and-storage.md#moving-to-another-device) for the full sequence.
 
 ## Enable a server
 
-Nextcloud is optional. Native Login Flow v2 works without Authentik or a custom Nextcloud app. Configure the app's `.env`:
+This section is for the operator. Nextcloud's native Login Flow v2 works without Authentik or a custom Nextcloud app. The root example disables Nextcloud and automatic login. Configure the arcade's `.env`:
 
 ```dotenv
 WEBRCADE_PUBLIC_URL=https://arcade.example.com
@@ -15,21 +59,13 @@ NEXTCLOUD_HANDOFF=false
 NEXTCLOUD_SAVE_FOLDER=CloudRcade
 ```
 
-Use the actual Nextcloud HTTPS base URL, including its subdirectory if applicable. The app verifies upstream TLS. Recreate the container after changing environment settings:
+Use the actual Nextcloud HTTPS base URL, including its subdirectory if applicable. The arcade verifies upstream TLS. The public URL must be an HTTPS origin without a path. Recreate the container after changing environment settings:
 
 ```sh
 docker compose up -d --force-recreate webrcade
 ```
 
-Enablement and automatic login are independent. With automatic redirect off, **Link** remains available in **Cloud Storage** settings and connected save synchronization still works. Setting `NEXTCLOUD_AUTO_REDIRECT=true` attempts login when the app opens online. Interrupted automatic sign-in is attempted once per tab to avoid loops; explicit Disconnect pauses auto reconnect until Link is selected.
-
-## Link as a player
-
-Open Settings, find Cloud Storage, select Nextcloud and choose **Link** when available. Complete Nextcloud's own sign-in and native approval flow. The app polls while the approval tab is open, then returns to the original library/game URL. If the browser blocks the tab, use the connection page's visible sign-in link.
-
-The browser remembers a revocable app credential for that server. A reused valid credential avoids a new grant; an expired credential needs recovery/relinking. Existing identity-provider sessions can simplify sign-in, but authentication or MFA may still appear when required by policy.
-
-Check the connected account before loading valuable progress. Use normal game saving and exit; check cloud errors before moving to another device. Disconnect leaves the remote save folder intact. See [save recovery](saves-and-storage.md#offline-saves-and-recovery).
+Manually Link with a disposable test account first. Confirm the account/status, save and reopen a game, then check that the files appear in that account's configured Nextcloud folder. Set `NEXTCLOUD_AUTO_REDIRECT=true` only if you want automatic connection attempts at startup. Automatic login does not enable a server by itself.
 
 ## Optional trusted handoff
 

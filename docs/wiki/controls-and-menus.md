@@ -2,6 +2,18 @@
 
 [Wiki home](README.md) · [Library](library-and-devices.md) · [Saves](saves-and-storage.md)
 
+## Find the right menu
+
+There are three places with different jobs:
+
+| Place | How to open it | Use it for |
+| --- | --- | --- |
+| Library Settings | **Settings** while browsing | Cloud connection, browser preferences and available diagnostic settings |
+| Game pause menu | Touch **Menu**, or that emulator's keyboard/gamepad pause shortcut | View Controls, game settings, supported save-state slots, resume and exit |
+| Blue/aqua touch drawer | Tap/pull the **‹** edge tab while a game runs | Show/hide buttons, mute, translucence, edit layout and supported screen views |
+
+Start with **View Controls** for a game's actual keyboard/gamepad mappings. A NES game and a 3DS game have different buttons and options.
+
 ## Keyboard and physical controllers
 
 Keyboard and gamepad input remain available alongside touch controls. Use the emulator's **View Controls** guide to check the mapping for that system; bindings and available game settings vary by app. Connect or pair a controller through your operating system/browser before launching. A browser may need a controller button press before it exposes the gamepad.
@@ -20,7 +32,7 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 
 ## Edit a layout
 
-1. Launch a game and open **Controls → Edit layout**.
+1. Launch a game, tap/pull the **‹** edge tab to open the touch drawer, then choose **Edit layout**.
 2. Drag the individual buttons, directional pad or sticks to your preferred positions. Drag the edge tab vertically or to the opposite edge if needed.
 3. Choose **Save** to keep the layout and resume play. **Cancel** restores the prior layout. **Reset** restores defaults for the current orientation; choose Save afterward to keep that reset.
 4. Rotate the device and repeat if you want a different landscape/portrait layout.
@@ -29,7 +41,7 @@ The game pauses during editing. Layouts save per platform and orientation in the
 
 Buttons can overlap the game or sit below it; place them wherever you find comfortable. Game screens fit the available safe viewport independently of the controller. Moving buttons, opening the drawer or hiding controls never reserves a separate control area or shrinks the game. Saved positions are restored without restricting them to the default bottom pad.
 
-With Nextcloud connected, saved layouts, tab positions, translucence, visibility, mute and DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
+With Nextcloud connected, saved layouts, tab positions, translucence, visibility, mute and DS/3DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
 
 ## Platform-specific input
 
@@ -39,7 +51,17 @@ N64 has independent analog, D-pad and C buttons. PlayStation adds left/right ana
 
 DS retains native stylus touch on the game screen. Its drawer has **DS screens**: **View** cycles the six layouts, **Single screen** switches top/touchscreen, and **Dual screens** cycles two-screen views. Vertical layouts fit both screens within the safe area; other layouts retain normal centering. Choosing a view exits rotated book mode. The native microphone control remains available.
 
+3DS has its own **3DS screens → View** button in the drawer to cycle that app's available screen arrangements. Its saved choice is separate from the DS view.
+
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
+
+## Experimental settings and defaults
+
+The inherited **Experimental apps** preference is enabled once when the fork's migration first runs so experimental systems such as N64 can be used. After that migration, a player's saved choice is respected. It is a browser preference, not a guarantee of compatibility or speed.
+
+The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app, permits scanner entries and exposes an **Experimental Settings** page. There is no separate “Link 3DS” operation. That page contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. Disabling 3DS in the operator environment removes that optional page and registration.
+
+3DS uses native 1x resolution and the original console model by default. See [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) before changing settings expecting full-speed playback.
 
 ## Exit carefully
 

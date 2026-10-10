@@ -2,6 +2,12 @@
 
 [Wiki home](README.md) · [Controls](controls-and-menus.md) · [Saves](saves-and-storage.md)
 
+## What the library shows
+
+A system folder such as NES or PlayStation is a category in the currently loaded **feed**. Its games can come from the operator's server or from URLs in an imported feed. These library folders are a view of the listing; opening one does not browse your device's Downloads, Dropbox or Drive directories.
+
+The operator creates the normal Default feed by [scanning the server's ROM folders](library-administration.md#rom-directory-layout). Players can switch to another supplied feed using Feeds. Changing feeds changes the game listing, so first confirm the selected feed if expected games disappear.
+
 ## Browse and play
 
 The library organizes the selected feed into system folders. Open a folder, select a game, review its details and choose **Play**. The launcher loads the emulator on demand. Artwork and descriptions depend on the feed; a filename-only library works without metadata.
@@ -20,6 +26,8 @@ After you launch a game, **Recently Played** collects up to 20 matching games, n
 
 History is stored in this browser and syncs when Nextcloud is connected. A second linked device can receive the matching history. Games removed from the current feed are omitted from the view. The virtual folder uses the current feed's launch properties and artwork; it does not modify the shared generated feed or duplicate games in search.
 
+On startup, the app restores the current account's cached history and fetches its cloud history automatically. You do not need to switch tabs or launch another game to make the folder appear.
+
 ## Select or import a feed
 
 On mobile, the **Feeds** button in the main header opens the feed picker, alongside Search and Settings. **Back to Systems** stays within system-folder navigation. Desktop uses its native feed navigation. Open an existing feed card and use its native **LOAD** action to browse it; **DELETE** removes that saved feed entry. Use **Add** to open the native import dialog, which supports **URL** or **FILE** input. Use an actual webRcade-compatible feed document; a ROM file is not a feed file.
@@ -30,7 +38,11 @@ The operator's `WEBRCADE_FEED_URL` supplies the native Default feed. Browser-sel
 
 ## Install the web app
 
-Use the browser's **Install app** or **Add to Home Screen** action, when available. The installed app opens the same site and uses that site's browser storage. Installation does not download the whole library or bypass site sign-in.
+1. Open the arcade in your usual browser and sign in.
+2. On desktop/Android, look in the address bar or browser menu for **Install app** (wording varies). On iPhone/iPad, use Safari's Share button and **Add to Home Screen**, then confirm.
+3. Open the new icon, complete sign-in if requested, and test a game and its save. Use the same cloud account if the new window has separate browser storage.
+
+Use the browser's **Install app** or **Add to Home Screen** action, when available. The installed app opens the same site. Storage sharing between ordinary tabs and installed windows depends on the browser/platform; check your progress and cloud account before relying on it. Installation does not download the whole library or bypass site sign-in.
 
 The manifest requests fullscreen with a standalone fallback. The app supports notches/home indicators and both orientations. iOS controls the system status bar and may keep it visible; installation cannot guarantee hiding all OS UI. Reopen or reinstall an existing installation if it keeps an older display mode. Back up valuable local progress before removing site data; removing an icon and clearing browser data are different browser actions.
 
