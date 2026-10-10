@@ -49,7 +49,7 @@ def main():
     print('PASS worker updates preserve the pending sign-in cookie, including query strings')
     anonymous = urllib.request.build_opener(NoRedirect)
     for path in ['/play/', '/content/feeds/combined.json', '/cloud-saves/config.php',
-                 '/cloud-saves/api.php?action=status', '/cloud-saves/system-keys.php']:
+                 '/cloud-saves/api.php?action=status', '/cloud-saves/3ds-keys.php']:
         with get(path, anonymous) as response:
             assert response.status in (302, 401, 403), 'sensitive route exposed: ' + path
     print('PASS library, feed, configuration, cloud API and external key endpoint remain protected')
