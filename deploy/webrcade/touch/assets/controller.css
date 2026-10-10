@@ -1,4 +1,8 @@
 #wrcad-touch { font: 14px/1.4 system-ui, sans-serif; color: #f3f5ff; position: fixed; inset: 0; z-index: 2147483646; pointer-events: none; }
+html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh); bottom: auto; }
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  #wrcad-touch { height: var(--cr-viewport-height, 100vh); bottom: auto; }
+}
 /* Apply to each control and label: native button styles can override inheritance. */
 #wrcad-touch, #wrcad-touch * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 #wrcad-touch[hidden], #wrcad-touch [hidden] { display: none !important; }

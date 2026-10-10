@@ -22,7 +22,8 @@ def cloud_asset(name):
     revision = hashlib.sha256((Path(__file__).parent / 'touch/cloud' / name).read_bytes()).hexdigest()[:16]
     return '/cloud-saves/' + name + '?v=' + revision
 
-MENU_INCLUDE = '<link rel="stylesheet" href="' + controller_asset('menus.css') + '">'
+MENU_INCLUDE = ('<link rel="stylesheet" href="' + controller_asset('viewport.css') + '">'
+                '<link rel="stylesheet" href="' + controller_asset('menus.css') + '">')
 ICON_VERSION = hashlib.sha256((Path(__file__).parent / 'touch/assets/cloudrcade.svg').read_bytes()).hexdigest()[:16]
 # Safari's native UI can inspect HTML before the deferred brand adapter runs.
 ICON_INCLUDE = ('<link rel="icon" type="image/png" sizes="32x32" href="/touch-controls/cloudrcade-32.png?v=' + ICON_VERSION + '">'

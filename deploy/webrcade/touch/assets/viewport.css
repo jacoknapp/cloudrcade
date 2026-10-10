@@ -1,0 +1,15 @@
+/* Dynamic browser chrome needs dvh; installed apps have no browser toolbars.
+ * WebKit can exclude the status-bar inset from dynamic/percentage heights in
+ * installed mode: https://bugs.webkit.org/show_bug.cgi?id=254868 */
+:root { --cr-viewport-height: 100vh; }
+@supports (height: 100dvh) { :root { --cr-viewport-height: 100dvh; } }
+html[data-cr-installed] { --cr-viewport-height: 100vh; height: 100vh; }
+@supports (height: 100lvh) {
+  html[data-cr-installed] { --cr-viewport-height: 100lvh; height: 100lvh; }
+}
+html[data-cr-installed] body { height: 100%; margin: 0; padding: 0; }
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  :root { --cr-viewport-height: 100vh; height: 100vh; }
+  body { height: 100%; margin: 0; padding: 0; }
+  @supports (height: 100lvh) { :root { --cr-viewport-height: 100lvh; height: 100lvh; } }
+}

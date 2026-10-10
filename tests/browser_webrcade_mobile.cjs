@@ -44,12 +44,13 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
    await context.route('**/play/static/js/main.*.chunk.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.STAGE_PLAYER)}));
   }
   if(process.env.STAGE_PLAYER || process.env.STAGE_VIEWPORT){
-   for(const file of ['mobile.js','mobile.css','brand.js','controller.js','controller.css'])await context.route('**/touch-controls/'+file+'*',route=>route.fulfill({contentType:file.endsWith('css')?'text/css':'application/javascript',body:fs.readFileSync(path.join(root,'assets',file))}));
+   for(const file of ['mobile.js','mobile.css','brand.js','controller.js','controller.css','viewport.css'])await context.route('**/touch-controls/'+file+'*',route=>route.fulfill({contentType:file.endsWith('css')?'text/css':'application/javascript',body:fs.readFileSync(path.join(root,'assets',file))}));
   }
   if(process.env.STAGE_VIEWPORT)await context.route('**/play/**',async route=>{
    if(route.request().resourceType()!=='document')return route.fallback();
    const response=await route.fetch();
    let html=(await response.text()).replace('apple-mobile-web-app-status-bar-style" content="black"','apple-mobile-web-app-status-bar-style" content="black-translucent"');
+   html=html.replace('<head>', '<head><link rel="stylesheet" href="/touch-controls/viewport.css">');
    html=html.replace(/(<meta\b[^>]*name="viewport"[^>]*content=")([^"]*)(")/,(_,a,b,c)=>a+b.replace(/,?\s*viewport-fit\s*=\s*\w+/g,'')+', viewport-fit=cover'+c);
    await route.fulfill({response,body:html});
   });

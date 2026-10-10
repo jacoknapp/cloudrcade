@@ -1,5 +1,19 @@
 // Project branding for the library and emulator pages; preserves the existing theme.
 (() => {
+  // Legacy iOS exposes navigator.standalone; game frames inherit their host's
+  // installed mode even when their own display-mode query does not report it.
+  const standalone = matchMedia('(display-mode: standalone)');
+  const fullscreen = matchMedia('(display-mode: fullscreen)');
+  const installedMode = () => {
+    let inherited = false;
+    try { inherited = window !== window.top && window.top.document.documentElement.hasAttribute('data-cr-installed'); } catch (_) {}
+    document.documentElement.toggleAttribute('data-cr-installed',
+      Boolean(navigator.standalone || standalone.matches || fullscreen.matches || inherited));
+  };
+  installedMode();
+  standalone.addEventListener?.('change', installedMode);
+  fullscreen.addEventListener?.('change', installedMode);
+  window.addEventListener('pageshow', installedMode);
   const name = window.WrcadCloudConfig?.appName || 'cloudЯcade';
   const iconVersion = encodeURIComponent(window.WrcadCloudConfig?.iconVersion || 'cabinet');
   document.title = location.pathname.startsWith('/cloud-saves/') ? 'Nextcloud saves · ' + name : name;

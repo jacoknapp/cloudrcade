@@ -46,6 +46,8 @@ Use the browser's **Install app** or **Add to Home Screen** action, when availab
 
 The manifest requests fullscreen with a standalone fallback. The app supports notches/home indicators and both orientations. iOS controls the system status bar and may keep it visible; installation cannot guarantee hiding all OS UI. Reopen or reinstall an existing installation if it keeps an older display mode. Back up valuable local progress before removing site data; removing an icon and clearing browser data are different browser actions.
 
+Installed mode uses full display sizing for the library and game frame; ordinary browser tabs follow the visible area as browser bars change. After an update, fully close and reopen the installed app to load the new page. A dark strip below the controls is not reserved controller space; report it with your device/OS and a screenshot if it persists.
+
 ## Device expectations
 
 Use the same browser/profile when relying on local saves or offline files. Private browsing, another browser or another device has separate storage. Touch controls appear on touch devices; keyboard and physical gamepads remain available. Smaller desktop windows continue to use the desktop carousel when their primary pointer is a fine pointer. The compact library targets a primary coarse pointer at widths up to 1366 CSS pixels.
