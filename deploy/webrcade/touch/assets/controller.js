@@ -171,16 +171,6 @@
     return element;
   }
   const dsOrigin = system === 'nds' ? safeArea('kt-ds-origin') : null;
-  let screenControlsTop = null, screenPlacementStamp = '';
-  function screenBounds(origin) {
-    const bounds = origin.getBoundingClientRect();
-    // Portrait dual-screen games and touch controls share the safe viewport.
-    // Include the expanded touch targets, so touchscreen taps cannot hit a pad.
-    const bottom = innerWidth <= innerHeight && (enabled || editing) && (gameReady || editing) && screenControlsTop !== null ?
-      Math.min(bounds.bottom, screenControlsTop) : bounds.bottom;
-    return {left: bounds.left, top: bounds.top, width: bounds.width,
-      height: Math.max(1, bottom - bounds.top)};
-  }
   const dsViews = [[2, 'Side by side'], [3, 'Side by side ↔'], [0, 'Vertical'],
     [1, 'Vertical ↕'], [4, 'Top screen'], [5, 'Touchscreen']];
   function alignDSScreens(emulator) {
@@ -193,7 +183,9 @@
       canvas.style.removeProperty('left');
       return;
     }
-    const bounds = screenBounds(dsOrigin);
+    // Fit the native screen ratio into the entire safe area. Starting from the
+    // core's already-inset canvas would keep its margins and prevent enlargement.
+    const bounds = dsOrigin.getBoundingClientRect();
     const ratio = emulator.getDefaultAspectRatio();
     if (!bounds.width || !bounds.height || !Number.isFinite(ratio) || ratio <= 0) return;
     const width = Math.min(bounds.width, bounds.height * ratio), height = width / ratio;
@@ -231,7 +223,7 @@
     // only portrait's explicit positioning needs clearing on every resize.
     for (const name of ['left', 'top']) canvas.style.removeProperty(name);
     if (innerWidth > innerHeight) return;
-    const bounds = screenBounds(n3dsOrigin);
+    const bounds = n3dsOrigin.getBoundingClientRect();
     const ratio = emulator.getDefaultAspectRatio();
     if (!bounds.width || !bounds.height || !Number.isFinite(ratio) || ratio <= 0) return;
     const width = Math.min(bounds.width, bounds.height * ratio), height = width / ratio;
@@ -344,8 +336,6 @@
     if (!dsCycle.hidden) obstacles.push(dsCycle.getBoundingClientRect());
     if (editing) obstacles.push($('.kt-editor').getBoundingClientRect());
     const gap = 10; // Includes the editor's dashed outlines and a finger gap.
-    const portraitScreens = innerWidth <= innerHeight && (dsOrigin || n3dsOrigin);
-    const controlBounds = portraitScreens ? pad.getBoundingClientRect() : null;
     for (const element of movable) {
       const point = saved[element.dataset.layoutId];
       const r = element.getBoundingClientRect();
@@ -354,10 +344,7 @@
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
       const clampX = x => Math.max(8 + r.width / 2, Math.min(innerWidth - 8 - r.width / 2, x));
-      // Keep restored layouts and editor drags inside the portrait control area.
-      // The safe-area bottom stays reserved for the system home gesture.
-      const clampY = y => Math.max((controlBounds ? Math.max(8, controlBounds.top) : 8) + r.height / 2,
-        Math.min((controlBounds ? controlBounds.bottom : innerHeight - 8) - r.height / 2, y));
+      const clampY = y => Math.max(8 + r.height / 2, Math.min(innerHeight - 8 - r.height / 2, y));
       // Apply the exclusion area to defaults, restored layouts, and live drags.
       // Choose the closest free position alongside/above/below the tab.
       const xs = [desiredX, ...obstacles.flatMap(o => [o.left - gap - r.width / 2, o.right + gap + r.width / 2])].map(clampX);
@@ -381,18 +368,6 @@
       const radius = Math.min(pixels, rect.width / 2, rect.height / 2);
       return [{element, rect, radius}];
     });
-    screenControlsTop = hitAreas.length ? Math.min(...hitAreas.map(({rect}) => rect.top)) - TOUCH_PADDING - 8 : null;
-    placeScreens();
-  }
-  function placeScreens() {
-    if (!dsOrigin && !n3dsOrigin) return;
-    const stamp = `${innerWidth}:${innerHeight}:${enabled}:${gameReady}:${editing}:${screenControlsTop}`;
-    if (stamp === screenPlacementStamp) return;
-    screenPlacementStamp = stamp;
-    // Keep the footprint while the drawer is open, avoiding a display jump.
-    // Disabling controls makes the entire safe viewport available again.
-    const emulator = window.app?.emulator;
-    if (emulator?.started) emulator.updateScreenSize();
   }
   function cancelDrag() {
     if (!editDrag) return;
@@ -575,7 +550,6 @@
     const stamp = `${innerWidth}:${innerHeight}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
     host.classList.toggle('kt-enabled', enabled);
-    placeScreens();
   }
   function setDrawer(open) {
     clear(); drawerOpen = open; drawer.hidden = !open;

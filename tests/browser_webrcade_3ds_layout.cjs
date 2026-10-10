@@ -17,52 +17,55 @@ const { chromium, webkit } = require('playwright');
           contentType: 'text/html', body: '<html><head></head><body></body></html>',
         }));
         await page.goto('http://controller.test/play/app/retro-' + (system === '3ds' ? 'azahar' : 'melonds') + '/');
-        await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,
-          '../deploy/webrcade/touch/assets/controller.css'), 'utf8') });
-        // Desktop engines do not expose an iPhone's notch/home-indicator insets.
-        // Supply those bounds in this fixture, leaving the real layout code intact.
-        await page.addStyleTag({content: `
-          html, body { margin: 0; background: black; }
-          canvas { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-          .kt-ds-origin, .kt-3ds-origin { top: var(--test-top, 59px); bottom: 34px; }
-          #wrcad-touch .kt-pad { bottom: 34px; }
-        `});
-        await page.evaluate((system) => {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1200; canvas.height = 1440;
-          canvas.style.position = 'fixed'; document.body.appendChild(canvas);
-          localStorage.setItem('webrcade.touch.layouts.v1', JSON.stringify({
-            [`${system}:portrait`]: {'button-8': [.3, .12]},
-          }));
-          const controller = { isControlDown: () => false, isPadButtonDown: () => false,
-            getAxisValue: () => 0, isAxisLeft: () => false, isAxisRight: () => false,
-            isAxisUp: () => false, isAxisDown: () => false };
-          const emulator = {
-            started: true, paused: false, canvas, view: 0, bookMode: false,
-            controllers: { getController: () => controller },
-            getViews: () => [[0, 'Vertical'], [1, 'Side by side'], [2, 'Top screen']],
-            getView() { return this.view; }, setView(value) { this.view = value; this.updateScreenSize(); },
-            getScreenLayout() { return this.view; },
-            getPrefs() { return { getScreenLayout: () => this.view, setScreenLayout: (v) => this.view = v }; },
-            resetToggleLayout() {}, setBookMode(v) { this.bookMode = v; },
-            updateScreenLayout() { this.updateScreenSize(); },
-            getDefaultAspectRatio() {
-              if (system === 'nds') return [0, 1].includes(this.view) ? 256 / 384 : 512 / 192;
-              return [400 / 480, 720 / 240, 400 / 240][this.view];
-            },
-            updateScreenSize() {
-              const ratio = this.getDefaultAspectRatio();
-              const width = Math.min(innerWidth * .96, innerHeight * .96 * ratio);
-              canvas.style.width = `${width}px`; canvas.style.height = `${width / ratio}px`;
-              canvas.style.maxWidth = '96vw'; canvas.style.maxHeight = '96vh';
-            },
-            pause(value) { this.paused = value; return true; },
-          };
-          window.app = { isShowOverlay: () => false, isPauseScreen: () => false, emulator };
-        }, system);
-        await page.addScriptTag({ content: fs.readFileSync(path.join(__dirname,
-          '../deploy/webrcade/touch/assets/controller.js'), 'utf8') });
-        await page.waitForTimeout(300);
+        const installFixture = async () => {
+          await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,
+            '../deploy/webrcade/touch/assets/controller.css'), 'utf8') });
+          // Desktop engines do not expose an iPhone's notch/home-indicator insets.
+          // Supply those bounds in this fixture, leaving the real layout code intact.
+          await page.addStyleTag({content: `
+            html, body { margin: 0; background: black; }
+            canvas { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+            .kt-ds-origin, .kt-3ds-origin { top: var(--test-top, 59px); bottom: 34px; }
+            #wrcad-touch .kt-pad { bottom: 34px; }
+          `});
+          await page.evaluate((system) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1200; canvas.height = 1440;
+            canvas.style.position = 'fixed'; document.body.appendChild(canvas);
+            const controller = { isControlDown: () => false, isPadButtonDown: () => false,
+              getAxisValue: () => 0, isAxisLeft: () => false, isAxisRight: () => false,
+              isAxisUp: () => false, isAxisDown: () => false };
+            const emulator = {
+              started: true, paused: false, canvas, view: 0, bookMode: false,
+              controllers: { getController: () => controller },
+              getViews: () => [[0, 'Vertical'], [1, 'Side by side'], [2, 'Top screen']],
+              getView() { return this.view; }, setView(value) { this.view = value; this.updateScreenSize(); },
+              getScreenLayout() { return this.view; },
+              getPrefs() { return { getScreenLayout: () => this.view, setScreenLayout: (v) => this.view = v }; },
+              resetToggleLayout() {}, setBookMode(v) { this.bookMode = v; },
+              updateScreenLayout() { this.updateScreenSize(); },
+              getDefaultAspectRatio() {
+                if (system === 'nds') return [0, 1].includes(this.view) ? 256 / 384 : 512 / 192;
+                return [400 / 480, 720 / 240, 400 / 240][this.view];
+              },
+              updateScreenSize() {
+                const ratio = this.getDefaultAspectRatio();
+                const width = Math.min(innerWidth * .96, innerHeight * .96 * ratio);
+                canvas.style.width = `${width}px`; canvas.style.height = `${width / ratio}px`;
+                canvas.style.maxWidth = '96vw'; canvas.style.maxHeight = '96vh';
+              },
+              pause(value) { this.paused = value; return true; },
+            };
+            window.app = { isShowOverlay: () => false, isPauseScreen: () => false, emulator };
+          }, system);
+          await page.addScriptTag({ content: fs.readFileSync(path.join(__dirname,
+            '../deploy/webrcade/touch/assets/controller.js'), 'utf8') });
+          await page.waitForTimeout(300);
+        };
+        const saved = {'button-8': [.45, .82], 'button-9': [.6, .86]};
+        await page.evaluate(({system, saved}) => localStorage.setItem('webrcade.touch.layouts.v1',
+          JSON.stringify({[`${system}:portrait`]: saved, [`${system}:landscape`]: saved})), {system, saved});
+        await installFixture();
         for (const view of system === '3ds' ? [0, 1, 2] : [0, 2]) {
           await page.evaluate((view) => app.emulator.setView(view), view);
           for (const viewport of [{ width: 874, height: 402 }, { width: 402, height: 874 },
@@ -85,14 +88,15 @@ const { chromium, webkit } = require('playwright');
             if (viewport.width <= viewport.height && (system === '3ds' || view === 0)) {
               const canvas = await page.locator('canvas').boundingBox();
               assert(canvas.y >= 59 - .5, `${system} view ${view} ${viewport.width}x${viewport.height}: game stays below the status-bar safe area (${JSON.stringify(canvas)})`);
-              for (const control of await page.locator('.kt-pad button, .kt-pad .kt-stick').all()) {
-                const r = await control.boundingBox();
-                if (!r) continue;
-                assert(canvas.y + canvas.height + 10 <= r.y + .5,
-                  `${system} ${viewport.width}x${viewport.height}: game clears every controller touch target`);
-                assert(r.y + r.height <= viewport.height - 34 + .5,
-                  'controls stay above the home indicator, including restored positions');
-              }
+              const width = Math.min(viewport.width, (viewport.height - 59 - 34) * size.ratio);
+              assert(Math.abs(canvas.width - width) < .5 && Math.abs(canvas.height - width / size.ratio) < .5,
+                `${system} view ${view}: screens use the entire safe viewport independently of controls`);
+            }
+            for (const [id, point] of Object.entries(saved)) {
+              const r = await page.locator(`[data-layout-id="${id}"]`).boundingBox();
+              assert(Math.abs(r.x + r.width / 2 - point[0] * viewport.width) < .5 &&
+                Math.abs(r.y + r.height / 2 - point[1] * viewport.height) < .5,
+                `${system} ${id}: saved position survives resizing and view changes`);
             }
           }
         }
@@ -106,30 +110,43 @@ const { chromium, webkit } = require('playwright');
         await page.locator('.kt-toggle').tap();
         await page.locator('.kt-close').tap();
         const withoutControls = await page.locator('canvas').boundingBox();
-        assert(withoutControls.height > withControls.height, 'controls off restores display space');
+        assert.deepEqual(withoutControls, withControls, 'controls off does not resize the game');
         await page.locator('.kt-tab').tap();
         await page.locator('.kt-toggle').tap();
         await page.locator('.kt-close').tap();
         assert.deepEqual(await page.locator('canvas').boundingBox(), withControls,
-          'reenabling controls restores the separate screen/control areas');
+          'reenabling controls keeps the full game display');
         await page.locator('.kt-tab').tap();
         await page.locator('.kt-edit').tap();
         await page.waitForTimeout(200);
         const shoulder = page.locator('.kt-pad [data-cid="8"]');
         const beforeDrag = await shoulder.boundingBox();
         await page.mouse.move(beforeDrag.x + beforeDrag.width / 2, beforeDrag.y + beforeDrag.height / 2);
-        await page.mouse.down(); await page.mouse.move(120, 90); await page.mouse.up();
+        await page.mouse.down(); await page.mouse.move(120, 150); await page.mouse.up();
         const dragged = await shoulder.boundingBox(), editingCanvas = await page.locator('canvas').boundingBox();
-        assert(dragged.y >= (await page.locator('.kt-pad').boundingBox()).y - .5,
-          'editing cannot drag a portrait button over the game');
-        assert(editingCanvas.y + editingCanvas.height + 10 <= dragged.y + .5,
-          'editing keeps game screens clear of controller touch targets');
+        // WebKit rounds pointer coordinates to whole CSS pixels.
+        assert(Math.abs(dragged.x + dragged.width / 2 - 120) < 1 &&
+          Math.abs(dragged.y + dragged.height / 2 - 150) < 1,
+          'a button can be freely placed above the default pad area: ' + JSON.stringify({beforeDrag, dragged}));
+        assert.deepEqual(editingCanvas, withControls, 'editing an overlay does not shrink the game');
         await page.locator('.kt-cancel').tap();
         await page.waitForTimeout(200);
         assert.deepEqual(await page.locator('canvas').boundingBox(), withControls,
-          'cancel restores the prior screen/control layout');
+          'cancel preserves the full game display');
+        assert.deepEqual(await shoulder.boundingBox(), beforeDrag, 'cancel restores the saved button position');
+        await page.locator('.kt-tab').tap(); await page.locator('.kt-edit').tap();
+        const r = await shoulder.boundingBox();
+        await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+        await page.mouse.down(); await page.mouse.move(120, 180); await page.mouse.up();
+        await page.locator('.kt-save').tap();
+        await shoulder.waitFor({state: 'visible'});
+        const persisted = await shoulder.boundingBox();
+        assert.deepEqual(await page.locator('canvas').boundingBox(), withControls, 'saving never reserves controller space');
+        await page.reload(); await installFixture();
+        assert.deepEqual(await shoulder.boundingBox(), persisted, 'reload respects a saved button above the default pad');
+        assert.deepEqual(await page.locator('canvas').boundingBox(), withControls, 'reload keeps the full screen display');
         await page.close();
-        console.log('PASS', engine.name(), system, 'screen/control separation, safe areas, restored layouts, views, rotation, controls off/on and drawing-buffer ownership');
+        console.log('PASS', engine.name(), system, 'full safe viewport, saved L/R positions, free drag/save/reload/cancel, views/rotation, controls off/on and drawing-buffer ownership');
       }
     } finally { await browser.close(); }
   }

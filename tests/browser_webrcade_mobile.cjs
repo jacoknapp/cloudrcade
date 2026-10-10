@@ -2,6 +2,7 @@
  * NODE_PATH=<Playwright modules> WEBRCADE_TEST_ORIGIN=https://arcade.example.test
  * WEBRCADE_TEST_PORT=<TLS tunnel port> node tests/browser_webrcade_mobile.cjs
  * STAGE_PLAYER=<patched player> intercepts only new library assets during staging.
+ * STAGE_VIEWPORT=1 stages current viewport/controller adapters and initial metadata.
  * WEBRCADE_TEST_OUTPUT=<existing directory> saves viewport screenshots.
  * Cloud transport is disabled in a disposable profile; no operator saves/accounts.
  */
@@ -41,8 +42,17 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
     await route.fulfill({response,body:html});
    });
    await context.route('**/play/static/js/main.*.chunk.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.STAGE_PLAYER)}));
-   for(const file of ['mobile.js','mobile.css','brand.js'])await context.route('**/touch-controls/'+file+'*',route=>route.fulfill({contentType:file.endsWith('css')?'text/css':'application/javascript',body:fs.readFileSync(path.join(root,'assets',file))}));
   }
+  if(process.env.STAGE_PLAYER || process.env.STAGE_VIEWPORT){
+   for(const file of ['mobile.js','mobile.css','brand.js','controller.js','controller.css'])await context.route('**/touch-controls/'+file+'*',route=>route.fulfill({contentType:file.endsWith('css')?'text/css':'application/javascript',body:fs.readFileSync(path.join(root,'assets',file))}));
+  }
+  if(process.env.STAGE_VIEWPORT)await context.route('**/play/**',async route=>{
+   if(route.request().resourceType()!=='document')return route.fallback();
+   const response=await route.fetch();
+   let html=(await response.text()).replace('apple-mobile-web-app-status-bar-style" content="black"','apple-mobile-web-app-status-bar-style" content="black-translucent"');
+   html=html.replace(/(<meta\b[^>]*name="viewport"[^>]*content=")([^"]*)(")/,(_,a,b,c)=>a+b.replace(/,?\s*viewport-fit\s*=\s*\w+/g,'')+', viewport-fit=cover'+c);
+   await route.fulfill({response,body:html});
+  });
   const page=await context.newPage(),errors=[],coreRequests=[];
   page.on('pageerror',e=>{errors.push(e.message);console.log('JS',e.message)});
   page.on('request',r=>{if(/\.wasm(?:\?|$)/.test(r.url()))coreRequests.push(r.url())});
@@ -168,6 +178,19 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   const frame=page.frameLocator('#webrcade-app-iframe');
   const iframe=await (await page.locator('#webrcade-app-iframe').elementHandle()).contentFrame();
   await iframe.waitForFunction(()=>window.app?.emulator?.started,{timeout:60000});
+  for(const viewport of [{width:390,height:844},{width:844,height:390},{width:320,height:568},{width:768,height:1024}]){
+   await page.setViewportSize(viewport);await page.waitForTimeout(150);
+   const bounds=await page.locator('#webrcade-app-iframe').boundingBox();
+   assert(Math.abs(bounds.x)<1 && Math.abs(bounds.y)<1 && Math.abs(bounds.width-viewport.width)<1 && Math.abs(bounds.height-viewport.height)<1,
+    'native game frame fills the mobile viewport: '+JSON.stringify(bounds));
+   assert.deepEqual(await iframe.evaluate(()=>({width:innerWidth,height:innerHeight})),viewport,'game uses the full parent viewport');
+  }
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(150);
+  for(const scope of [page,iframe]){
+   assert((await scope.locator('meta[name="viewport"]').getAttribute('content')).includes('viewport-fit=cover'),'library and game request the full safe-area viewport');
+   await scope.evaluate(()=>document.querySelector('meta[name="viewport"]').content='width=device-width, initial-scale=1, viewport-fit=auto');
+   await scope.waitForFunction(()=>document.querySelector('meta[name="viewport"]').content.includes('viewport-fit=cover'));
+  }
   const overlays=iframe.getByText('Click', {exact:false});
   // Resume audio through the existing overlay, if this browser requires a gesture.
   if(await overlays.count())await overlays.first().click({timeout:3000}).catch(()=>{});

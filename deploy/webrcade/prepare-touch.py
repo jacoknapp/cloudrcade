@@ -112,8 +112,15 @@ def overlay(relative, source, original, bundle, mains, tmp):
         bundle_url = '/arcade-bundles/' + relative.parts[1] + '/' + bundle_name
         original = original.replace('src="' + mains[0] + '"', 'src="' + bundle_url + '"', 1)
     # The adapter must run before inline webpack bootstrap code, not defer.
-    original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black">' + cloud, 1)
+    original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">' + cloud, 1)
     original = re.sub(r'<title>.*?</title>', '<title>cloudЯcade</title>', original, flags=re.S)
+    # Include this before JS runs, in game frames as well as the library.
+    def cover_viewport(match):
+        content = re.sub(r',?\s*viewport-fit\s*=\s*\w+', '', match[2])
+        return match[1] + content + ', viewport-fit=cover' + match[3]
+    original, viewport_count = re.subn(
+        r'(<meta\b[^>]*name="viewport"[^>]*content=")([^"]*)(")', cover_viewport, original)
+    assert viewport_count == 1, ('Unexpected viewport metadata', source)
     # Supply icons in the initial HTML as well as the runtime brand adapter.
     original = re.sub(r'<link\b[^>]*rel=["\'](?:icon|apple-touch-icon|manifest)["\'][^>]*>', '', original)
     original = original.replace('<head>', '<head>' + ICON_INCLUDE, 1)

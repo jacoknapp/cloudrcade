@@ -54,8 +54,8 @@ Settings and in-game menus use compact black/red panels; pause actions stack
 in portrait and use two columns in landscape. Settings navigation and action
 buttons stay in place across pages while longer content scrolls inside. The touch controller and its
 pop-out retain their original blue/aqua styling.
-Portrait 3DS and vertically stacked DS screens fit above the touch controls,
-including their touch targets. Turning controls off restores display space.
+Game frames fill the mobile viewport. Touch controls can overlap the game and
+retain your saved positions; moving or hiding controls never shrinks the display.
 The loading logo and status fit mobile viewports and remain visible during slow loads.
 The startup update popup shows current fork notes, with compact mobile text and
 separate fixed controls for **Don't show again** and **OK**.
@@ -71,9 +71,8 @@ Use your browser's **Install app** or **Add to Home Screen** action for an app
 without browser navigation bars. The manifest requests `fullscreen`, with a
 `standalone` fallback, and supports notches/home indicators without locking
 orientation. iOS controls its system status bar and can keep it visible in a
-Home Screen app; a site cannot guarantee hiding OS UI on every device.
-The app requests an opaque black iOS status bar to keep content below system UI.
-Existing installations may need to be reopened or reinstalled to pick up a changed display
+Home Screen app; a site cannot guarantee hiding OS UI on every device. Existing
+installations may need to be reopened or reinstalled to pick up a changed display
 mode. See [WebKit's Home Screen guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
 and [status-bar limitation](https://bugs.webkit.org/show_bug.cgi?id=301994).
 

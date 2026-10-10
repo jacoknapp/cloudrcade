@@ -15,7 +15,7 @@
     link.rel = rel; link.href = href; link.type = type; document.head.append(link);
   }
   for (const [key, value] of [['apple-mobile-web-app-capable', 'yes'],
-    ['apple-mobile-web-app-status-bar-style', 'black'],
+    ['apple-mobile-web-app-status-bar-style', 'black-translucent'],
     ['apple-mobile-web-app-title', name], ['theme-color', '#000000']]) {
     let meta = document.querySelector('meta[name="' + key + '"]');
     if (!meta) { meta = document.createElement('meta'); meta.name = key; document.head.append(meta); }
@@ -23,4 +23,18 @@
   }
   const description = document.querySelector('meta[name="description"]');
   if (description) description.content = name + ' — games in your browser.';
+  // Game frames need the same full viewport as the library. Preserve it if
+  // native startup replaces the viewport meta while Safari settles its layout.
+  let viewport = document.querySelector('meta[name="viewport"]');
+  if (!viewport) {
+    viewport = document.createElement('meta'); viewport.name = 'viewport';
+    viewport.content = 'width=device-width, initial-scale=1'; document.head.append(viewport);
+  }
+  const coverViewport = () => {
+    if (!/\bviewport-fit\s*=\s*cover\b/.test(viewport.content)) {
+      viewport.content = viewport.content.replace(/,?\s*viewport-fit\s*=\s*\w+/g, '') + ', viewport-fit=cover';
+    }
+  };
+  coverViewport();
+  new MutationObserver(coverViewport).observe(viewport, {attributes: true, attributeFilter: ['content']});
 })();
