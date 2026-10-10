@@ -75,6 +75,11 @@ Set `NEXTCLOUD_AUTO_REDIRECT=true` to start login automatically. These flags are
 independent: disabling automatic login leaves the **Link** button available.
 Other cloud choices retain their normal setup flow.
 
+If Authentik protects the app, allow the static offline worker to update without
+sign-in using the exact path expression `^/touch-controls/offline-worker\.js$`.
+See the [proxy configuration and verification](deploy/webrcade/README.md#offline-play)
+to prevent background updates from interrupting the sign-in redirect.
+
 For automatic authorization with an existing Nextcloud/Authentik session,
 install the [optional Nextcloud handoff app](integrations/nextcloud/README.md),
 configure its exact trusted origin/client and existing SAML provider, then set

@@ -99,6 +99,19 @@ Only files actually loaded are cached; this does not download the full game coll
 
 `offline.js` registers `offline-worker.js` at scope `/`, allowed by the Apache header on that worker only. The worker caches the initial library shell and feed, then allowlisted same-origin static assets and complete game responses in the configured storage-prefix cache. Online requests refresh cached files; unavailable or slow servers fall back to cached copies. Library and emulator HTML keys omit launch query parameters, while feed and asset keys retain them. Cached full game files support HEAD and byte-range reads. Partial responses, redirects, login HTML, private/no-store responses, credentials, cloud APIs and authentication routes are not cached. First-visit resources are warmed after worker activation; disc warming never forces a full download. Existing caches and save stores are not purged during updates.
 
+When protecting the app with Authentik, add exactly
+`^/touch-controls/offline-worker\.js$` to this application's unauthenticated-path
+expressions. Browsers check this static worker for updates during navigation,
+including while the sign-in redirect is pending. Protecting the worker can make
+Authentik clear the pending session cookie and return an empty HTTP 400 callback.
+Keep the library, feeds, ROMs, BIOS keys, configuration and cloud APIs protected;
+the worker contains public application code only. Query strings on its update
+URL must also work. Run `python3 scripts/check-auth-proxy.py --origin
+https://arcade.example.com` to check the exception and cookie retention without
+logging into an account. A tab already on the failed callback needs a fresh
+navigation to `/outpost.goauthentik.io/start` with `rd` set to the URL-encoded
+public library URL.
+
 Run `node tests/test_webrcade_offline.cjs`. `tests/browser_webrcade_offline.py` uses Playwright, a disposable persistent Chromium profile, and a staged/live SSH tunnel to verify online loading, a full browser restart offline, real emulator launches, local-save retention, DS isolation headers, uncached errors and reconnection. Set `WEBRCADE_TEST_PORT`, `CHROME` and optionally `ONLY` (comma-separated feed types). Regenerate HTML with `prepare-touch.py`, deploy both offline scripts, and apply `rom-library.conf` before testing. Background: [service worker lifecycle and offline caching](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
 
 ## Recently Played
