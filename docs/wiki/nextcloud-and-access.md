@@ -73,6 +73,11 @@ python3 scripts/check-auth-proxy.py --origin https://arcade.example.com
 
 An already failed empty HTTP 400 callback needs a fresh sign-in navigation. See [troubleshooting](operations-and-troubleshooting.md#blank-page-after-gateway-sign-in) for recovery. Do not broaden anonymous access to private assets to fix a worker update.
 
+Safari's native share/Home Screen UI also needs to fetch the static app icons
+without a login session. Allow the exact [app icon paths](../../deploy/webrcade/README.md#app-icons)
+and use the same proxy checker to verify them. The library, feeds, ROMs and
+BIOS keys remain protected.
+
 ## Credential boundaries
 
 The browser stores its app credential in site storage and supplies it per request to the same-origin PHP bridge. The bridge targets only the configured server and files under `NEXTCLOUD_SAVE_FOLDER`; it enforces TLS, session-bound CSRF, conditional writes and a 64 MB upload limit. PHP retains temporary login-flow state and a one-shot result until acknowledgement within the flow's lifetime; ordinary WebDAV credentials are request-only on the server.

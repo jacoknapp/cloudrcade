@@ -114,6 +114,33 @@ public library URL.
 
 Run `node tests/test_webrcade_offline.cjs`. `tests/browser_webrcade_offline.py` uses Playwright, a disposable persistent Chromium profile, and a staged/live SSH tunnel to verify online loading, a full browser restart offline, real emulator launches, local-save retention, DS isolation headers, uncached errors and reconnection. Set `WEBRCADE_TEST_PORT`, `CHROME` and optionally `ONLY` (comma-separated feed types). Regenerate HTML with `prepare-touch.py`, deploy both offline scripts, and apply `rom-library.conf` before testing. Background: [service worker lifecycle and offline caching](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
 
+## App icons
+
+The initial library and emulator HTML includes the Apple icon and favicon links,
+before JavaScript runs. Apple/ordinary PNGs use an opaque black background and
+large artwork; Android has a separate maskable PNG with its required safe area.
+The conventional `/apple-touch-icon.png`, `/apple-touch-icon-precomposed.png` and
+`/favicon.ico` paths also resolve to these assets. Browser storage and PWA identity
+remain stable when icon artwork changes.
+
+Native Safari icon requests can arrive without the page's login session. If a
+gateway protects the app, allow only these static branding paths anonymously:
+
+```text
+^/touch-controls/cloudrcade(?:\.svg|\.ico|-(?:32|180|192|512|maskable-512)\.png)$
+^/apple-touch-icon(?:-precomposed)?\.png$
+^/favicon\.ico$
+```
+
+Keep the separate offline-worker exception described above. The proxy checker
+verifies public icon responses and pending-cookie preservation as well as private
+route protection. Avoid allowing the entire `/touch-controls/` directory.
+
+To update the artwork, edit `touch/assets/cloudrcade.svg` and run
+`node scripts/render-icons.cjs` from the repository root with Playwright and
+Chromium available. The script renders and validates opaque, centered icons in
+both the Docker overlay and source app, plus the separate maskable derivative.
+
 ## Recently Played
 
 The library starts on the folder picker with **Recently Played** highlighted when it contains games. Select it to open it; returning from a game stays in the folder you were browsing. It keeps the last 20 launched games on this browser, newest first, with repeat launches moved to the front. All system folders remain available. Recently Played is hidden when no history entries match the current library; the first system folder is selected instead. It appears automatically after playing a game or receiving matching Nextcloud history.

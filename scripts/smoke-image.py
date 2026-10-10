@@ -5,6 +5,7 @@ Uses synthetic ROM/disc/key fixtures only, never accounts or operator files.
 Usage: python3 scripts/smoke-image.py cloudrcade:test
 """
 import hashlib
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import ssl
@@ -34,6 +35,17 @@ def until(check, timeout=60):
             pass
         time.sleep(0.5)
     raise AssertionError('Timed out waiting for the integrated app')
+
+class IconLinks(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.icons = []
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'link' and attrs.get('rel') == 'apple-touch-icon':
+            self.icons.append(attrs)
 
 with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     root = Path(temp)
@@ -98,10 +110,18 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/touch-controls/menus.css?v=' in html
             assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
+            apple = IconLinks(html).icons
+            assert len(apple) == 1 and apple[0]['sizes'] == '180x180', 'Apple icon must exist before JS runs'
+            with get(apple[0]['href']) as icon:
+                assert icon.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()
+        for path in ['/apple-touch-icon.png', '/apple-touch-icon-precomposed.png']:
+            with get(path) as response:
+                assert response.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()
         with get('/cloud-saves/manifest.php') as response:
             manifest = json.load(response)
             assert manifest['name'] == 'Release Test Arcade' and manifest['start_url'] == '/play/'
             assert manifest['display'] == 'fullscreen' and manifest['display_override'] == ['fullscreen', 'standalone']
+            assert any(icon.get('purpose') == 'maskable' and 'maskable-512.png' in icon['src'] for icon in manifest['icons'])
         with get('/touch-controls/cloudrcade-192.png') as response:
             assert response.read(8) == b'\x89PNG\r\n\x1a\n'
         with get('/play/app/retro-azahar/') as response:
@@ -109,6 +129,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert '/arcade-bundles/retro-azahar/cloud-main.' in app_html
             assert '/touch-controls/mobile.js' not in app_html, 'mobile library must not load in emulator frames'
             assert '/touch-controls/menus.css?v=' in app_html, 'game menus need the shared mobile UI stylesheet'
+            assert len(IconLinks(app_html).icons) == 1, 'emulator initial HTML must include the Apple icon too'
         # A second scan discovers newly added files without a container restart.
         (roms / 'nes/roms/second.nes').write_bytes(b'NES\x1a' + bytes(12) + b'second-fixture')
         until(lambda: any(item['title'] == 'second' for item in items()))

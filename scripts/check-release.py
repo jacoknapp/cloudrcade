@@ -12,7 +12,7 @@ for scope in ('deploy', 'integrations', 'scripts', 'tests', 'docs', '.github'):
         if path.name in {'webrcade.env', 'handoff.env', 'aes_keys.txt', 'keys.txt',
                          'keys.bin', 'default_keys.h', 'boot9.bin', 'boot11.bin'}:
             raise SystemExit(f'Operator file in release source: {path.relative_to(ROOT)}')
-        if path.suffix in {'.png', '.pyc'}:
+        if path.suffix in {'.png', '.ico', '.pyc'}:
             continue
         content = path.read_text()
         # Construct signatures so this checker does not match its own strings.

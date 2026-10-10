@@ -4,13 +4,14 @@
   const iconVersion = encodeURIComponent(window.WrcadCloudConfig?.iconVersion || 'cabinet');
   document.title = location.pathname.startsWith('/cloud-saves/') ? 'Nextcloud saves · ' + name : name;
   for (const link of document.querySelectorAll('link[rel="icon"],link[rel="apple-touch-icon"],link[rel="manifest"]')) link.remove();
-  for (const [rel, href, type] of [
+  for (const [rel, href, type, sizes] of [
+    ['icon', '/touch-controls/cloudrcade-32.png?v=' + iconVersion, 'image/png', '32x32'],
     ['icon', '/touch-controls/cloudrcade.svg?v=' + iconVersion, 'image/svg+xml'],
-    ['apple-touch-icon', '/touch-controls/cloudrcade-180.png?v=' + iconVersion, 'image/png'],
+    ['apple-touch-icon', '/touch-controls/cloudrcade-180.png?v=' + iconVersion, 'image/png', '180x180'],
     ['manifest', '/cloud-saves/manifest.php', 'application/manifest+json']
   ]) {
     const link = document.createElement('link');
-    if (rel === 'apple-touch-icon') link.sizes = '180x180';
+    if (sizes) link.sizes = sizes;
     link.rel = rel; link.href = href; link.type = type; document.head.append(link);
   }
   for (const [key, value] of [['apple-mobile-web-app-capable', 'yes'],

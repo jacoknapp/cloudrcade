@@ -47,6 +47,18 @@ def main():
         current = {cookie.name: cookie.value for cookie in jar if cookie.name in pending}
         assert current == pending, 'worker update deleted or replaced the pending session cookie'
     print('PASS worker updates preserve the pending sign-in cookie, including query strings')
+    for path in ['/touch-controls/cloudrcade.svg', '/touch-controls/cloudrcade-32.png',
+                 '/touch-controls/cloudrcade-180.png', '/touch-controls/cloudrcade-192.png',
+                 '/touch-controls/cloudrcade-512.png', '/touch-controls/cloudrcade-maskable-512.png',
+                 '/touch-controls/cloudrcade.ico', '/apple-touch-icon.png',
+                 '/apple-touch-icon-precomposed.png', '/favicon.ico']:
+        with get(path + '?v=icon-proxy-check') as response:
+            assert response.status == 200, 'Safari icon request is still protected: ' + path
+            assert response.headers.get('Content-Type', '').startswith('image/'), 'icon must return an image'
+            assert not response.headers.get('Set-Cookie'), 'icon must not change the pending session'
+        current = {cookie.name: cookie.value for cookie in jar if cookie.name in pending}
+        assert current == pending, 'icon fetch replaced the pending sign-in cookie'
+    print('PASS static app icons are public and preserve the pending sign-in cookie')
     anonymous = urllib.request.build_opener(NoRedirect)
     for path in ['/play/', '/content/feeds/combined.json', '/cloud-saves/config.php',
                  '/cloud-saves/api.php?action=status', '/cloud-saves/3ds-keys.php']:

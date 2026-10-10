@@ -1,1 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#15213c"/><g transform="translate(64 0) scale(-1 1)"><path d="M21 48V16h13c9 0 14 4 14 11 0 5-3 9-8 10l10 11H39L28 36v12zm7-19h6c4 0 6-1 6-3s-2-3-6-3h-6z" fill="#82e8e0"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>cloudЯcade</title>
+  <rect width="512" height="512" fill="#0b0b0b"/>
+  <!-- Fill ordinary app tiles; the renderer uses the unscaled artwork for maskable icons. -->
+  <g id="artwork" transform="translate(256 256) scale(1.35) translate(-256 -256)">
+  <path d="M152 98H360V292L382 324V398Q382 414 366 414H146Q130 414 130 398V324L152 292Z"
+        fill="#191919" stroke="#e50914" stroke-width="14" stroke-linejoin="round"/>
+  <rect x="168" y="112" width="176" height="24" rx="4" fill="#e50914"/>
+  <rect x="174" y="154" width="164" height="128" rx="8" fill="#050505"/>
+  <path d="M300 170V266H279V230H268L239 266H212L246 226C227 222 212 213 212 198C212 180 224 170 247 170ZM279 188H248C238 188 233 192 233 198C233 204 238 208 248 208H279Z"
+        fill="#f3f1eb" fill-rule="evenodd"/>
+  <path d="M144 310H368" fill="none" stroke="#e50914" stroke-width="10"/>
+  <path d="M197 328V352M179 356H215" fill="none" stroke="#f3f1eb" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="197" cy="328" r="12" fill="#e50914"/>
+  <circle cx="294" cy="346" r="12" fill="#e50914"/>
+  <circle cx="329" cy="330" r="12" fill="#e50914"/>
+  <rect x="249" y="378" width="14" height="20" rx="3" fill="#aaa"/>
+  </g>
+</svg>

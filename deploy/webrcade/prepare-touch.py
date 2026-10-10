@@ -23,6 +23,12 @@ def cloud_asset(name):
     return '/cloud-saves/' + name + '?v=' + revision
 
 MENU_INCLUDE = '<link rel="stylesheet" href="' + controller_asset('menus.css') + '">'
+ICON_VERSION = hashlib.sha256((Path(__file__).parent / 'touch/assets/cloudrcade.svg').read_bytes()).hexdigest()[:16]
+# Safari's native UI can inspect HTML before the deferred brand adapter runs.
+ICON_INCLUDE = ('<link rel="icon" type="image/png" sizes="32x32" href="/touch-controls/cloudrcade-32.png?v=' + ICON_VERSION + '">'
+                '<link rel="icon" type="image/svg+xml" href="/touch-controls/cloudrcade.svg?v=' + ICON_VERSION + '">'
+                '<link rel="apple-touch-icon" sizes="180x180" href="/touch-controls/cloudrcade-180.png?v=' + ICON_VERSION + '">'
+                '<link rel="manifest" href="/cloud-saves/manifest.php">')
 INCLUDE = (MENU_INCLUDE + '<script defer src="' + controller_asset('brand.js') + '"></script><link rel="stylesheet" href="' + controller_asset('controller.css') + '">'
            '<script defer src="' + controller_asset('controller.js') + '"></script>'
            '<script defer src="' + controller_asset('offline.js') + '"></script>')
@@ -107,8 +113,9 @@ def overlay(relative, source, original, bundle, mains, tmp):
     # The adapter must run before inline webpack bootstrap code, not defer.
     original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">' + cloud, 1)
     original = re.sub(r'<title>.*?</title>', '<title>cloudЯcade</title>', original, flags=re.S)
-    # Remove stock platform icons; the runtime brand adapter supplies project icons.
+    # Supply icons in the initial HTML as well as the runtime brand adapter.
     original = re.sub(r'<link\b[^>]*rel=["\'](?:icon|apple-touch-icon|manifest)["\'][^>]*>', '', original)
+    original = original.replace('<head>', '<head>' + ICON_INCLUDE, 1)
     original = re.sub(r'(<meta\b[^>]*name="description"[^>]*content=")[^"]*(")', r'\1cloudЯcade — games in your browser.\2', original)
     target = ROOT / relative
     target.parent.mkdir(parents=True, exist_ok=True)

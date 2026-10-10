@@ -97,6 +97,8 @@ If Authentik protects the app, allow the static offline worker to update without
 sign-in using the exact path expression `^/touch-controls/offline-worker\.js$`.
 See the [proxy configuration and verification](deploy/webrcade/README.md#offline-play)
 to prevent background updates from interrupting the sign-in redirect.
+Allow the [static app icon paths](deploy/webrcade/README.md#app-icons) too, so
+Safari can fetch the full-size icon from its native share and Home Screen UI.
 
 For automatic authorization with an existing Nextcloud/Authentik session,
 install the [optional Nextcloud handoff app](integrations/nextcloud/README.md),
