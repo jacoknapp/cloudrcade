@@ -12,7 +12,8 @@
       gbc: ['GBC', '#9baa68'], gba: ['GBA', '#927ac4'], n64: ['N64', '#e50914'],
       'retro-melonds': ['DS', '#70a9bd'], genesis: ['MD', '#e50914'], psx: ['PS', '#70a9bd'],
       'retro-pcsx-rearmed': ['PS', '#70a9bd'], '3ds': ['3DS', '#70a9bd'], 'retro-azahar': ['3DS', '#70a9bd']};
-    const type = unique(item.items).find(game => game.type)?.type, system = systems[type];
+    const types = new Set(unique(item.items).map(game => game.type).filter(Boolean));
+    const type = types.size === 1 ? [...types][0] : null, system = systems[type];
     if (!system) return null;
     const [label, color] = system, handheld = /^(gb|gbc|gba|retro-melonds|3ds|retro-azahar)$/.test(type);
     let shape = handheld ?
