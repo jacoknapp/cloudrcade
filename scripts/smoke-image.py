@@ -120,6 +120,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert len(apple) == 1 and apple[0]['sizes'] == '180x180', 'Apple icon must exist before JS runs'
             with get(apple[0]['href']) as icon:
                 assert icon.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()
+        for asset in ['viewport.css', 'brand.js']:
+            with get('/touch-controls/' + asset) as response:
+                assert response.read() == Path('deploy/webrcade/touch/assets', asset).read_bytes(), 'shared viewport/status assets must match source'
         with get('/play/static/js/main.7ac86965.chunk.js') as response:
             player = response.read().decode()
             notes = json.loads(Path('src/react/screens/releasenotes/notes.json').read_text())

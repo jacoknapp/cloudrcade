@@ -4,6 +4,11 @@
   // installed mode even when their own display-mode query does not report it.
   const standalone = matchMedia('(display-mode: standalone)');
   const fullscreen = matchMedia('(display-mode: fullscreen)');
+  const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // Only the outer Apple web app owns the system status area. Painting its
+  // safe area avoids broad system shading without insetting the game frame.
+  document.documentElement.toggleAttribute('data-cr-status-top', appleTouch && window === window.top);
   const installedMode = () => {
     let inherited = false;
     try { inherited = window !== window.top && window.top.document.documentElement.hasAttribute('data-cr-installed'); } catch (_) {}

@@ -23,9 +23,10 @@ const findBrowse = () => {
         '--host-resolver-rules=MAP '+new URL(origin).hostname+':443 127.0.0.1:'+port]} :
       {executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
     try {
-      for (const mode of ['browser','standalone','legacy-ios']) {
+      for (const [mode, device] of [['browser','iPhone 13'], ['standalone','iPhone 13'],
+        ['legacy-ios','iPhone 13'], ['standalone','Pixel 5']]) {
         const installed = mode !== 'browser';
-        const context = await browser.newContext({...devices['iPhone 13'], ignoreHTTPSErrors:true, serviceWorkers:'block'});
+        const context = await browser.newContext({...devices[device], ignoreHTTPSErrors:true, serviceWorkers:'block'});
         await context.addInitScript(mode => {
           Object.defineProperty(navigator, 'standalone', {configurable:true, value:mode === 'legacy-ios' && window === window.top});
           const nativeMatch = window.matchMedia.bind(window);
@@ -53,6 +54,9 @@ const findBrowse = () => {
             else {response = await r.fetch();body = await response.text();}
             // This fixture deliberately separates dvh from the full screen.
             if (installed && file.endsWith('.css')) body = body.replaceAll('100dvh','calc(100vh - 60px)');
+            // Desktop engines have no phone safe area. Model the existing top
+            // inset to check overlay bounds and scope, not the OS blur itself.
+            if (file.endsWith('.css')) body = body.replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '60px');
             await r.fulfill({...(response ? {response} : {}),contentType:file.endsWith('.css')?'text/css':'application/javascript',body});
           });
         }
@@ -79,6 +83,17 @@ const findBrowse = () => {
         const updates = page.locator('.release-screen-dialog');
         await updates.waitFor({state:'visible'});
         await updates.getByRole('button',{name:'OK',exact:true}).click();
+        const checkStatusTop = async (document, expected) => {
+          const surface = await document.evaluate(() => {
+            const s = getComputedStyle(document.documentElement, '::before');
+            return {content:s.content, position:s.position, height:s.height,
+              top:s.top, color:s.backgroundColor, pointer:s.pointerEvents};
+          });
+          if (expected) assert.deepEqual(surface, {content:'""',position:'fixed',height:'60px',
+            top:'0px',color:'rgb(0, 0, 0)',pointer:'none'});
+          else assert(['none','normal'].includes(surface.content), 'no status surface outside outer installed Apple app');
+        };
+        await checkStatusTop(page, installed && device === 'iPhone 13');
         const expectedHeight = h => h - (installed && process.env.EXPECT_BROKEN ? 60 : 0);
         for (const viewport of [{width:393,height:852},{width:852,height:393},{width:320,height:568}]) {
           await page.setViewportSize(viewport);await page.waitForTimeout(100);
@@ -92,6 +107,9 @@ const findBrowse = () => {
         await page.getByRole('dialog').getByRole('button').filter({hasText:/^\s*PLAY\s*$/}).click();
         await page.locator('#webrcade-app-iframe').waitFor({state:'visible'});
         const frame = await (await page.locator('#webrcade-app-iframe').elementHandle()).contentFrame();
+        await checkStatusTop(frame, false);
+        // A tap at the system boundary must still reach the underlying game.
+        assert.equal(await page.evaluate(() => document.elementFromPoint(10, 30)?.id), 'webrcade-app-iframe');
         for (const viewport of [{width:393,height:852},{width:852,height:393},{width:320,height:568}]) {
           await page.setViewportSize(viewport);await page.waitForTimeout(100);
           const bounds = await page.locator('#webrcade-app-iframe').boundingBox();
@@ -104,7 +122,7 @@ const findBrowse = () => {
         }
         assert.equal(romRequests,0);
         assert.deepEqual(errors,[]);
-        console.log('PASS',engine.name(),mode,'library/native iframe/bottom touch target across portrait, landscape and small phone',
+        console.log('PASS',engine.name(),device,mode,'status surface scope/touch passthrough and library/native iframe/bottom touch target across portrait, landscape and small phone',
           installed && process.env.EXPECT_BROKEN ? '(reproduced 60px gap)' : '(no reserved bottom strip)');
         await context.close();
       }
