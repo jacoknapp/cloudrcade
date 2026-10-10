@@ -41,8 +41,9 @@ with the same dark theme, system folders, Recently Played, all-game search,
 feed URL/file import and native settings/cloud saves. Desktop keeps its original
 carousel. The mobile layout uses compact typography, three columns on phones and local
 retro console artwork for system folders, with the original charcoal/red colors.
-Settings, the controller drawer and in-game menus use compact black/red panels;
-pause actions stack in portrait and use two columns in landscape.
+Settings and in-game menus use compact black/red panels; pause actions stack
+in portrait and use two columns in landscape. The touch controller and its
+pop-out retain their original blue/aqua styling.
 Game details open in a touch-friendly panel; Play uses the same native launcher
 and on-demand emulator cores. Large folders show 48 cards per page with
 lazy artwork. The mobile cards, details and search caches are released while a

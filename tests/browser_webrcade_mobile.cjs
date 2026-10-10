@@ -118,7 +118,7 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   await capture('mobile-game-running');
   await iframe.locator('.kt-tab').tap();
   await iframe.locator('#kt-drawer').waitFor({state:'visible'});
-  assert.equal(await iframe.locator('#kt-drawer').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(11, 11, 11)','controller drawer uses black rather than blue');
+  assert.equal(await iframe.locator('#kt-drawer').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(17, 28, 50)','controller pop-out retains its original blue palette');
   await capture('mobile-controller-menu');
   await iframe.locator('.kt-close').click();
   await iframe.locator('.kt-menu').tap();await iframe.waitForFunction(()=>app.isPauseScreen());
