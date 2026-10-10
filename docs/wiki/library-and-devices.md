@@ -10,7 +10,7 @@ Desktop retains the original carousel. Touch phones and tablets use a full-viewp
 
 System folders without custom artwork use distinct console silhouettes on desktop
 and mobile, including separate Game Boy/Color, DS/3DS and Genesis/N64 designs.
-Recently Played uses a red history/play icon. Custom feed images take precedence.
+Recently Played uses a red history icon. Custom feed images take precedence.
 
 Use **Search all games** on mobile to search across the current feed's games rather than only the open folder. Clearing the search restores browsing. Search does not scan your filesystem or search every saved feed at once.
 
