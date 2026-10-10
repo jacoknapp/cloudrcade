@@ -11,6 +11,13 @@
     const link = document.createElement('link');
     link.rel = rel; link.href = href; link.type = type; document.head.append(link);
   }
+  for (const [key, value] of [['apple-mobile-web-app-capable', 'yes'],
+    ['apple-mobile-web-app-status-bar-style', 'black-translucent'],
+    ['apple-mobile-web-app-title', name], ['theme-color', '#000000']]) {
+    let meta = document.querySelector('meta[name="' + key + '"]');
+    if (!meta) { meta = document.createElement('meta'); meta.name = key; document.head.append(meta); }
+    meta.content = value;
+  }
   const description = document.querySelector('meta[name="description"]');
   if (description) description.content = name + ' — games in your browser.';
 })();

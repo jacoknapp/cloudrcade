@@ -38,3 +38,13 @@ The main image includes Python, chdman and the feed builder. `service.py` superv
 The HTTP runtime uses PHP8.3/Apache on Debian Bookworm with Python/chdman for the integrated scanner; it copies tested frontend/core assets from the pinned upstream image.
 
 Feeds are served through an Apache alias from the state mount. No nested feed mount or writable directory inside the operator ROM share is required.
+
+The mobile library is a small React adapter (`touch/assets/mobile.js` and
+`mobile.css`) registered by the pinned bundle hook. It reuses native feed/game
+actions, settings and AppScreen, rather than maintaining another save/launcher
+implementation. It mounts bounded pages of cards and unmounts its cards/details
+and search caches while the app frame runs. Only library HTML loads this adapter;
+emulator pages retain their existing controller/core lifecycle. Desktop primary
+pointers retain the original carousel. Browser regression:
+`tests/browser_webrcade_mobile.cjs` (disposable profile, own ROMs; optional
+`WEBRCADE_TEST_3DS_TITLE` also boots and exits an encrypted mounted-key game).

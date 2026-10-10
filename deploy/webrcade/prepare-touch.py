@@ -41,6 +41,7 @@ def overlay(relative, source, original, bundle, mains, tmp):
     cloud = '<script src="/cloud-saves/config.php"></script><script src="' + cloud_asset('runtime.js') + '"></script><script src="/cloud-saves/clock.js?v=1"></script><script src="' + cloud_asset('bridge.js') + '"></script><script>WrcadCloud.attachChunk(' + repr(names[0]) + ');</script>'
     if str(relative) == 'index.html':
         cloud += '<script src="' + controller_asset('recently-played.js') + '"></script>'
+        cloud += '<link rel="stylesheet" href="' + controller_asset('mobile.css') + '"><script src="' + controller_asset('mobile.js') + '"></script>'
         # The upstream filename hash does not change when we patch it.
         # Give each local patch revision a new URL to bypass old caches.
         revision = hashlib.sha256(Path(__file__).with_name('patch-player.py').read_bytes()).hexdigest()[:16]
@@ -103,7 +104,7 @@ def overlay(relative, source, original, bundle, mains, tmp):
         bundle_url = '/arcade-bundles/' + relative.parts[1] + '/' + bundle_name
         original = original.replace('src="' + mains[0] + '"', 'src="' + bundle_url + '"', 1)
     # The adapter must run before inline webpack bootstrap code, not defer.
-    original = original.replace('<head>', '<head>' + cloud, 1)
+    original = original.replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">' + cloud, 1)
     original = re.sub(r'<title>.*?</title>', '<title>cloudЯcade</title>', original, flags=re.S)
     # Remove stock platform icons; the runtime brand adapter supplies project icons.
     original = re.sub(r'<link\b[^>]*rel=["\'](?:icon|apple-touch-icon|manifest)["\'][^>]*>', '', original)

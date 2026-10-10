@@ -34,6 +34,26 @@ builds and publishes it; pull requests build and validate without publishing.
 Commit-specific `sha-<full-commit>` tags and `v*` release tags are also published.
 CI authenticates using GitHub's built-in token; no Docker Hub secret is required.
 
+## Mobile and installed web app
+
+Phones and touch tablets use a full-viewport library in portrait and landscape,
+with the same dark theme, system folders, Recently Played, all-game search,
+feed URL/file import and native settings/cloud saves. Desktop keeps its original
+carousel. Game details open in a touch-friendly panel; Play uses the same native
+launcher and on-demand emulator cores. Large folders show 48 cards per page with
+lazy artwork. The mobile cards, details and search caches are released while a
+game runs, and the native exit flow disposes its emulator frame before returning
+to the library. Save locations and controller preferences are shared with desktop.
+
+Use your browser's **Install app** or **Add to Home Screen** action for an app
+without browser navigation bars. The manifest requests `fullscreen`, with a
+`standalone` fallback, and supports notches/home indicators without locking
+orientation. iOS controls its system status bar and can keep it visible in a
+Home Screen app; a site cannot guarantee hiding OS UI on every device. Existing
+installations may need to be reopened or reinstalled to pick up a changed display
+mode. See [WebKit's Home Screen guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
+and [status-bar limitation](https://bugs.webkit.org/show_bug.cgi?id=301994).
+
 ## Internet connection for streamed games
 
 **PlayStation and Nintendo 3DS ROM/disc streaming requires an active internet
