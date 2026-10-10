@@ -22,10 +22,11 @@ def cloud_asset(name):
     revision = hashlib.sha256((Path(__file__).parent / 'touch/cloud' / name).read_bytes()).hexdigest()[:16]
     return '/cloud-saves/' + name + '?v=' + revision
 
-INCLUDE = ('<script defer src="' + controller_asset('brand.js') + '"></script><link rel="stylesheet" href="' + controller_asset('controller.css') + '">'
+MENU_INCLUDE = '<link rel="stylesheet" href="' + controller_asset('menus.css') + '">'
+INCLUDE = (MENU_INCLUDE + '<script defer src="' + controller_asset('brand.js') + '"></script><link rel="stylesheet" href="' + controller_asset('controller.css') + '">'
            '<script defer src="' + controller_asset('controller.js') + '"></script>'
            '<script defer src="' + controller_asset('offline.js') + '"></script>')
-LIBRARY_INCLUDE = '<script defer src="' + controller_asset('brand.js') + '"></script><script defer src="' + controller_asset('offline.js') + '"></script>'
+LIBRARY_INCLUDE = MENU_INCLUDE + '<script defer src="' + controller_asset('brand.js') + '"></script><script defer src="' + controller_asset('offline.js') + '"></script>'
 EXTRA_APPS = Path(os.environ.get('WEBRCADE_EXTRA_APPS', str(Path(__file__).parent / 'touch/apps')))
 PSX_ONLY = os.environ.get('WEBRCADE_PSX_ONLY') == '1'
 

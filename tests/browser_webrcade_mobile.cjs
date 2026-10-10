@@ -77,6 +77,10 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   const targets=await page.locator('._QxYEW button,._35dTO,._2G8jD').evaluateAll(els=>els.filter(el=>el.offsetHeight).map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})));
   assert(targets.every(t=>t.width>=44 && t.height>=44),'native settings targets are at least 44px: '+JSON.stringify(targets));
   await capture('mobile-settings');
+  assert(panel.height<420,'display settings use a compact panel rather than a tall TV layout');
+  const settingsRow=await page.locator('._3e512').first().evaluate(el=>{
+   const children=[...el.children].map(child=>child.getBoundingClientRect());return Math.abs((children[0].y+children[0].height/2)-(children[1].y+children[1].height/2));});
+  assert(settingsRow<3,'setting labels and controls align in one row');
   await page.locator('._2k8Sx button').last().click();await page.waitForTimeout(400);
   await page.locator('._2k8Sx button').last().click();
   await page.getByText('Cloud Storage',{exact:true}).waitFor();
@@ -112,6 +116,41 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   assert.equal(await page.evaluate('('+findLibrary.toString()+')().browseScreenRef.current._searchCache'),null,'search cache releases during play');
   assert(coreRequests.length>0,'native core is loaded on game launch');
   await capture('mobile-game-running');
+  await iframe.locator('.kt-tab').tap();
+  await iframe.locator('#kt-drawer').waitFor({state:'visible'});
+  assert.equal(await iframe.locator('#kt-drawer').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(11, 11, 11)','controller drawer uses black rather than blue');
+  await capture('mobile-controller-menu');
+  await iframe.locator('.kt-close').click();
+  await iframe.locator('.kt-menu').tap();await iframe.waitForFunction(()=>app.isPauseScreen());
+  const menu=iframe.locator('._3c68d');
+  await menu.waitFor();
+  assert.equal(await menu.evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'portrait game menu uses mobile rows');
+  const menuTargets=await menu.getByRole('button').evaluateAll(els=>els.map(el=>({height:el.getBoundingClientRect().height,font:+parseFloat(getComputedStyle(el).fontSize)})));
+  assert(menuTargets.every(t=>t.height>=44 && t.font>=14),'game menu actions remain readable and tappable');
+  await capture('mobile-game-menu');
+  await iframe.getByRole('button',{name:/^View Controls/}).click();
+  await iframe.locator('._QxYEW').waitFor();
+  assert.equal(await iframe.locator('._1YZKt').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)),14,'controls guide is readable on mobile');
+  await capture('mobile-game-controls');
+  await iframe.getByRole('button',{name:'OK',exact:true}).click();
+  if(!await iframe.evaluate(()=>app.isPauseScreen())) {
+   await iframe.locator('.kt-menu').tap();await iframe.waitForFunction(()=>app.isPauseScreen());
+  }
+  await iframe.getByRole('button',{name:/NES Settings/}).click();
+  await iframe.locator('._QxYEW').waitFor();await page.waitForTimeout(300);
+  const coreSettings=await iframe.locator('._QxYEW').boundingBox();
+  assert(coreSettings.x>=0 && coreSettings.x+coreSettings.width<=390,'in-game settings fit the phone');
+  await capture('mobile-game-settings');
+  await iframe.getByRole('button',{name:'Cancel',exact:true}).click();
+  if(!await iframe.evaluate(()=>app.isPauseScreen())) {
+   await iframe.locator('.kt-menu').tap();await iframe.waitForFunction(()=>app.isPauseScreen());
+  }
+  await page.setViewportSize({width:844,height:390});
+  assert.equal(await menu.evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2,'landscape game menu uses two compact columns');
+  await capture('mobile-game-menu-landscape');
+  await iframe.getByRole('button',{name:/^Resume/}).click();
+  await iframe.waitForFunction(()=>!app.isPauseScreen());
+  await page.setViewportSize({width:390,height:844});
   await page.evaluate(()=>document.getElementById('webrcade-app-iframe').contentWindow.postMessage('exit','*'));
   await page.waitForSelector('.cr-mobile-card',{timeout:30000});
   assert.equal(await page.locator('#webrcade-app-iframe').count(),0,'native exit disposes emulator iframe');

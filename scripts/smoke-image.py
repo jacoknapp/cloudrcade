@@ -95,6 +95,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             html = response.read().decode()
             assert '/touch-controls/brand.js' in html and '/cloud-saves/config.php' in html
             assert '/touch-controls/mobile.js?v=' in html and '/touch-controls/mobile.css?v=' in html
+            assert '/touch-controls/menus.css?v=' in html
             assert 'apple-mobile-web-app-capable' in html and 'black-translucent' in html
             assert '<title>cloudЯcade</title>' in html and '<title>webЯcade</title>' not in html
         with get('/cloud-saves/manifest.php') as response:
@@ -107,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             app_html = response.read().decode()
             assert '/arcade-bundles/retro-azahar/cloud-main.' in app_html
             assert '/touch-controls/mobile.js' not in app_html, 'mobile library must not load in emulator frames'
+            assert '/touch-controls/menus.css?v=' in app_html, 'game menus need the shared mobile UI stylesheet'
         # A second scan discovers newly added files without a container restart.
         (roms / 'nes/roms/second.nes').write_bytes(b'NES\x1a' + bytes(12) + b'second-fixture')
         until(lambda: any(item['title'] == 'second' for item in items()))
