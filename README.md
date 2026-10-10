@@ -2,7 +2,7 @@
 
 [![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 
-CloudRcade is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade)
+**cloudЯcade** (cloudRcade, with a backwards R) is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade)
 with Nextcloud saves, editable mobile controls, offline caching, Recently Played,
 clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app.
 It preserves upstream history and credits; it is not an official webRcade release.

@@ -23,7 +23,7 @@ services:
         read_only: true
       - type: bind
         source: ${WEBRCADE_3DS_BIOS_PATH:-./roms/3DS/bios}
-        target: /run/webrcade/3ds
+        target: /run/cloudrcade/3ds
         read_only: true
       - type: bind
         source: ${WEBRCADE_CONFIG_PATH:-./config}
