@@ -86,3 +86,6 @@ html[data-cr-mobile] ._R64Gp { margin: 0; flex: 1; }
   html[data-cr-mobile] ._1YiUm { margin: 0; }
   html[data-cr-mobile] ._QxYEW { min-height: min(80dvh, 640px); }
 }
+html[data-cr-mobile] ._35dTO { height: 44px; }
+html[data-cr-mobile] ._fAfxL::before { top: 50%; bottom: auto; margin-top: -.75rem; }
+html[data-cr-mobile] ._2G8jD { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }

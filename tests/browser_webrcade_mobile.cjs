@@ -71,6 +71,8 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   await page.getByText('Display Settings',{exact:true}).waitFor();
   await page.waitForFunction(()=>{const el=document.querySelector('._1OdS7');return el && +getComputedStyle(el).opacity > .95});
   const panel=await page.locator('._QxYEW').boundingBox();assert(panel.x>=0 && panel.x+panel.width<=390,'native settings fit phone');
+  const targets=await page.locator('._QxYEW button,._35dTO,._2G8jD').evaluateAll(els=>els.filter(el=>el.offsetHeight).map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})));
+  assert(targets.every(t=>t.width>=44 && t.height>=44),'native settings targets are at least 44px: '+JSON.stringify(targets));
   await capture('mobile-settings');
   await page.locator('._2k8Sx button').last().click();await page.waitForTimeout(400);
   await page.locator('._2k8Sx button').last().click();
