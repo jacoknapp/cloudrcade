@@ -2,7 +2,7 @@
 """Verify one-container HTTP, mounted BIOS, scheduled scans and safe shutdown.
 
 Uses synthetic ROM/disc/key fixtures only, never accounts or operator files.
-Usage: python3 scripts/smoke-image.py cloudrcade:test
+Usage: python3 scripts/smoke-image.py cloudrcade:test [linux/amd64|linux/arm64]
 """
 import hashlib
 from html.parser import HTMLParser
@@ -20,6 +20,9 @@ import urllib.request
 import uuid
 
 image = sys.argv[1]
+platform = sys.argv[2] if len(sys.argv) > 2 else None
+if platform not in (None, 'linux/amd64', 'linux/arm64'):
+    raise SystemExit('Supported smoke-test platforms: linux/amd64, linux/arm64')
 name = 'cloudrcade-smoke-' + uuid.uuid4().hex[:10]
 tls = ssl._create_unverified_context()
 
@@ -68,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
                                      (state / 'derived', '/var/www/html/derived', True),
                                      (bios, '/run/webrcade/3ds', True)]:
         mounts += ['--mount', f'type=bind,src={source},dst={target}' + (',readonly' if readonly else '')]
-    args = ['run', '-d', '--name', name, '-p', '127.0.0.1::443',
+    args = ['run', *(['--platform', platform] if platform else []), '-d', '--name', name, '-p', '127.0.0.1::443',
             '-e', 'WEBRCADE_APP_NAME=Release Test Arcade', '-e', 'WEBRCADE_FEED_TITLE=Release Test Arcade',
             '-e', 'WEBRCADE_STORAGE_PREFIX=release_test', '-e', 'WEBRCADE_SCAN_INTERVAL_SECONDS=2',
             '-e', 'WEBRCADE_REQUIRED_ROM_DIR=nes/roms', '-e', 'WEBRCADE_ENABLE_3DS=true',
@@ -76,6 +79,11 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     try:
         docker(*args)
         info = json.loads(docker('inspect', name))[0]
+        if platform:
+            image_info = json.loads(docker('image', 'inspect', info['Image']))[0]
+            assert image_info['Os'] + '/' + image_info['Architecture'] == platform, 'Wrong target image platform'
+            machine = {'linux/amd64': 'x86_64', 'linux/arm64': 'aarch64'}[platform]
+            assert docker('exec', name, 'uname', '-m').strip() == machine, 'Wrong runtime architecture'
         port = info['NetworkSettings']['Ports']['443/tcp'][0]['HostPort']
         origin = 'https://127.0.0.1:' + port
 
@@ -178,7 +186,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         docker('exec', name, 'python3', '/usr/local/share/cloudrcade/service.py', 'scan')
         docker('stop', '--time', '12', name)
         assert json.loads(docker('inspect', name))[0]['State']['ExitCode'] == 0
-        print('PASS one app: HTTP/3DS overlays, env branding, mounted key isolation, real CHD conversion, scheduled discovery, failed-scan preservation and graceful shutdown')
+        print('PASS ' + (platform or 'host platform') + ' one app: HTTP/3DS overlays, env branding, mounted key isolation, real CHD conversion, scheduled discovery, failed-scan preservation and graceful shutdown')
     except Exception:
         print(docker('logs', name, stderr=subprocess.STDOUT)[-6000:], file=sys.stderr)
         raise
