@@ -19,8 +19,10 @@ which supports AIO without changing its managed child container. The example ori
 | `NEXTCLOUD_CONTAINER`, `NEXTCLOUD_APP_PATH`, `NEXTCLOUD_OCC_PATH` | Installer container and filesystem locations. |
 
 `handoff.env` holds this deployment's choices; the release example uses generic
-hosts. For CloudRcade, the configured `client` must equal `WEBRCADE_APP_NAME`
-followed by ` cloud saves`. Its callback is the configured public origin plus
+hosts. For CloudRcade, the configured `client` must equal the nonempty
+`NEXTCLOUD_CLIENT_NAME`, or otherwise `WEBRCADE_APP_NAME`, followed by
+` cloud saves`. This lets visible branding change while an existing trusted
+client identity stays stable. Its callback is the configured public origin plus
 `/cloud-saves/?resume=1`; its back URL returns to that origin's library.
 
 Connecting starts a same-tab form POST to `/apps/retroarcade_login/start` with

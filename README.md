@@ -7,6 +7,14 @@ with Nextcloud saves, editable mobile controls, offline caching, Recently Played
 clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app.
 It preserves upstream history and credits; it is not an official webRcade release.
 
+## User and operator wiki
+
+The [Git-tracked wiki](docs/wiki/README.md) covers [everyday use](docs/wiki/library-and-devices.md),
+[controls and game menus](docs/wiki/controls-and-menus.md), [saves](docs/wiki/saves-and-storage.md),
+[Nextcloud and SSO](docs/wiki/nextcloud-and-access.md), and
+[deployment, upgrades and troubleshooting](docs/wiki/operations-and-troubleshooting.md).
+Start with its [quick start](docs/wiki/quick-start.md) for a first installation.
+
 ## Run with Docker
 
 ```sh
@@ -41,8 +49,10 @@ with the same dark theme, system folders, Recently Played, all-game search,
 feed URL/file import and native settings/cloud saves. Desktop keeps its original
 carousel. The mobile layout uses compact typography, three columns on phones and local
 retro console artwork for system folders, with the original charcoal/red colors.
+Feeds has its own header button, separate from system-folder navigation.
 Settings and in-game menus use compact black/red panels; pause actions stack
-in portrait and use two columns in landscape. The touch controller and its
+in portrait and use two columns in landscape. Settings navigation and action
+buttons stay in place across pages while longer content scrolls inside. The touch controller and its
 pop-out retain their original blue/aqua styling.
 The loading logo and status fit mobile viewports and remain visible during slow loads.
 Background offline-worker updates make no protected requests during sign-in;

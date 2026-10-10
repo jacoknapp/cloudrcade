@@ -48,6 +48,32 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   page.on('request',r=>{if(/\.wasm(?:\?|$)/.test(r.url()))coreRequests.push(r.url())});
   await page.goto(origin+'/play/',{waitUntil:'domcontentloaded'});
   const capture=async name=>{if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,name+'.png')})};
+  async function stableSettingsNavigation(scope,width,height,name){
+   await page.setViewportSize({width,height});await page.waitForTimeout(150);
+   const dialog=scope.locator('._QxYEW');
+   const geometry=()=>dialog.evaluate(el=>[el,el.querySelector('._1OdS7'),...el.querySelectorAll('._2k8Sx button'),el.querySelector('._E4PtH')]
+    .map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y,width:n.getBoundingClientRect().width,height:n.getBoundingClientRect().height})));
+   const baseline=await geometry();let pages=0;
+   for(;pages<20;pages++){
+    await page.waitForTimeout(150);
+    const current=await geometry();
+    assert(current.every((rect,i)=>Object.keys(rect).every(key=>Math.abs(rect[key]-baseline[i][key])<1)),name+' settings navigation and actions stay fixed across pages');
+    assert(current[0].x>=0 && current[0].y>=0 && current[0].x+current[0].width<=width && current[0].y+current[0].height<=height,name+' settings fit the viewport');
+    const content=dialog.locator('._3aKyj');
+    assert(await content.locator('._3Y0YY,._19qVy').evaluateAll(els=>els.every(el=>el.scrollWidth<=el.clientWidth+1)),name+' settings help wraps without clipped text');
+    if(await content.evaluate(el=>el.scrollHeight>el.clientHeight)){
+     await content.evaluate(el=>{el.scrollTop=el.scrollHeight});
+     assert(await content.evaluate(el=>el.scrollTop>0),name+' long settings content scrolls');
+     const scrolled=await geometry();assert.deepEqual(scrolled,current,name+' scrolling leaves navigation and actions in place');
+     await capture('mobile-settings-scroll-'+name);
+     await content.evaluate(el=>{el.scrollTop=0});
+    }
+    const next=scope.locator('._2k8Sx button').last();if(await next.isDisabled())break;
+    await next.click();
+   }
+   assert(pages>0 && pages<20,name+' checked every available settings page');
+   for(let i=0;i<pages;i++){await scope.locator('._2k8Sx button').first().click();await page.waitForTimeout(150);}
+  }
   const loading=page.locator('#loadingScreen');
   await loading.waitFor();await page.waitForTimeout(2500);
   for(const [width,height,name] of [[390,844,'phone'],[844,390,'landscape'],[320,568,'small-phone'],[768,1024,'tablet']]){
@@ -86,8 +112,14 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   await page.waitForTimeout(500);assert((await page.locator('meta[name="viewport"]').getAttribute('content')).includes('viewport-fit=cover'),'safe-area viewport survives iOS native setup');
   await fits(844,390,'mobile-landscape');await fits(768,1024,'mobile-tablet');await fits(390,844,'mobile-phone');
   assert.equal(coreRequests.length,0,'library does not preload emulator cores');
+  const feedsControl=page.locator('.header-nav-right .cr-mobile-feeds-button');
+  assert(await feedsControl.isVisible(),'Feeds is separate from the category selector');
+  const feedsTarget=await feedsControl.boundingBox();assert(feedsTarget.width>=44 && feedsTarget.height>=44,'Feeds has a full mobile touch target');
+  assert.equal(await page.locator('.cr-mobile-breadcrumb').getByRole('button',{name:'Feeds',exact:true}).count(),0,'category navigation has no mixed-in feed control');
   await page.getByRole('button',{name:'Feeds',exact:true}).click();
+  assert.equal(await feedsControl.getAttribute('aria-current'),'page','Feeds indicates its selected view');
   assert.equal(await page.locator('.cr-mobile-toolbar h1').innerText(),'Feeds');
+  await capture('mobile-feed-selector');
   await page.locator('.cr-mobile-card').filter({hasText:'Add'}).click();
   await page.getByRole('dialog').waitFor();await capture('mobile-feed-details');
   assert(await page.getByRole('dialog').getByRole('button').filter({hasText:/^\s*URL\s*$/}).isVisible());
@@ -97,6 +129,10 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   await page.locator('.header-nav-right button').last().click();
   await page.getByText('Display Settings',{exact:true}).waitFor();
   await page.waitForFunction(()=>{const el=document.querySelector('._1OdS7');return el && +getComputedStyle(el).opacity > .95});
+  await stableSettingsNavigation(page,390,844,'phone');
+  await stableSettingsNavigation(page,320,568,'small-phone');
+  await stableSettingsNavigation(page,844,390,'landscape');
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(150);
   const panel=await page.locator('._QxYEW').boundingBox();assert(panel.x>=0 && panel.x+panel.width<=390,'native settings fit phone');
   const targets=await page.locator('._QxYEW button,._35dTO,._2G8jD').evaluateAll(els=>els.filter(el=>el.offsetHeight).map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})));
   assert(targets.every(t=>t.width>=44 && t.height>=44),'native settings targets are at least 44px: '+JSON.stringify(targets));
@@ -164,6 +200,9 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   await iframe.locator('._QxYEW').waitFor();await page.waitForTimeout(300);
   const coreSettings=await iframe.locator('._QxYEW').boundingBox();
   assert(coreSettings.x>=0 && coreSettings.x+coreSettings.width<=390,'in-game settings fit the phone');
+  await stableSettingsNavigation(iframe,390,844,'game-phone');
+  await stableSettingsNavigation(iframe,844,390,'game-landscape');
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(150);
   await capture('mobile-game-settings');
   await iframe.getByRole('button',{name:'Cancel',exact:true}).click();
   if(!await iframe.evaluate(()=>app.isPauseScreen())) {
@@ -198,7 +237,7 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
    console.log('PASS mobile touch launch of encrypted 3DS, real graphics, one external BIOS fetch, library unload and native core exit');
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS phone/landscape/tablet fill, feeds URL/file, native settings, all-library/empty search, bounded pagination, no core preload, real NES launch, UI/search unload, native emulator disposal, folder/history restore');
+  console.log('PASS phone/landscape/tablet fill, feeds URL/file, fixed settings navigation/actions with scrolling content across every page, all-library/empty search, bounded pagination, no core preload, real NES launch, UI/search unload, native emulator disposal, folder/history restore');
   await context.close();
   const desktop=await browser.newContext({viewport:{width:1440,height:900},ignoreHTTPSErrors:true,serviceWorkers:'block'});
   await desktop.route('**/cloud-saves/config.php',async route=>{const response=await route.fetch({url:'https://127.0.0.1:'+port+'/cloud-saves/config.php'});await route.fulfill({response,body:(await response.text()).replace('"autoRedirect":true','"autoRedirect":false')});});

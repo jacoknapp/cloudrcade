@@ -54,8 +54,9 @@ The cache reduces repeated work; first-time shader compilation can still pause.
 Encrypted games require an operator-provided `aes_keys.txt`, following
 [Citra's external sysdata key-file convention](https://docs.libretro.com/library/citra/).
 Decrypted games do not require this file. The mathematical AES key-scrambler
-constant remains emulation code, as in Citra; no preset key slots are compiled in. The optional 3DS app must be built
-separately; the portable frontend image does not contain a 3DS core or keys.
+constant remains emulation code, as in Citra; no preset key slots are compiled in. The root CloudRcade release image includes the key-free 3DS core and app.
+Custom standalone source deployments can build this app separately; neither
+installation bundles runtime keys.
 
 Set these Docker environment variables (see `../.env.example`):
 

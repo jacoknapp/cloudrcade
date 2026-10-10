@@ -171,14 +171,20 @@
       props.style = {...element.props.style, opacity: 1};
     }
     let children = React.Children.toArray(element.props.children).map(child => adapt(child, browse));
+    if (element.props.className === 'header-nav-right') {
+      children.unshift(h('button', {key: 'mobile-feeds', type: 'button', className: 'cr-mobile-feeds-button',
+        'aria-current': browse.state.menuMode === 'feeds' ? 'page' : undefined,
+        onClick: () => navigate(browse, 'feeds')}, 'Feeds'));
+    }
     if (element.props.className === 'webrcade-outer') {
       const {feed, category, menuMode, searchTerm} = browse.state;
+      const hasHeader = children.some(child => child?.props?.className === 'header-nav');
       const heading = searchTerm ? 'Search results' : menuMode === 'feeds' ? 'Feeds' : menuMode === 'categories' ? 'Your library' : category?.longTitle || category?.title || feed.getTitle();
       const toolbar = h('div', {className: 'cr-mobile-toolbar', key: 'mobile-toolbar'},
         h('div', {className: 'cr-mobile-breadcrumb'},
           menuMode !== 'categories' || searchTerm ? h('button', {type: 'button', onClick: () => navigate(browse, 'categories')}, '‹ Systems') : h('span', null, feed.getTitle()),
-          h('div', null, menuMode !== 'feeds' ? h('button', {type: 'button', onClick: () => navigate(browse, 'feeds')}, 'Feeds') : null,
-            children.some(child => child?.props?.className === 'header-nav') ? null : h('button', {type: 'button', onClick: browse.props.onSettings}, 'Settings'))),
+          hasHeader ? null : h('div', null, menuMode !== 'feeds' ? h('button', {type: 'button', onClick: () => navigate(browse, 'feeds')}, 'Feeds') : null,
+            h('button', {type: 'button', onClick: browse.props.onSettings}, 'Settings'))),
         h('h1', null, heading),
         menuMode !== 'feeds' ? h('label', {className: 'cr-mobile-search'}, h('span', {className: 'cr-mobile-sr-only'}, 'Search games'),
           h('input', {id: 'cr-mobile-search', type: 'search', placeholder: 'Search all games', value: searchTerm, autoComplete: 'off',
