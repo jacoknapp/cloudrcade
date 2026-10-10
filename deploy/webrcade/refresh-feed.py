@@ -54,10 +54,14 @@ def metadata():
  sql="""SELECT JSON_OBJECT('path',r.Path,'md5',r.MD5,'game',r.GameId,
  'platform',r.PlatformId,'title',g.Name,'summary',g.Summary,'cover',c.ImageId)
  FROM Games_Roms r LEFT JOIN Game g ON r.GameId=g.Id LEFT JOIN Cover c ON g.Cover=c.Id;"""
+ socket=os.environ.get('WEBRCADE_METADATA_DB_SOCKET','').strip()
  host=os.environ.get('WEBRCADE_METADATA_DB_HOST','').strip()
  options=['--batch','--raw','--skip-column-names','--default-character-set=utf8mb4',
           '-u'+cfg['UserName'],'-D'+cfg['DatabaseName']]
- if host:
+ if socket:
+  command=['mariadb','--protocol=SOCKET','--socket='+socket,*options]
+  child_env={**os.environ,'MYSQL_PWD':cfg['Password']}
+ elif host:
   command=['mariadb','--host='+host,'--port='+os.environ.get('WEBRCADE_METADATA_DB_PORT','3306'),*options]
   child_env={**os.environ,'MYSQL_PWD':cfg['Password']}
  else:

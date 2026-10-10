@@ -30,6 +30,12 @@ host directory selected by `WEBRCADE_CONFIG_PATH`; its `DatabaseConfiguration`
 supplies database credentials and is never included in public config or images.
 Use a read-only database account and a network route to your database. Optional
 `WEBRCADE_METADATA_PATH_PREFIX` maps catalog paths into the managed library.
+Alternatively, mount a database socket directory read-only and set
+`WEBRCADE_METADATA_DB_SOCKET` to the socket path inside the app. This explicitly
+uses Unix-socket transport and takes precedence over the TCP host/port; the
+database can remain bound to localhost. Its own container must also mount the
+shared socket directory. Database passwords stay in the external config JSON.
+
 The legacy `WEBRCADE_METADATA_CONTAINER` driver remains for host-run scanners;
 the app's direct database mode does not require a Docker socket.
 `WEBRCADE_3DS_SKIP_DIRS` / `WEBRCADE_3DS_SKIP_NAMES` are pipe-separated exclusions.

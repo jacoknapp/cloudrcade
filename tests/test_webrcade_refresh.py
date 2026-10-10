@@ -117,6 +117,17 @@ class MetadataConnectionTests(unittest.TestCase):
     args=query.call_args.args[0];options=query.call_args.kwargs
     self.assertEqual(args[0],'mariadb');self.assertIn('--host=db.example.test',args);self.assertIn('--port=3307',args)
     self.assertNotIn('synthetic-only',' '.join(args));self.assertEqual(options['env']['MYSQL_PWD'],'synthetic-only')
+ def test_socket_metadata_uses_local_transport_without_password_in_argv(self):
+  with tempfile.TemporaryDirectory() as temp:
+   config=Path(temp)/'metadata.json'
+   config.write_text(json.dumps({'DatabaseConfiguration':{'UserName':'readonly','DatabaseName':'catalog','Password':'synthetic-only'}}))
+   fake=type('Result',(),{'returncode':0,'stdout':'{"path":"example.nes"}\n'})()
+   with patch.dict(os.environ,{'WEBRCADE_METADATA_ENABLED':'true','WEBRCADE_METADATA_CONFIG':str(config),'WEBRCADE_METADATA_DB_HOST':'ignored.example.test','WEBRCADE_METADATA_DB_SOCKET':'/run/catalog/mysqld.sock'}),patch.object(m.subprocess,'run',return_value=fake) as query:
+    self.assertEqual(m.metadata(),[{'path':'example.nes'}])
+    args=query.call_args.args[0];options=query.call_args.kwargs
+    self.assertIn('--protocol=SOCKET',args);self.assertIn('--socket=/run/catalog/mysqld.sock',args)
+    self.assertFalse(any(x.startswith('--host=') or x.startswith('--port=') for x in args))
+    self.assertNotIn('synthetic-only',' '.join(args));self.assertEqual(options['env']['MYSQL_PWD'],'synthetic-only')
  def test_host_metadata_driver_also_keeps_password_out_of_argv(self):
   with tempfile.TemporaryDirectory() as temp:
    config=Path(temp)/'metadata.json'
