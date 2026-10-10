@@ -44,6 +44,7 @@ retro console artwork for system folders, with the original charcoal/red colors.
 Settings and in-game menus use compact black/red panels; pause actions stack
 in portrait and use two columns in landscape. The touch controller and its
 pop-out retain their original blue/aqua styling.
+The loading logo and status fit mobile viewports and remain visible during slow loads.
 Game details open in a touch-friendly panel; Play uses the same native launcher
 and on-demand emulator cores. Large folders show 48 cards per page with
 lazy artwork. The mobile cards, details and search caches are released while a

@@ -18,6 +18,8 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   '--host-resolver-rules=MAP '+new URL(origin).hostname+':443 127.0.0.1:'+port]});
  try {
   const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,ignoreHTTPSErrors:true,serviceWorkers:'block',...(safari?{userAgent:devices['iPhone 13'].userAgent}:{permissions:['screen-wake-lock']})});
+  let releaseInitialFeed;
+  const initialFeedGate=new Promise(resolve=>{releaseInitialFeed=resolve});
   let runtimeConfig;
   await context.route('**/cloud-saves/api.php?**',route=>{const action=new URL(route.request().url()).searchParams.get('action');
    return route.fulfill({status:action==='status'?200:404,json:action==='status'?{csrf:'fixture',config:runtimeConfig}:{error:'Missing fixture'}});});
@@ -27,7 +29,7 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
    config.enabled=true;config.autoRedirect=false;config.accessAllowed=true;config.feedUrl=origin+'/content/feeds/combined.json';runtimeConfig=config;
    await route.fulfill({response,body:'window.WrcadCloudConfig='+JSON.stringify(config)+';'});
   });
-  await context.route('**/content/feeds/combined.json',async route=>{const response=await route.fetch({url:'https://127.0.0.1:'+port+'/content/feeds/combined.json'});
+  await context.route('**/content/feeds/combined.json',async route=>{await initialFeedGate;const response=await route.fetch({url:'https://127.0.0.1:'+port+'/content/feeds/combined.json'});
    const feed=JSON.parse(await response.text());
    function rewrite(value){if(typeof value==='string' && /^https?:\/\//.test(value)){const url=new URL(value);if(url.pathname.startsWith('/content/'))return origin+url.pathname+url.search;}
     if(Array.isArray(value))return value.map(rewrite);if(value&&typeof value==='object')for(const key of Object.keys(value))value[key]=rewrite(value[key]);return value;}
@@ -45,9 +47,31 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   page.on('pageerror',e=>{errors.push(e.message);console.log('JS',e.message)});
   page.on('request',r=>{if(/\.wasm(?:\?|$)/.test(r.url()))coreRequests.push(r.url())});
   await page.goto(origin+'/play/',{waitUntil:'domcontentloaded'});
-  await page.waitForSelector('.cr-mobile-card');
-  await page.evaluate('('+findLibrary.toString()+')().ctx.showReleaseNotes(false)');
   const capture=async name=>{if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,name+'.png')})};
+  const loading=page.locator('#loadingScreen');
+  await loading.waitFor();await page.waitForTimeout(2500);
+  for(const [width,height,name] of [[390,844,'phone'],[844,390,'landscape'],[320,568,'small-phone'],[768,1024,'tablet']]){
+   await page.setViewportSize({width,height});await page.waitForTimeout(150);
+   const layout=await loading.evaluate(el=>({bounds:el.getBoundingClientRect().toJSON(),logo:el.querySelector('.logoLarge').getBoundingClientRect().toJSON(),opacity:+getComputedStyle(el).opacity}));
+   for(const rect of [layout.bounds,layout.logo])assert(rect.x>=0 && rect.y>=0 && rect.right<=width && rect.bottom<=height,'loading screen fits '+name);
+   assert(layout.opacity>=.95,'loading screen stays visible after its animation');
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'loading does not overflow the viewport');
+   assert(await loading.locator('.loading-text').isVisible(),'loading status remains visible');
+   await capture('mobile-loading-'+name);
+  }
+  await page.setViewportSize({width:390,height:844});
+  const logoText=loading.locator('.logoLarge-left-text'),name=await logoText.innerText();
+  await logoText.evaluate(el=>{el.textContent='A longer configured arcade name'});
+  assert(await logoText.evaluate(el=>el.scrollWidth<=el.clientWidth),'configured branding wraps within the loading screen');
+  await logoText.evaluate((el,name)=>{el.textContent=name},name);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await loading.evaluate(el=>getComputedStyle(el).animationName),'none','loading respects reduced motion');
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  releaseInitialFeed();
+  await page.waitForSelector('.cr-mobile-card');
+  await loading.waitFor({state:'detached'});
+  console.log('PASS mobile loading logo/status fit portrait, landscape, small phones/tablets, remain visible through slow loading and release on readiness');
+  await page.evaluate('('+findLibrary.toString()+')().ctx.showReleaseNotes(false)');
   async function fits(width,height,name){
    await page.setViewportSize({width,height});await page.waitForTimeout(150);
    const bounds=await page.locator('.cr-mobile-library .webrcade-outer').boundingBox();
