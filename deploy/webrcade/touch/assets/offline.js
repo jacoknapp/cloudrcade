@@ -15,7 +15,7 @@
     await loaded;
     // The first visit can load resources before clients.claim(). Warm those
     // URLs from the HTTP cache too; subsequent requests are intercepted normally.
-    registration.active?.postMessage({type:'warm', urls:[location.href,
+    registration.active?.postMessage({type:'warm', urls:[location.href, config.feedUrl || '/content/feeds/combined.json',
       ...performance.getEntriesByType('resource').map(entry => entry.name)]});
   }).catch(error => console.warn('Offline game caching unavailable:', error));
 })();

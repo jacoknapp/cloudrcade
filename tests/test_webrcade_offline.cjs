@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const origin = 'https://arcade.example.test';
 const entries = new Map(), handlers = {};
-let fetcher, calls = 0, failWrite = false;
+let fetcher, calls = 0, failWrite = false, skips = 0;
 const cache = {
   match: async key => entries.get(String(key))?.clone(),
   put: async (key, response) => {
@@ -16,7 +16,7 @@ const sandbox = {URL, Request, Response, Headers, Blob, Promise, console,
   setTimeout, clearTimeout, caches:{open:async()=>cache},
   fetch:async request => { calls++; return fetcher(request); },
   self:{location:{origin,href:origin+'/touch-controls/offline-worker.js?cache=wrcad-arcade-offline-v1'}, navigator:{onLine:true}, clients:{claim:async()=>{}},
-    addEventListener:(name, callback)=>handlers[name]=callback}};
+    skipWaiting:async()=>{skips++},addEventListener:(name, callback)=>handlers[name]=callback}};
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('deploy/webrcade/touch/assets/offline-worker.js','utf8'),sandbox);
 const good = (body, type='application/octet-stream', status=200) => new Response(body,{status,headers:{'Content-Type':type}});
@@ -32,6 +32,20 @@ async function request(path, init={}, browser={}) {
   return response;
 }
 async function main() {
+  const installation=[];
+  fetcher=async()=>{throw new Error('Protected request during sign-in')};
+  handlers.install({waitUntil:p=>installation.push(p)});
+  await Promise.all(installation);
+  assert.equal(calls,0,'worker install/update must not fetch protected pages during sign-in');
+  assert.equal(skips,1,'new worker activates promptly');
+  console.log('PASS worker installation needs no authenticated page/feed requests');
+  const warming=[];
+  fetcher=async url=>String(url).endsWith('.json')?good('{}','application/json'):good('page /touch-controls/offline.js','text/html');
+  handlers.message({data:{type:'warm',urls:[origin+'/play/',origin+'/content/feeds/combined.json']},waitUntil:p=>warming.push(p)});
+  await Promise.all(warming);
+  assert(entries.has(origin+'/play/') && entries.has(origin+'/content/feeds/combined.json'),'loaded app still warms its shell and feed');
+  entries.clear();calls=0;
+  console.log('PASS app-driven warming preserves first-visit offline shell/feed caching');
   for (const feed of ['/content/feeds/combined.json', 'https://catalog.example.com/feed.json']) {
     const listeners = {};
     const fixture = {...sandbox, self:{...sandbox.self,

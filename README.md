@@ -45,6 +45,8 @@ Settings and in-game menus use compact black/red panels; pause actions stack
 in portrait and use two columns in landscape. The touch controller and its
 pop-out retain their original blue/aqua styling.
 The loading logo and status fit mobile viewports and remain visible during slow loads.
+Background offline-worker updates make no protected requests during sign-in;
+the loaded app warms its library and feed afterward.
 Game details open in a touch-friendly panel; Play uses the same native launcher
 and on-demand emulator cores. Large folders show 48 cards per page with
 lazy artwork. The mobile cards, details and search caches are released while a

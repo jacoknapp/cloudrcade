@@ -86,11 +86,10 @@ async function warm(url, required = false) {
 }
 
 self.addEventListener('install', event => {
-  // A first offline navigation needs the shell even if registration happened
-  // after the original page and feed were loaded. Never prefetch the ROM library.
-  event.waitUntil(Promise.all([warm(LIBRARY, true), warm(FEED, true)]));
-  // Corrections to this worker must not wait for every open game to close.
-  self.skipWaiting();
+  // Browsers update this public script even while sign-in is pending. Protected
+  // prefetches here can replace the auth proxy's pending redirect cookie.
+  // The loaded app sends its shell/feed/assets after authentication instead.
+  event.waitUntil(self.skipWaiting());
 });
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
