@@ -76,6 +76,13 @@ def build(work, output):
         artifacts = source / 'build/linux-artifacts'
         if source_digest(source) != lock['sourceTreeSha256']:
             raise RuntimeError('Build changed its native source inputs')
+    # Snapshot before verification. A caller-provided cache can be rebuilt
+    # concurrently; packaging must use exactly the bytes that passed the lock.
+    inputs = artifacts
+    artifacts = output / 'qualified-artifacts'
+    artifacts.mkdir()
+    for name in lock['artifacts']:
+        shutil.copy2(inputs / name, artifacts / name)
     actual = {name: sha(artifacts / name) for name in lock['artifacts']}
     if actual != lock['artifacts']:
         raise RuntimeError(f'Linux artifact mismatch: {actual}')
