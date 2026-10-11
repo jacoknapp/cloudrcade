@@ -32,7 +32,7 @@ def patch_runtime(app):
       const fs = moduleInstance.FS;
       let total = 0;
       for (const file of payload.files || []) {
-        if (!/^(USA|EUR|JAP)\\/Card A\\/[A-Za-z0-9_. -]+\\.gci$/.test(file.name)) throw new Error("Invalid memory card path");
+        if (!/^(USA|EUR|JAP)\\/Card A\\/[^/\\\\\\x00-\\x1f]+\\.gci$/.test(file.name)) throw new Error("Invalid memory card path");
         const bytes = new Uint8Array(file.content);
         total += bytes.length;
         if (total > 64 * 1024 * 1024) throw new Error("Memory card data exceeds 64 MiB");
@@ -49,7 +49,7 @@ def patch_runtime(app):
         let names;
         try { names = fs.readdir(path); } catch { continue; }
         for (const name of names) {
-          if (!/^[A-Za-z0-9_. -]+\\.gci$/.test(name)) continue;
+          if (!/^[^/\\\\\\x00-\\x1f]+\\.gci$/.test(name)) continue;
           const stat = fs.stat(path + name);
           if (!fs.isFile(stat.mode)) continue;
           files.push({name:folder + name, content:fs.readFile(path + name)});

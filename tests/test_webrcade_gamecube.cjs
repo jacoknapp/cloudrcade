@@ -187,5 +187,12 @@ function fake() {
   const recycled={}; assert.equal(padState(new Set(['A']),null,recycled),recycled);
   assert.equal(recycled.mask,BUTTONS.A); padState(new Set(),null,recycled);
   assert.deepEqual(recycled,neutral,'every reused field resets after release or gamepad disconnect');
+  const {GameCubeSaves} = await import(pathToFileURL(path.join(root,'saves.mjs')));
+  const saves=new GameCubeSaves('fixture',{}), persisted=[];
+  saves.cardPath='gamecube/TEST01/cards';
+  saves.manager={async save(name,files){persisted.push({name,files});return true;}};
+  await saves.cards({async request(type){assert.equal(type,'exportCards');return {files:[]};}});
+  assert.deepEqual(persisted,[{name:saves.cardPath,files:[]}],
+    'deleting the last card save persists an empty card instead of resurrecting the previous backup');
   console.log('PASS experimental GameCube device-GPU requirement, >50MB streaming with existing 16MiB buffer, input, timeout and worker cleanup');
 })().catch(error=>{console.error(error);process.exitCode=1;});

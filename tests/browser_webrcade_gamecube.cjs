@@ -63,7 +63,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
           const adapter=new UpstreamWorkerAdapter({videoBackend:'Null',noJitCache:true,ppcWasmJit:false});
           try {
             await Promise.race([adapter.load(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Core load timed out')),60000))]);
-            await adapter.request('importCards',{files:[{name:'USA/Card A/fixture.gci',content:new Uint8Array([1,2,3,4])}]});
+            await adapter.request('importCards',{files:[{name:'JAP/Card A/任天堂 & fixture.gci',content:new Uint8Array([1,2,3,4])}]});
             const cards=await adapter.request('exportCards');
             if(cards.files.length!==1 || cards.files[0].content.join(',')!=='1,2,3,4')throw new Error('Memory card filesystem roundtrip failed');
             try { await adapter.request('importCards',{files:[{name:'../../invalid.gci',content:new Uint8Array(1)}]});throw new Error('Invalid card path accepted'); }

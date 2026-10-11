@@ -22,7 +22,7 @@ export class GameCubeSaves {
   cards(adapter) { return this.serialize(async()=>{
     if (!this.manager) return;
     const {files}=await adapter.request('exportCards');
-    if (files.length && await this.manager.save(this.cardPath,files) === false) this.onError('Memory cards saved locally; cloud sync needs attention.');
+    if (await this.manager.save(this.cardPath,files) === false) this.onError('Memory cards saved locally; cloud sync needs attention.');
   }); }
   saveState(adapter, slot) { return this.serialize(async()=>{
     this.checkSlot(slot);
