@@ -17,11 +17,11 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await page.route('http://controller.test/**', route => route.fulfill({
         contentType: 'text/html', body: '<html><head></head><body></body></html>'}));
       await page.goto('http://controller.test/play/app/retro-ppsspp/');
-      const install = async () => {
-        await page.addStyleTag({content: asset('controller.css')
+      const install = async (target = page) => {
+        await target.addStyleTag({content: asset('controller.css')
           .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px')});
-        await page.addStyleTag({content: 'html,body {margin:0;background:black}'});
-        await page.evaluate(() => {
+        await target.addStyleTag({content: 'html,body {margin:0;background:black}'});
+        await target.evaluate(() => {
           const controller = {isControlDown: () => false, isPadButtonDown: () => false,
             getAxisValue: () => 0, isAxisLeft: () => false, isAxisRight: () => false,
             isAxisUp: () => false, isAxisDown: () => false};
@@ -29,8 +29,8 @@ const asset = name => fs.readFileSync(path.join(__dirname,
             emulator: {started: true, paused: false, controllers: {getController: () => controller},
               updateScreenSize() {}, pause(value) {this.paused = value; return true;}}};
         });
-        await page.addScriptTag({content: asset('controller.js')});
-        await page.locator('.kt-pad').waitFor({state: 'visible'});
+        await target.addScriptTag({content: asset('controller.js')});
+        await target.locator('.kt-pad').waitFor({state: 'visible'});
         await page.waitForTimeout(200);
       };
       await install();
@@ -92,7 +92,43 @@ const asset = name => fs.readFileSync(path.join(__dirname,
         assert(Math.abs(r.x+r.width/2-x*390)<.5 && Math.abs(r.y+r.height/2-y*844)<.5,
           `${id}: saved position survives the new defaults`);
       }
-      console.log('PASS', engine.name(), 'PSP defaults, browser/installed bounds, rotation, independent input and saved layout');
+      // Reproduce a game frame extending 60px below its installed-app host.
+      // Child visualViewport alone reports the frame's larger layout bounds.
+      await page.goto('http://controller.test/host/');
+      await page.evaluate(() => {
+        localStorage.clear(); document.body.style.margin = '0';
+        const frame = document.createElement('iframe');
+        frame.src = '/play/app/retro-ppsspp/';
+        frame.style.cssText = `position:fixed;top:0;left:0;width:100%;height:${innerHeight+60}px;border:0`;
+        document.body.append(frame);
+      });
+      const game = await (await page.locator('iframe').elementHandle()).contentFrame();
+      await game.waitForURL('http://controller.test/play/app/retro-ppsspp/');
+      await game.waitForLoadState(); await install(game);
+      for (const installed of [false, true]) {
+        await game.evaluate(value => document.documentElement.toggleAttribute('data-cr-installed', value), installed);
+        for (const viewport of [{width:390,height:844}, {width:390,height:744}]) {
+          await page.setViewportSize(viewport); await page.waitForTimeout(250);
+          for (const button of ['button-12','button-13','menu']) {
+            const r = await game.locator(`[data-layout-id="${button}"]`).boundingBox();
+            const bottomGap = viewport.height-r.y-r.height;
+            assert.equal(r.height, 44, `${button}: full-size tap target`);
+            assert(Math.abs(bottomGap-(installed ? 22 : 34))<.5,
+              `${button}: visible above host bottom, including safe inset: ${JSON.stringify({r,bottomGap})}`);
+          }
+        }
+      }
+      // Model browser chrome hiding an additional part of the layout viewport.
+      await page.evaluate(() => {
+        const visual = new EventTarget();
+        Object.assign(visual, {offsetLeft:0,offsetTop:0,width:innerWidth,height:innerHeight-50});
+        Object.defineProperty(window, 'visualViewport', {configurable:true,value:visual});
+        dispatchEvent(new Event('resize'));
+      });
+      await page.waitForTimeout(250);
+      const start = await game.locator('[data-cid="13"]').boundingBox();
+      assert(Math.abs(744-50-start.y-start.height-22)<.5, 'Start stays above visual viewport bottom');
+      console.log('PASS', engine.name(), 'PSP defaults, rotation, independent input, saved layout and fully visible Start/Select in oversized frames/browser chrome');
     } finally {await browser.close();}
   }
 })().catch(error => {console.error(error); process.exitCode = 1;});

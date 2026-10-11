@@ -329,6 +329,37 @@
     const value = layouts[layoutKey()] ?? layouts[legacyKey];
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
+  // A game iframe can be taller than the visible installed-app window. Its
+  // own visualViewport describes the iframe, so also intersect its ancestors.
+  // Keep saved normalized coordinates in the existing game-frame dimensions.
+  function visibleViewport() {
+    let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+    let view = window, offsetX = 0, offsetY = 0;
+    try {
+      while (view) {
+        const visual = view.visualViewport;
+        const x = visual?.offsetLeft || 0, y = visual?.offsetTop || 0;
+        left = Math.max(left, x - offsetX);
+        top = Math.max(top, y - offsetY);
+        right = Math.min(right, view.innerWidth - offsetX,
+          x + (visual?.width || view.innerWidth) - offsetX);
+        bottom = Math.min(bottom, view.innerHeight - offsetY,
+          y + (visual?.height || view.innerHeight) - offsetY);
+        if (view === view.top || !view.frameElement) break;
+        const frame = view.frameElement, rect = frame.getBoundingClientRect();
+        offsetX += rect.left + frame.clientLeft;
+        offsetY += rect.top + frame.clientTop;
+        view = view.parent;
+      }
+    } catch (_) { /* Cross-origin ancestors cannot supply their bounds. */ }
+    return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
+  }
+  let controllerBounds = visibleViewport();
+  function fitVisibleViewport() {
+    controllerBounds = visibleViewport();
+    Object.assign(host.style, {left: `${controllerBounds.left}px`, top: `${controllerBounds.top}px`,
+      width: `${controllerBounds.width}px`, height: `${controllerBounds.height}px`, right: 'auto', bottom: 'auto'});
+  }
   function applyLayout() {
     for (const element of movable) { element.style.transform = ''; element.style.visibility = ''; }
     if (pad.hidden) return;
@@ -344,8 +375,10 @@
       const custom = Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
-      const clampX = x => Math.max(8 + r.width / 2, Math.min(innerWidth - 8 - r.width / 2, x));
-      const clampY = y => Math.max(8 + r.height / 2, Math.min(innerHeight - 8 - r.height / 2, y));
+      const clampX = x => Math.max(controllerBounds.left + 8 + r.width / 2,
+        Math.min(controllerBounds.right - 8 - r.width / 2, x));
+      const clampY = y => Math.max(controllerBounds.top + 8 + r.height / 2,
+        Math.min(controllerBounds.bottom - 8 - r.height / 2, y));
       // Apply the exclusion area to defaults, restored layouts, and live drags.
       // Choose the closest free position alongside/above/below the tab.
       const xs = [desiredX, ...obstacles.flatMap(o => [o.left - gap - r.width / 2, o.right + gap + r.width / 2])].map(clampX);
@@ -535,12 +568,14 @@
     // Keep the tab clear of the editor; allow the drawer to extend upward when
     // its handle has been placed near the bottom of the screen.
     const toolbarBottom = system === 'nds' ? document.querySelector('.touch-overlay-buttons')?.getBoundingClientRect().bottom || 0 : 0;
-    const minimum = editing ? $('.kt-editor').getBoundingClientRect().bottom + 10 : Math.max(8, toolbarBottom + 10);
-    const top = Math.max(minimum, Math.min(innerHeight - 56, y * innerHeight - 24));
-    host.style.setProperty('--kt-dock-top', `${top}px`);
-    drawer.style.marginTop = `${drawerOpen ? Math.min(0, innerHeight - 8 - top - drawer.offsetHeight) : 0}px`;
+    const minimum = editing ? $('.kt-editor').getBoundingClientRect().bottom + 10 :
+      Math.max(controllerBounds.top + 8, toolbarBottom + 10);
+    const top = Math.max(minimum, Math.min(controllerBounds.bottom - 56, y * innerHeight - 24));
+    host.style.setProperty('--kt-dock-top', `${top - controllerBounds.top}px`);
+    drawer.style.marginTop = `${drawerOpen ? Math.min(0, controllerBounds.bottom - 8 - top - drawer.offsetHeight) : 0}px`;
   }
   function draw() {
+    fitVisibleViewport();
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
@@ -555,7 +590,7 @@
       document.documentElement.classList.toggle('kt-ds-playing', gameReady && !editing && !drawerOpen);
     }
     const tabRect = tab.getBoundingClientRect();
-    const stamp = `${innerWidth}:${innerHeight}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
+    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
     host.classList.toggle('kt-enabled', enabled);
   }
@@ -798,6 +833,7 @@
   function resizeLayout() { clear(); layoutStamp = ''; draw(); }
   window.addEventListener('resize', resizeLayout);
   window.visualViewport?.addEventListener('resize', resizeLayout);
+  window.visualViewport?.addEventListener('scroll', resizeLayout);
   document.addEventListener('visibilitychange', clear);
   function refreshPreferences() {
     if (editing) return; // Keep unsaved drags intact until Save or Cancel.
