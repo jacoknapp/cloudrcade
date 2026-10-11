@@ -151,8 +151,13 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         psp_main = re.search(r'src="([^"]*/arcade-bundles/retro-ppsspp/cloud-main\.[^"]+\.js)"', psp_html)
         assert psp_main, 'PSP wrapper script is missing'
         with get(psp_main.group(1)) as response:
-            assert b'RETRO_PPSSPP:"retro-ppsspp"' in response.read(), 'PSP canonical app type is missing'
-        with get('/play/app/retro-ppsspp/js/experimental-v2/ppsspp_libretro.wasm') as response:
+            psp_wrapper = response.read()
+            assert b'RETRO_PPSSPP:"retro-ppsspp"' in psp_wrapper, 'PSP canonical app type is missing'
+            assert b'.psp.enabled.v1' not in psp_wrapper, 'PSP still requires the retired opt-in'
+            assert b'PlayStation Portable (experimental)' not in psp_wrapper
+        assert '.psp.enabled.v1' not in player, 'Library still requires the retired PSP opt-in'
+        assert 'Enable PSP (experimental)' not in player
+        with get('/play/app/retro-ppsspp/js/v3/ppsspp_libretro.wasm') as response:
             assert response.read(4) == b'\0asm'
         with get('/play/app/retro-ppsspp/assets/manifest.json') as response:
             assert 'compat.ini' in json.load(response)

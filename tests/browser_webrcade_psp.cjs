@@ -1,4 +1,4 @@
-/* Actual experimental PSP core lifecycle. Use an operator-owned game or
+/* Actual PSP core lifecycle. Use an operator-owned game or
  * upstream open-source homebrew demo, served by the test instance.
  * WEBRCADE_TEST_ORIGIN=https://localhost:8443 PSP_TEST_ROM=/content/demo.elf
  * NODE_PATH=<Playwright modules> node tests/browser_webrcade_psp.cjs
@@ -20,7 +20,6 @@ const config={appName:'PSP Test',storagePrefix:'psp_test',enabled:false,autoRedi
   try {
     const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',
       hasTouch:true,viewport:{width:390,height:844}});
-    await context.addInitScript(()=>localStorage.setItem('psp_test.psp.enabled.v1','1'));
     const page=await context.newPage();
     page.on('pageerror',e=>errors.push(e.stack));page.on('console',m=>{logs.push(m.text());if(process.env.PSP_TEST_DEBUG)console.log(m.text());});
     await page.route('**/cloud-saves/config.php',r=>r.fulfill({contentType:'application/javascript',

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a pinned experimental PSP app and its corresponding source package.
+# Build a pinned PSP app and its corresponding source package.
 # Requires Docker, Git, Python, rsync and network access. No ROMs or BIOS needed.
 # WORK is disposable scratch space; OUT is the generated release/psp directory.
 set -euo pipefail
@@ -59,8 +59,8 @@ rm -rf "${APP:?}/src" "${APP:?}/public"
 cp -r "$HERE/app/src" "$HERE/app/public" "$APP/"
 # Share the existing, tested bounded HTTP range reader without another copy.
 cp "$HERE/../retro-azahar/app/src/emulator/lazyrom.js" "$APP/src/emulator/"
-mkdir -p "$APP/public/js/experimental-v2" "$APP/public/assets"
-cp "$WORK/RetroArch/ppsspp_libretro.js" "$WORK/RetroArch/ppsspp_libretro.wasm" "$APP/public/js/experimental-v2/"
+mkdir -p "$APP/public/js/v3" "$APP/public/assets"
+cp "$WORK/RetroArch/ppsspp_libretro.js" "$WORK/RetroArch/ppsspp_libretro.wasm" "$APP/public/js/v3/"
 python3 "$HERE/package-assets.py" "$WORK/ppsspp/assets" "$APP/public/assets"
 sed -i 's#@webrcade/app-retro-melonds#@webrcade/app-retro-ppsspp#' "$APP/package.json"
 run -e CI=false -v "$WORK:/w" -w /w node:16 bash -c \
@@ -69,4 +69,4 @@ run -e CI=false -v "$WORK:/w" -w /w node:16 bash -c \
 mkdir -p "$OUT/app" "$OUT/sources"
 rsync -a --delete "$APP/build/" "$OUT/app/"
 python3 "$HERE/package-source.py" "$WORK" "$OUT/sources/psp-source.tar.gz"
-echo "Built experimental PSP app: $OUT"
+echo "Built PSP app: $OUT"

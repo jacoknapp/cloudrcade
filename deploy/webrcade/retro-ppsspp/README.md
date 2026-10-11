@@ -1,9 +1,7 @@
-# Experimental PSP application
+# PSP application
 
-Players opt in through **Settings → Experimental Settings → Enable PSP
-(experimental)**. It is off by default, saved per browser/storage namespace,
-and toggling it reloads the library. No Docker enable flag is required.
-The library and the PSP app both enforce this preference.
+PSP is available by default in the library and native app. No player or Docker
+enable flag is required. Older PSP opt-in preferences are ignored.
 
 The scanner reads `.iso`, `.cso`, `.pbp` and `.elf` under `psp/roms`, including
 subfolders. PSP needs no console BIOS. PPSSPP's redistributable system assets
@@ -11,7 +9,7 @@ are included in the app. The PSP controller has separate analog/D-pad inputs,
 cross/circle/square/triangle, L/R, Select, Start and Menu.
 
 HTTPS (or localhost), cross-origin isolation, SharedArrayBuffer and WebGL2 are
-required. This core is experimental; compatibility and performance vary.
+required. Compatibility and performance vary by game and device.
 The upstream `celshading.elf` demo currently fails during loading in both this
 adapter and EmulatorJS's own frontend. The PBP sprite demo passes the native
 browser lifecycle checks; ELF support remains subject to upstream compatibility.

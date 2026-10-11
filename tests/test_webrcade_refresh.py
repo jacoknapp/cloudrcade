@@ -20,7 +20,7 @@ class RefreshTests(unittest.TestCase):
   self.put('psp/roms/Not a game.sav',b'save')
   self.put('nes/roms/game.nes',b'nes')
   m.main();feed=json.loads((self.state/'feeds/combined.json').read_text())
-  category=next(c for c in feed['categories'] if c['title']=='PlayStation Portable (experimental)')
+  category=next(c for c in feed['categories'] if c['title']=='PlayStation Portable')
   self.assertEqual(len(category['items']),4)
   self.assertTrue(all(i['type']=='psp' and '/psp/roms/' in i['props']['rom'] for i in category['items']))
  def test_portable_env_without_gaseous_or_a_mounted_snes_library(self):

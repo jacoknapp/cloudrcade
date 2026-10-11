@@ -26,7 +26,7 @@ SYSTEMS = {
  'nds': ('Nintendo DS', 'retro-melonds', {'.nds'}, 20),
  'segaMD': ('Sega Genesis', 'genesis', {'.bin', '.gen', '.smd', '.md'}, 29),
  'psx': ('PlayStation', 'psx', {'.chd', '.pbp', '.cue'}, 7),
- 'psp': ('PlayStation Portable (experimental)', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
+ 'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
 }
 # The 3DS share mixes games with updates, DLC, homebrew and console backups.

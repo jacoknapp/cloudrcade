@@ -4,7 +4,7 @@
     "date": "October 10, 2026",
     "title": "Mobile play and a refreshed library",
     "changes": [
-      "*Experimental PSP support*: enable it in Settings → Experimental Settings. The switch is off by default; HTTPS and WebGL2 are required.",
+      "*PSP support*: available by default, with streaming for large games. HTTPS and WebGL2 are required.",
       "A compact *mobile library* with search, touch controls and game details. Install as a web app for a full-screen experience.",
       "A centered app icon, a clearer *Recently Played* history icon and distinct console artwork on mobile and desktop.",
       "Desktop console artwork leaves the system name to the carousel, keeping category labels clear and readable.",

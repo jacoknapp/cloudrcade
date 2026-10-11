@@ -18,7 +18,7 @@ Start with [your first game](docs/wiki/quick-start.md#play-your-first-game). The
 - [Nextcloud Link, connection status, Manage and reconnecting](docs/wiki/nextcloud-and-access.md).
 - [Streaming, offline play and 3DS performance](docs/wiki/streaming-offline-and-3ds.md).
 
-PSP support is experimental and off by default. Turn it on in **Settings → Experimental Settings → Enable PSP (experimental)**; no Docker setting is needed. Place PSP games under `roms/psp/roms/`. HTTPS and WebGL2 are required.
+PSP support is available by default; no player or Docker enable setting is needed. Place PSP games under `roms/psp/roms/`. HTTPS and WebGL2 are required.
 
 <a id="nextcloud-and-sso"></a>
 

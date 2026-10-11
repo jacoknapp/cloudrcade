@@ -39,9 +39,9 @@ replace(apps, '\n  //RETRO_PPSSPP: "retro-ppsspp",', '\n  RETRO_PPSSPP: "retro-p
 replace(apps, '  NDS: "nds",', '  NDS: "nds",\n  PSP: "psp",')
 replace(apps, 'const types = [{', '''const types = [{
     key: APP_TYPE_KEYS.RETRO_PPSSPP, alias: APP_TYPE_KEYS.PSP,
-    name: 'PlayStation Portable (experimental)', coreName: 'PPSSPP', slowExit: true,
+    name: 'PlayStation Portable', coreName: 'PPSSPP', slowExit: true,
     location: 'app/retro-ppsspp/', background: 'images/app/nds-background.png',
-    thumbnail: 'images/app/nds-thumb.png', description: 'Experimental PSP browser core.',
+    thumbnail: 'images/app/nds-thumb.png', description: 'PSP browser core.',
     validate: checkRom, extensions: ['iso', 'cso', 'pbp', 'elf'],
     multiThreaded: true, defaults: {rom: ''}
   }, {''')

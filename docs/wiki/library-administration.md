@@ -59,7 +59,7 @@ The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at
 | `n64/roms` | Nintendo 64 | `.z64`, `.v64`, `.n64` |
 | `nds/roms` | Nintendo DS | `.nds` |
 | `segaMD/roms` | Genesis | `.bin`, `.gen`, `.smd`, `.md` |
-| `psp/roms` | PSP (experimental; enable in the player’s Experimental Settings) | `.iso`, `.cso`, `.pbp`, `.elf` |
+| `psp/roms` | PSP | `.iso`, `.cso`, `.pbp`, `.elf` |
 | `psx/roms` | PlayStation | `.chd`, `.pbp`, `.cue` |
 | `3DS` | Nintendo 3DS | `.cia`, `.3ds`, `.cci` |
 

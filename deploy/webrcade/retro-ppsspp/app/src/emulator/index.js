@@ -6,7 +6,7 @@ const HOME = '/home/web_user';
 const SAVES = HOME + '/retroarch/userdata/saves';
 const USER = SAVES + '/PSP';
 const STATE = HOME + '/retroarch/userdata/states/game.state';
-const CORE_BASE = 'js/experimental-v2/';
+const CORE_BASE = 'js/v3/';
 const SAVE_ROOTS = ['SAVEDATA'];
 // Standard gamepad positions: cross, square, circle, triangle.
 const BUTTONS = [['INP_A', 0], ['INP_X', 1], ['INP_SELECT', 2], ['INP_START', 3],
@@ -120,16 +120,12 @@ export class Emulator extends RetroAppWrapper {
   }
 
   async loadEmscriptenModule(canvas) {
-    const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
-    if (localStorage.getItem(prefix + '.psp.enabled.v1') !== '1') {
-      throw new Error('Enable PSP in Experimental Settings to play this game.');
-    }
     if (!window.crossOriginIsolated || typeof SharedArrayBuffer !== 'function') {
-      throw new Error('Experimental PSP support requires HTTPS and cross-origin isolation.');
+      throw new Error('PSP support requires HTTPS and cross-origin isolation.');
     }
     const probe = document.createElement('canvas');
     const gl = probe.getContext('webgl2');
-    if (!gl) throw new Error('Experimental PSP support requires WebGL2.');
+    if (!gl) throw new Error('PSP support requires WebGL2.');
     gl.getExtension('WEBGL_lose_context')?.loseContext();
     await new Promise((resolve, reject) => {
       const script = document.createElement('script');

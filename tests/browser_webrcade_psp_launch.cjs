@@ -21,7 +21,6 @@ const feed={title:'PSP launch fixture',categories:[{title:'PSP',items:[{
   try{
    const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',
     hasTouch:true,viewport:{width:390,height:844}});
-   await context.addInitScript(()=>localStorage.setItem('psp_launch_test.psp.enabled.v1','1'));
    const page=await context.newPage(),errors=[];
    page.on('pageerror',e=>errors.push(e.stack));
    page.on('console',m=>{if(m.type()==='error'&&m.text().includes('absoluteKey'))errors.push(m.text());});

@@ -59,9 +59,9 @@ DS retains native stylus touch on the game screen. Its drawer has **DS screens**
 
 The inherited **Experimental apps** preference is enabled once when the fork's migration first runs so experimental systems such as N64 can be used. After that migration, a player's saved choice is respected. It is a browser preference, not a guarantee of compatibility or speed.
 
-Open **Settings → Experimental Settings → Enable PSP (experimental)** to opt into PSP. It is off by default and remembered in this browser. Changing it reloads the library immediately; no Docker setting is needed. PSP uses an independent analog stick and D-pad, cross/circle/square/triangle, L/R, Select and Start. HTTPS, cross-origin isolation and WebGL2 are required. Compatibility and speed vary by browser and device.
+PSP is available by default without an Experimental Settings toggle or Docker enable setting. PSP uses an independent analog stick and D-pad, cross/circle/square/triangle, L/R, Select and Start. HTTPS, cross-origin isolation and WebGL2 are required. Compatibility and speed vary by browser and device.
 
-The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. There is no separate “Link 3DS” operation. That page contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. Disabling 3DS in the operator environment removes its registration and diagnostic switches; the PSP switch remains available.
+The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. There is no separate “Link 3DS” operation. That page contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. Disabling 3DS in the operator environment removes its registration and diagnostic switches; PSP remains available by default.
 
 3DS uses native 1x resolution and the original console model by default. See [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) before changing settings expecting full-speed playback.
 

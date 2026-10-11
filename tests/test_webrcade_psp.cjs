@@ -1,4 +1,4 @@
-// PSP adapter boundaries: disabled boot, independent inputs, memory ownership,
+// PSP adapter boundaries: platform requirements, independent inputs, memory ownership,
 // and save-before-cleanup. No ROMs, accounts or WebAssembly needed.
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,
@@ -6,12 +6,16 @@ const source=fs.readFileSync(require('node:path').join(__dirname,
   .replace(/^import .*;\n/gm,'').replace('export class Emulator','class Emulator')+'\nglobalThis.Emulator=Emulator;';
 class Wrapper { constructor(){ ['A','X','SELECT','START','UP','DOWN','LEFT','RIGHT','B','Y','LBUMP','RBUMP'].forEach((n,i)=>this['INP_'+n]=1<<i); } }
 const context={RetroAppWrapper:Wrapper,Prefs:class{},LazyRom:class{},DisplayLoop:class{},
-  LOG:{error:()=>{}},window:{WrcadCloudConfig:{storagePrefix:'test'}},localStorage:{getItem:()=>null},
+  LOG:{error:()=>{}},window:{WrcadCloudConfig:{storagePrefix:'test'}},
+  localStorage:{getItem:()=>{throw new Error('PSP must not read the retired opt-in');}},
   document:{removeEventListener:()=>{}},setTimeout,clearTimeout,SharedArrayBuffer};
 vm.createContext(context);vm.runInContext(source,context);
 const emu=new context.Emulator({});
 (async()=>{
-  await assert.rejects(emu.loadEmscriptenModule({}),/Enable PSP in Experimental Settings/);
+  await assert.rejects(emu.loadEmscriptenModule({}),/PSP support requires HTTPS and cross-origin isolation/);
+  context.window.crossOriginIsolated=true;
+  context.document.createElement=()=>({getContext:()=>null});
+  await assert.rejects(emu.loadEmscriptenModule({}),/PSP support requires WebGL2/);
   const calls=[];const module={_simulate_input:(...args)=>calls.push(args)};
   emu.applyInput(module,0,emu.INP_A|emu.INP_UP,.75,-.5);
   assert(calls.some(a=>a[1]===0&&a[2]===1),'cross reaches libretro B');
@@ -33,5 +37,5 @@ const emu=new context.Emulator({});
   emu.lazyRom={chunks:new Map([[0,new Uint8Array(2)]])};
   await emu.dispose();assert.equal(emu.lazyRom.chunks.size,0);
   assert.deepEqual(cleanup,[['loop',0],['threads'],['audio']]);
-  console.log('PASS PSP opt-in gate, independent analog/D-pad/face inputs, state allocation ownership and exit cleanup');
+  console.log('PASS PSP platform requirements without opt-in storage, independent analog/D-pad/face inputs, state allocation ownership and exit cleanup');
 })().catch(e=>{console.error(e);process.exitCode=1});
