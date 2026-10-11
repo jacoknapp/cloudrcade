@@ -104,11 +104,19 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 @media (max-width: 460px) { #wrcad-touch.kt-n64 .kt-pad, #wrcad-touch.kt-3ds .kt-pad { height: 370px; } #wrcad-touch.kt-n64 .kt-cbuttons { bottom: 192px; } }
 @media (max-width: 599px) {
   #wrcad-touch.kt-n64 .kt-extra-dpad, #wrcad-touch.kt-3ds .kt-extra-dpad, #wrcad-touch.kt-psp .kt-extra-dpad { left: 0; bottom: 190px; }
+  /* PSP needs room for L, the D-pad and the analog stick on the same side.
+   * Keep 20px between controls so their 10px touch margins do not overlap. */
+  #wrcad-touch.kt-psp .kt-pad { height: 370px; }
+  #wrcad-touch.kt-psp .kt-extra-dpad { bottom: 210px; }
   #wrcad-touch.kt-dualshock .kt-pad { height: 370px; }
   #wrcad-touch.kt-3ds .kt-c-stick { right: 0; bottom: 204px; }
   #wrcad-touch.kt-dualshock .kt-dpad, #wrcad-touch.kt-dualshock .kt-actions { bottom: 176px; }
   #wrcad-touch .kt-analog-left { left: 0; bottom: 56px; }
   #wrcad-touch .kt-analog-right { left: auto; right: 0; bottom: 56px; }
+}
+@media (min-width: 460px) and (max-width: 599px) and (orientation: landscape) {
+  #wrcad-touch.kt-psp .kt-pad { height: 244px; }
+  #wrcad-touch.kt-psp .kt-extra-dpad { left: 156px; bottom: 54px; }
 }
 @media (min-width: 461px) { #wrcad-touch.kt-n64 .kt-shoulders [data-cid="10"] { position: absolute; left: 25%; } }
 @media (min-width: 600px) { #wrcad-touch .kt-pad { left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); max-width: 1000px; margin: auto; } #wrcad-touch .kt-center { bottom: 14px; } }
