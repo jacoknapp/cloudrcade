@@ -355,11 +355,24 @@
     } catch (_) { /* Cross-origin ancestors cannot supply their bounds. */ }
     return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
   }
+  const pspOrigin = system === 'psp' ? safeArea('kt-psp-origin') : null;
   let controllerBounds = visibleViewport();
   function alignPSPScreen(emulator) {
     if (system !== 'psp' || !emulator?.started || !emulator.canvas) return;
     const bounds = visibleViewport(), canvas = emulator.canvas;
     if (!bounds.width || !bounds.height) return;
+    // Portrait touch controls have their own lower area. Center the picture in
+    // the remaining safe space, even when pause/settings hide the controls.
+    if (enabled && bounds.width < bounds.height) {
+      const safe = pspOrigin.getBoundingClientRect(), controls = getComputedStyle(pad);
+      bounds.left = Math.max(bounds.left, safe.left);
+      bounds.right = Math.min(bounds.right, safe.right);
+      bounds.top = Math.max(bounds.top, safe.top);
+      bounds.bottom -= parseFloat(controls.bottom) + parseFloat(controls.height) + 20;
+      bounds.width = Math.max(0, bounds.right - bounds.left);
+      bounds.height = Math.max(0, bounds.bottom - bounds.top);
+      if (!bounds.width || !bounds.height) return;
+    }
     const screen = emulator.getScreenSize?.();
     const ratio = screen === emulator.SS_16_9 ? 16 / 9 : emulator.getDefaultAspectRatio?.();
     if (!Number.isFinite(ratio) || ratio <= 0) return;
@@ -370,7 +383,7 @@
     const pixels = value => `${Math.round(value * 1000) / 1000}px`;
     // Only CSS placement changes here. RetroArch owns the WebGL drawing buffer
     // and observes canvas size itself; resetting it would erase the game image.
-    for (const [name, value] of Object.entries({width: pixels(width), height: pixels(height),
+    for (const [name, value] of Object.entries({position: 'fixed', width: pixels(width), height: pixels(height),
       'max-width': 'none', 'max-height': 'none',
       left: pixels(bounds.left + bounds.width / 2), top: pixels(bounds.top + bounds.height / 2)})) {
       if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')

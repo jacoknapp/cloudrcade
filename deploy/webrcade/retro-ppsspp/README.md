@@ -60,3 +60,8 @@ pointing at an open-source homebrew demo or an
 operator-owned game on a disposable instance. The pinned upstream
 `pspautotests/demos/sprite.pbp` works as a homebrew fixture. Browser tests
 use Playwright, fresh local storage and no cloud account.
+
+On portrait touch screens, the picture is centered in the safe space above the
+default controller area, with a20px gap. Landscape keeps viewport centering.
+Turning touch controls off restores the full portrait viewport. Native PSP
+settings, drawing-buffer ownership and saved control positions are retained.

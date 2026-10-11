@@ -19,13 +19,18 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await page.goto('http://controller.test/play/app/retro-ppsspp/');
       const install = async (target = page) => {
         await target.addStyleTag({content: asset('controller.css')
-          .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px')});
+          .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px')
+          .replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '59px')});
         await target.addStyleTag({content: 'html,body {margin:0;background:black}'});
         await target.evaluate(() => {
           const canvas = document.createElement('canvas');
           canvas.width = 480; canvas.height = 272;
           canvas.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)';
-          document.body.append(canvas);
+          // A positioned app container must not add its offset to viewport
+          // coordinates (as the previous absolute canvas placement did).
+          const container = document.createElement('div');
+          container.style.cssText = 'position:absolute;left:17px;top:30px;width:100%;height:100%';
+          container.append(canvas); document.body.append(container);
           const controller = {isControlDown: () => false, isPadButtonDown: () => false,
             getAxisValue: () => 0, isAxisLeft: () => false, isAxisRight: () => false,
             isAxisUp: () => false, isAxisDown: () => false};
@@ -124,9 +129,15 @@ const asset = name => fs.readFileSync(path.join(__dirname,
           const canvas = app.emulator.canvas, r = canvas.getBoundingClientRect();
           return {x:r.x,y:r.y,width:r.width,height:r.height,buffer:[canvas.width,canvas.height]};
         });
+        const installed = await game.evaluate(() => document.documentElement.hasAttribute('data-cr-installed'));
+        const portrait = width < height;
+        const pictureTop = portrait ? Math.max(top,59) : top;
+        const pictureBottom = top + height - (portrait ? (installed ? 22 : 34) + 370 + 20 : 0);
         assert(Math.abs(picture.x + picture.width / 2 - left - width / 2)<.5 &&
-          Math.abs(picture.y + picture.height / 2 - top - height / 2)<.5,
-          'PSP picture centered in visible host: '+JSON.stringify(picture));
+          Math.abs(picture.y + picture.height / 2 - (pictureTop + pictureBottom)/2)<.5,
+          'PSP picture centered above default portrait controls: '+JSON.stringify(picture));
+        if(portrait) assert(picture.y >= pictureTop-.5 && picture.y+picture.height <= pictureBottom+.5,
+          'portrait picture clears status area and default controls');
         assert(Math.abs(picture.width / picture.height - 480 / 272)<.005, 'PSP aspect ratio retained');
         assert(picture.width<=width && picture.height<=height, 'PSP picture fits the visible host');
         assert.deepEqual(picture.buffer,[480,272], 'placement leaves drawing buffer to the core');
@@ -175,10 +186,20 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await page.evaluate(() => Object.assign(visualViewport,{offsetLeft:0,offsetTop:0,width:390,height:744}));
       await game.evaluate(() => {app.emulator.screenSize=app.emulator.SS_FILL; app.emulator.updateScreenSize();});
       const fill = await game.locator('canvas').boundingBox();
-      assert(Math.abs(fill.width-390*.96)<.5 && Math.abs(fill.height-744*.96)<.5, 'Fill setting retained');
+      assert(Math.abs(fill.width-390*.96)<.5 && Math.abs(fill.height-(744-59-22-370-20)*.96)<.5, 'Fill setting fits the portrait play area');
       await game.evaluate(() => {app.emulator.screenSize=app.emulator.SS_16_9; app.emulator.updateScreenSize();});
       const wide = await game.locator('canvas').boundingBox();
       assert(Math.abs(wide.width/wide.height-16/9)<.005, '16:9 setting retained');
+      // Disabling touch controls restores the whole visible viewport; re-enable
+      // them without changing saved button positions or the drawing buffer.
+      await game.locator('.kt-tab').click(); await game.locator('.kt-toggle').click();
+      await game.locator('.kt-close').click();
+      const noControls = await game.locator('canvas').boundingBox();
+      assert(Math.abs(noControls.y+noControls.height/2-744/2)<.5,'controls off restores full viewport');
+      await game.locator('.kt-tab').click(); await game.locator('.kt-toggle').click();
+      await game.locator('.kt-close').click();
+      await game.evaluate(() => {app.emulator.screenSize=0; app.emulator.updateScreenSize();});
+      await checkPicture(390,744);
       // Even in the same oversized frame, every other console keeps its legacy
       // CSS viewport. The PSP repair must not reposition another platform.
       await page.setViewportSize({width:390,height:844});

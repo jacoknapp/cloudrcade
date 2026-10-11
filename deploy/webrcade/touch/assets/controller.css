@@ -34,7 +34,7 @@ html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh);
 #wrcad-touch .kt-ds-cycle { width: 100%; }
 #wrcad-touch .kt-ds-screens > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 #wrcad-touch .kt-ds-screens > div button { padding: 8px; font-size: 13px; }
-.kt-ds-origin, .kt-3ds-origin { position: fixed; visibility: hidden; top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px); pointer-events: none; }
+.kt-ds-origin, .kt-3ds-origin, .kt-psp-origin { position: fixed; visibility: hidden; top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px); pointer-events: none; }
 html.kt-ds-active .touch-overlay-buttons-right > .touch-overlay-button-small,
 html.kt-ds-active .touch-overlay-buttons-right > .touch-overlay-button-last { display: none !important; }
 html.kt-ds-active #touch-overlay { display: none !important; }

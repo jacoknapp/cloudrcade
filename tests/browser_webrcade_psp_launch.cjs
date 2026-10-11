@@ -50,8 +50,11 @@ const feed={title:'PSP launch fixture',categories:[{title:'PSP',items:[{
       frame.style.setProperty('height',height+'px','important'),viewport.height+60);
     await game.waitForFunction(n=>Module._get_current_frame_count()>n+30,before,{timeout:30000});
     const picture=await game.locator('#canvas').boundingBox();
+    const playBottom = viewport.width < viewport.height ?
+      (await game.locator('.kt-pad').boundingBox()).y - 20 : viewport.height;
     assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5 &&
-      Math.abs(picture.y+picture.height/2-viewport.height/2)<.5,'PSP picture centered in visible host');
+      Math.abs(picture.y+picture.height/2-playBottom/2)<.5,'PSP picture centered above portrait controls');
+    assert(picture.y+picture.height<=playBottom+.5,'picture clears portrait controls');
     assert(Math.abs(picture.width/picture.height-480/272)<.005,'native PSP aspect ratio retained');
    }
    const beforePause=await game.evaluate(()=>{emulator.pause(true);return Module._get_current_frame_count();});
