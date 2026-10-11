@@ -4,12 +4,15 @@ The beta image adds Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
 files under the GameCube content directory launch Dolphin in the browser, using
 the device GPU through WebGPU. Keyboard, standard gamepad and touch controls,
 acknowledged pause/resume, Web Audio, memory cards and eight save-state slots are
-included. These actions use CloudRcade's existing pop-out controller drawer;
-the game view has no separate toolbar, menu or duplicate touch controls. Enable
-sound in the drawer after launch to satisfy browser audio permission rules.
-Memory cards autosave every15seconds, on pause and when returning to the library.
-Use Return to library in the drawer to finish saving before leaving the game.
-The Menu button opens that drawer with save/load state controls. The built-in
+included. Menu and Escape open CloudRcade's shared native pause screen and save
+slot editor, with the same keyboard and gamepad navigation as the other cores.
+Return to Browse saves memory cards before leaving. The controller settings
+drawer handles only touch controls, mute and layout editing. GameCube has its
+own default button and stick geometry; saved per-system layouts remain usable.
+The first Menu or drawer gesture unlocks browser audio; master mute still applies.
+Memory cards autosave every15seconds, on pause and when returning to the library;
+unchanged cards skip storage writes, and failed cloud sync remains retryable.
+The built-in
 GameCube performance readout is enabled by default; switch it off or on in the
 library's Experimental Settings before launching. It samples native frame and
 emulated-time counters once per second, reports core fps and speed independently
@@ -33,7 +36,10 @@ counts as a boot: Dolphin must accept the disc and reach its Running state.
 Browsers require HTTPS or localhost, shared-memory isolation, OffscreenCanvas
 and hardware WebGPU. Software adapters and CPU rasterizer fallback are rejected.
 Rendering runs entirely on the browser device. CPU emulation uses Dolphin's
-cached interpreter; dynamic JIT is disabled. No server GPU dependency exists.
+cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
+thread. Native WebGPU uses packed geometry, mapped uploads and the replay pump;
+heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
+No server GPU dependency exists.
 The pinned binary reserves1.5GiB of initial WASM memory; small devices may lack
 sufficient memory. Performance depends on browser, device and game.
 

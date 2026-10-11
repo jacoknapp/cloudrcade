@@ -7,6 +7,8 @@
 <link rel="icon" href="/touch-controls/cloudrcade.svg">
 <link rel="stylesheet" href="/touch-controls/viewport.css">
 <link rel="stylesheet" href="/touch-controls/controller.css">
+<link rel="stylesheet" href="pause-ui.css">
+<link rel="stylesheet" href="/touch-controls/menus.css">
 <style>
  :root { color-scheme:dark; font:16px system-ui,sans-serif; background:#000; color:#eee; }
  body { max-width:960px; margin:32px auto; padding:0 20px; }
@@ -18,6 +20,20 @@
  .library #status { position:fixed; top:40%; left:10%; right:10%; text-align:center; }
  .running { max-width:none; margin:0; padding:0; overflow:hidden; }
  .running #launcher,.running #status { display:none; }
+ #gamecube-menu { position:fixed; inset:0; z-index:100; font-family:Quicksand,sans-serif; }
+ #gamecube-menu[hidden] { display:none; }
+ #gamecube-menu-error { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); z-index:100; padding:12px; background:#161616; color:#eee; border:1px solid #e50914; font-size:14px; }
+ html.gc-paused-menu { font-size:1vw; }
+ @media (pointer:coarse) and (max-width:1366px) {
+  html.gc-paused-menu { font-size:14px; }
+  #gamecube-menu .gc-native-slottab { width:100%; }
+  #gamecube-menu .gc-native-slottab-content { flex-direction:column; padding:12px 0; }
+  #gamecube-menu .gc-native-slottab-content-left { display:none; }
+  #gamecube-menu .gc-native-slottab-content-right { width:100%; padding:0; font-size:14px; }
+  #gamecube-menu .gc-native-slottab-content-right-title { font-size:14px; }
+  #gamecube-menu .gc-native-slottab-content-right-subtitle { font-size:13px; margin-top:6px; }
+  #gamecube-menu .gc-native-slottab-content-right-buttons { padding:12px 0 0; width:100%; justify-content:flex-start; gap:8px; flex-wrap:wrap; }
+ }
 </style>
 <script src="/cloud-saves/config.php"></script>
 <script src="/cloud-saves/runtime.js"></script>
@@ -29,18 +45,19 @@
 <div id="launcher">
 <h1 id="title">Experimental GameCube</h1>
 <p><a id="backLibrary" href="/play/">Back to library</a></p>
-<p>Select a GameCube ISO or GCM. Game controls, sound, saves and exit use CloudRcade's pop-out menu.</p>
+<p>Select a GameCube ISO or GCM. Menu pauses the game and opens CloudRcade's standard menu for save states and exit. The side panel controls the touch layout and mute.</p>
 <button id="initialize">Initialize core</button>
 <label>Disc <input id="disc" type="file" accept=".iso,.gcm"></label>
 <label>or URL <input id="url" type="url" placeholder="https://…/game.iso"></label>
 <button id="selectUrl">Select URL</button><button id="boot" disabled>Boot disc</button>
 <button id="close" disabled>Close session</button>
 <p>Requires browser WebGPU on the device GPU. Games over50MB stream using the existing2MiB disk chunks and16MiB cache.</p>
-<p>Keyboard: X/Z/V/B = A/B/X/Y; Q/E/C = L/R/Z; Enter = Start; arrows = D-pad; WASD = stick; IJKL = C-stick; Escape = pop-out menu. Standard gamepads and existing touch controls are supported.</p>
+<p>Keyboard: X/Z/V/B = A/B/X/Y; Q/E/C = L/R/Z; Enter = Start; arrows = D-pad; WASD = stick; IJKL = C-stick; Escape = pause menu. Standard gamepads and existing touch controls are supported.</p>
 <p id="details"></p>
 <p><a href="LICENSE.dolphin">Dolphin license</a> · <a href="gamecube-source.tar.gz">Corresponding source</a> · <a href="adapter-source/README.md">Browser adapter source</a> · <a href="sys/GC/font-licenses.txt">Font license</a></p>
 </div>
 <p id="status" role="status">Core is stopped.</p>
 <canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
+<div id="gamecube-menu" hidden></div>
 <script type="module" src="lab.mjs"></script>
 </body></html>

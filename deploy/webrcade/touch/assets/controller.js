@@ -164,21 +164,6 @@
   const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (gamecubePage ? 'gamecube' : emulatorPath);
   const gamecube = system === 'gamecube' || gamecubePage;
   if (gamecube) {
-    drawer.querySelector('strong').textContent = 'Game controls';
-    const section = document.createElement('div');
-    section.className = 'kt-gamecube';
-    section.innerHTML = `<strong>GameCube</strong><button class="kt-gc-pause">Pause</button>
-      <label>Save slot <select aria-label="GameCube save slot">${Array.from({length:8},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-      <button class="kt-gc-save">Save state</button><button class="kt-gc-load">Load state</button>
-      <button class="kt-gc-exit">Return to library</button><p role="status" class="kt-gc-status"></p>`;
-    drawer.insertBefore(section, $('.kt-close'));
-    const action = (name, method) => section.querySelector(name).addEventListener('click', async () => {
-      try { await window.WrcadGameCube?.[method](Number(section.querySelector('select').value)); }
-      catch (error) { section.querySelector('[role="status"]').textContent = error.message; }
-    });
-    action('.kt-gc-pause','togglePause');
-    action('.kt-gc-save','saveState');action('.kt-gc-load','loadState');action('.kt-gc-exit','exit');
-    addEventListener('cloudrcade-game-menu', () => setDrawer(!drawerOpen));
     if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
   }
   document.documentElement.classList.toggle('kt-ds-active', system === 'nds');
@@ -552,7 +537,8 @@
     cancelDrag(); layouts[layoutKey()] = {}; layoutStamp = ''; draw();
   });
   host.classList.toggle('kt-n64', n64);
-  host.classList.toggle('kt-3ds', n3ds || gamecube);
+  host.classList.toggle('kt-3ds', n3ds);
+  host.classList.toggle('kt-gamecube', gamecube);
   host.classList.toggle('kt-psp', system === 'psp');
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
@@ -586,7 +572,8 @@
     $('[data-cid="12"]').hidden = true;
   }
   if (gamecube) {
-    $('[data-cid="12"]').textContent='Z';$('[data-cid="10"]').hidden=true;$('[data-cid="11"]').hidden=true;
+    const z = $('[data-cid="12"]'); z.textContent = 'Z'; $('.kt-shoulders').append(z);
+    $('[data-cid="10"]').hidden = true; $('[data-cid="11"]').hidden = true;
   }
   if (system === 'psx' || system === 'psp') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
@@ -647,10 +634,23 @@
         element.dataset.direction === 'digital' && held.has([0, 2, 3, 1][i])));
     }
   }
+  const gamecubeDock = {stamp: '', top: 0};
   function dockPosition() {
     const point = currentLayout().dock;
-    return Array.isArray(point) && point.length === 2 && point.every(Number.isFinite) ?
-      point : [dockSide === 'left' ? 0 : 1, .18 + 24 / innerHeight];
+    if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
+    if (gamecube && innerWidth > innerHeight && innerWidth <= 650 && innerHeight <= 550) {
+      // The short landscape layout reaches the top of the window. Put its
+      // settings tab between the shoulder and face buttons, without pushing
+      // Z onto R. Re-measure on viewport changes, never on every input frame.
+      const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.top}:${controllerBounds.bottom}`;
+      if (stamp !== gamecubeDock.stamp) {
+        const style = getComputedStyle(pad);
+        gamecubeDock.top = controllerBounds.bottom - parseFloat(style.bottom) - parseFloat(style.height) + 66;
+        gamecubeDock.stamp = stamp;
+      }
+      return [dockSide === 'left' ? 0 : 1, (gamecubeDock.top + 24) / innerHeight];
+    }
+    return [dockSide === 'left' ? 0 : 1, .18 + 24 / innerHeight];
   }
   function drawDock() {
     const [x, y] = dockPosition();
@@ -676,12 +676,6 @@
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
     pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!enabled || !gameReady));
-    if (gamecube) {
-      const api = window.WrcadGameCube;api?.fitCanvas?.();
-      $('.kt-gc-pause').textContent = api?.paused ? 'Resume' : 'Pause';
-      $('.kt-gc-status').textContent = api?.status || '';
-      for (const button of $('.kt-gamecube').querySelectorAll('button,select')) button.disabled = !api?.ready || api.busy;
-    }
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
@@ -761,7 +755,6 @@
   $('.kt-menu').addEventListener('click', () => {
     if (editing) return;
     clear();
-    if (gamecube) { setDrawer(true); return; }
     const emulator = window.app?.emulator;
     touchPauseBlocked = false;
     if (emulator && emulator.pause(true)) {
@@ -1063,7 +1056,7 @@
     const framed = Boolean(document.getElementById('webrcade-app-iframe'));
     // Layout editing intentionally pauses the emulator. Keep its toolbar and
     // dock usable until Save/Cancel, while hiding controls on native pause screens.
-    host.hidden = framed || !(ready || (gamecube && emulator?.started) || (editing && emulator === editEmulator));
+    host.hidden = framed || !(ready || (gamecube && emulator?.started && !window.app.isPauseScreen()) || (editing && emulator === editEmulator));
     if (host.hidden && drawerOpen) setDrawer(false);
     if (ready !== gameReady || controller !== activeController || framed) clear();
     activeController = controller; gameReady = ready;

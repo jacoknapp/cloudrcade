@@ -64,7 +64,7 @@ def prepare(work, out):
         shutil.copytree(HERE / 'app', stage / 'app')
         index = stage / 'app/index.html'
         html = index.read_text()
-        for name in ['brand.js','controller.js','viewport.css','controller.css']:
+        for name in ['brand.js','controller.js','viewport.css','controller.css','menus.css']:
             revision = hashlib.sha256((HERE.parent / 'touch/assets' / name).read_bytes()).hexdigest()[:16]
             html = html.replace('/touch-controls/' + name + '"', '/touch-controls/' + name + '?v=' + revision + '"')
         index.write_text(html)

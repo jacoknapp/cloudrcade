@@ -76,7 +76,11 @@ export class GameCubeSession {
       const creating = Promise.resolve(this.createAdapter({onStatus: this.onStatus,
         videoBackend: 'WebGPU-Real', presenterBackend: 'webgpu',
         transferCanvas:()=>this.canvas.transferControlToOffscreen(),
-        cpuThread: false, cpuCore: 'cached', ppcWasmJit: false,
+        cpuThread: true, cpuCore: 'cached', ppcWasmJit: true,
+        ppcWasmJitTier: 'guarded', ppcWasmJitForce: false, ppcWasmJitWarmupFrames: 120,
+        // GameCube-only native device-GPU path. Keep diagnostic GPU probes off.
+        wgpuGeometryPack: true, wgpuUploadTransport: 'mapped',
+        wgpuReplayPump: true, wgpuDiagnosticQuiet: true,
         noJitCache: true, collectMetrics: false})).then(adapter => {
         if (this.closed) {
           adapter.worker?.terminate();

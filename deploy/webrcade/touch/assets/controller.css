@@ -120,10 +120,36 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 }
 @media (min-width: 461px) { #wrcad-touch.kt-n64 .kt-shoulders [data-cid="10"] { position: absolute; left: 25%; } }
 @media (min-width: 600px) { #wrcad-touch .kt-pad { left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); max-width: 1000px; margin: auto; } #wrcad-touch .kt-center { bottom: 14px; } }
-/* GameCube uses the existing control drawer; its core contains no menu. */
-#wrcad-touch .kt-gamecube { margin-top: 16px; }
-#wrcad-touch .kt-gamecube strong { margin-bottom: 8px; }
-#wrcad-touch .kt-gamecube button { display: block; width: 100%; margin-top: 8px; }
-#wrcad-touch .kt-gamecube label { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
-#wrcad-touch .kt-gamecube select { font: inherit; color: inherit; background: #15213c; border: 1px solid #b7c8f05e; border-radius: 10px; min-height: 44px; padding: 8px; }
-#wrcad-touch .kt-gamecube [role="status"] { font-size: 12px; overflow-wrap: anywhere; margin: 8px 0 0; }
+/* GameCube's own geometry; saved per-system coordinates still override it. */
+#wrcad-touch.kt-gamecube .kt-pad { height: 400px; }
+#wrcad-touch.kt-gamecube .kt-stick[data-stick-index="0"][data-direction="analog"] { bottom: 176px; }
+#wrcad-touch.kt-gamecube .kt-extra-dpad { left: 24px; bottom: 64px; width: 88px; height: 88px; --kt-arrow-offset: 29px; }
+#wrcad-touch.kt-gamecube .kt-c-stick { left: auto; right: 0; bottom: 64px; width: 88px; height: 88px; }
+#wrcad-touch.kt-gamecube .kt-c-stick::after { content: "C"; position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 11px; pointer-events: none; }
+#wrcad-touch.kt-gamecube .kt-actions { width: 202px; height: 172px; bottom: 150px; }
+#wrcad-touch.kt-gamecube .kt-actions [data-cid="4"] { left: 70px; top: 76px; bottom: auto; width: 68px; height: 68px; font-size: 24px; border-color: #67e5c580; }
+#wrcad-touch.kt-gamecube .kt-actions [data-cid="5"] { left: 2px; top: 122px; right: auto; }
+#wrcad-touch.kt-gamecube .kt-actions [data-cid="6"] { left: 158px; top: 36px; width: 44px; height: 64px; border-radius: 22px; }
+#wrcad-touch.kt-gamecube .kt-actions [data-cid="7"] { left: 70px; top: 0; width: 68px; height: 44px; border-radius: 22px; }
+#wrcad-touch.kt-gamecube .kt-shoulders { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; }
+#wrcad-touch.kt-gamecube .kt-shoulders [data-cid="8"] { justify-self: start; }
+#wrcad-touch.kt-gamecube .kt-center button { width: 44px; padding: 5px 3px; }
+@media (orientation: landscape) and (max-height: 550px) {
+  #wrcad-touch.kt-gamecube .kt-pad { height: 244px; }
+  #wrcad-touch.kt-gamecube .kt-stick[data-stick-index="0"][data-direction="analog"] { width: 104px; height: 104px; bottom: 76px; }
+  #wrcad-touch.kt-gamecube .kt-extra-dpad { left: 128px; bottom: 94px; width: 64px; height: 64px; --kt-arrow-offset: 21px; }
+  #wrcad-touch.kt-gamecube .kt-c-stick { right: 226px; bottom: 94px; }
+  #wrcad-touch.kt-gamecube .kt-actions { bottom: 8px; }
+}
+@media (orientation: portrait) and (max-width: 360px) {
+  #wrcad-touch.kt-gamecube .kt-stick[data-stick-index="0"][data-direction="analog"] { width: 104px; height: 104px; bottom: 228px; }
+  #wrcad-touch.kt-gamecube .kt-extra-dpad, #wrcad-touch.kt-gamecube .kt-c-stick { width: 64px; height: 64px; }
+  #wrcad-touch.kt-gamecube .kt-extra-dpad { left: 0; --kt-arrow-offset: 21px; }
+}
+@media (orientation: landscape) and (max-height: 550px) and (max-width: 650px) {
+  #wrcad-touch.kt-gamecube .kt-pad { height: 294px; }
+  #wrcad-touch.kt-gamecube .kt-stick[data-stick-index="0"][data-direction="analog"] { bottom: 116px; }
+  #wrcad-touch.kt-gamecube .kt-extra-dpad { left: 0; bottom: 24px; }
+  #wrcad-touch.kt-gamecube .kt-c-stick { left: 128px; right: auto; }
+  #wrcad-touch.kt-gamecube .kt-center { left: 33%; }
+}
