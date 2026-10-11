@@ -12,22 +12,39 @@
   canvas { width:100%; aspect-ratio:4/3; object-fit:contain; background:#000; display:block; }
   #status { min-height:1.5em; } #details { overflow-wrap:anywhere; }
   a { color:#b5a4ff; }
+  .library .selection { display:none; }
+  .embedded { max-width:none; margin:0; padding:8px 16px; }
+  .embedded canvas { max-height:70vh; width:100%; }
+  #touch { display:none; gap:8px; flex-wrap:wrap; justify-content:space-between; }
+  #touch button { touch-action:none; user-select:none; min-width:44px; min-height:44px; }
+  @media (pointer:coarse) { #touch { display:flex; } body { margin:8px auto; padding:0 8px; } button { padding:8px; } }
+
 </style>
-<h1>Experimental GameCube</h1>
-<p>Dolphin prototype. Select a local GameCube ISO or GCM to try it. Compatibility and performance are unverified.</p>
-<p>Sound and saves are disabled in this prototype. Closing it discards progress.</p>
-<button id="initialize">Initialize core</button>
-<label>Disc <input id="disc" type="file" accept=".iso,.gcm"></label>
-<label>or URL <input id="url" type="url" placeholder="https://…/game.iso"></label>
-<button id="selectUrl">Select URL</button>
-<button id="boot" disabled>Boot disc</button>
+<h1 id="title">Experimental GameCube</h1>
+<p><a id="backLibrary" href="/play/">Back to library</a></p>
+<p class="selection">Select a GameCube ISO or GCM. Compatibility varies by game and browser.</p>
+<p class="selection">Memory cards save automatically. Save states use eight slots. Connected Nextcloud accounts sync through CloudRcade.</p>
+<button class="selection" id="initialize">Initialize core</button>
+<label class="selection">Disc <input id="disc" type="file" accept=".iso,.gcm"></label>
+<label class="selection">or URL <input id="url" type="url" placeholder="https://…/game.iso"></label>
+<button class="selection" id="selectUrl">Select URL</button>
+<button class="selection" id="boot" disabled>Boot disc</button>
 <button id="pause" disabled>Pause</button>
 <button id="close" disabled>Close session</button>
+<button id="sound" disabled>Enable sound</button>
+<label>State slot <select id="slot" disabled><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+<button id="save" disabled>Save state</button><button id="load" disabled>Load state</button>
+<button id="exit">Library</button>
 <p>Requires WebGPU and the device’s GPU. Games over 50 MB stream with a 16 MiB disk cache.</p>
 <p id="status" role="status">Core is stopped.</p>
 <canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
 <p>Keyboard: X/Z/V/B = A/B/X/Y; Q/E/C = L/R/Z; Enter = Start; arrows = D-pad; WASD = stick; IJKL = C-stick. Standard gamepads are supported.</p>
-<p id="details"></p>
-<p><a href="LICENSE.dolphin">Dolphin license</a> · <a href="gamecube-source.tar.gz">Pinned Dolphin corresponding source</a></p>
-<script type="module" src="lab.mjs"></script>
+<div id="touch" aria-label="Touch controls">
+<div><button data-key="STICK_UP">↑</button><br><button data-key="STICK_LEFT">←</button><button data-key="STICK_DOWN">↓</button><button data-key="STICK_RIGHT">→</button></div>
+<div><button data-key="C_UP">C↑</button><button data-key="C_LEFT">C←</button><button data-key="C_DOWN">C↓</button><button data-key="C_RIGHT">C→</button></div>
+<div><button data-key="L">L</button><button data-key="R">R</button><button data-key="Z">Z</button><button data-key="START">Start</button><br><button data-key="B">B</button><button data-key="A">A</button><button data-key="X">X</button><button data-key="Y">Y</button></div>
+<div><button data-key="D_UP">D↑</button><button data-key="D_LEFT">D←</button><button data-key="D_DOWN">D↓</button><button data-key="D_RIGHT">D→</button></div>
+</div><p id="details"></p>
+<p><a href="LICENSE.dolphin">Dolphin license</a> · <a href="gamecube-source.tar.gz">Pinned Dolphin corresponding source</a> · <a href="adapter-source/README.md">Browser adapter source</a></p>
+<script src="/cloud-saves/config.php"></script><script src="/cloud-saves/runtime.js"></script><script src="/cloud-saves/bridge.js"></script><script type="module" src="lab.mjs"></script>
 </html>

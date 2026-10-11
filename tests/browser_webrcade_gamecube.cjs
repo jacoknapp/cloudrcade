@@ -113,7 +113,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         GameCubeSession.prototype.boot=async function() {
           this.booted=true;
           this.adapter={setInputState(state){uiCalls.inputs.push({...state});},
-            pollFrame(){uiCalls.polls++;},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
+            pollFrame(){uiCalls.polls++;},async request(type){if(type==='pause')uiCalls.pauses++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
           return {gameId:'TEST01'};
         };
       });

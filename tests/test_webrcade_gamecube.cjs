@@ -20,7 +20,7 @@ function fake() {
     async load() { calls.load++; this.loaded = true; }, setAudioMuted(value) { assert.equal(value,true); },
     async mountGame(file) { calls.mounted = file; return {fullCore:true, coreBoot:{accepted:true}}; },
     start() { calls.started++; }, pause() { calls.paused++; },
-    async request(type) { assert.equal(type,'start'); calls.started++; return {}; }, applyFrame() {},
+    async request(type) { assert(['start','pause'].includes(type)); if(type==='start')calls.started++;else calls.paused++;return {}; }, applyFrame() {},
     setInputState(state) { calls.input = {...state}; calls.inputCalls++; }, pollFrame() {},
     rejectAll() { calls.rejected++; }, frameData:new Uint8Array(4)};
 }
@@ -61,9 +61,9 @@ function fake() {
   const reused={...state}; session.setInput(reused); reused.mask=0; session.setInput(reused);
   assert.equal(adapter.calls.inputCalls,2,'reusing a mutable input buffer still delivers changes');
   session.setInput(state);
-  session.pause(); assert.equal(adapter.calls.input.mask,0,'pause releases stuck buttons');
+  await session.pause(); assert.equal(adapter.calls.input.mask,0,'pause releases stuck buttons');
   session.setInput(state); assert.equal(adapter.calls.input.mask,0,'paused input is ignored');
-  session.resume(); assert.equal(adapter.calls.started,2);
+  await session.resume(); assert.equal(adapter.calls.started,2);
   session.dispose(); session.dispose();
   assert.equal(adapter.calls.terminated,1); assert.equal(adapter.calls.rejected,1);
   assert.equal(session.adapter,null); assert.equal(adapter.frameData,null);

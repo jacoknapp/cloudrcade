@@ -1,81 +1,56 @@
-# Experimental GameCube prototype
+# Experimental GameCube
 
-This is the first GameCube milestone on the reset beta branch: an isolated
-Dolphin browser session with local ISO/GCM loading, keyboard/gamepad input,
-pause/resume, hardware WebGPU rendering and explicit worker cleanup. It is experimental.
-Sound, saves and the native CloudRcade library are not integrated yet.
-The 50 MB threshold and GPU configuration apply only to GameCube. Other
-systems keep their existing thresholds, renderer settings and controller behavior.
+The beta image adds Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
+files under the GameCube content directory launch Dolphin in the browser, using
+the device GPU through WebGPU. Keyboard, standard gamepad and touch controls,
+acknowledged pause/resume, Web Audio, memory cards and eight save-state slots are
+included. Enable sound after launch to satisfy browser audio permission rules.
+Memory cards autosave every15seconds, on pause and when returning to the library.
+Use the Library/Close buttons to finish saving before leaving the game.
+Local and connected Nextcloud saves use the existing CloudRcade account isolation,
+conflict handling and offline recovery bridge. States are scoped to the exact
+core binary version. Game compatibility and mobile memory support are experimental.
 
-The prototype uses [wasm-dolphin](https://github.com/dougchansan/wasm-dolphin)
-at the exact commit in `core.json`. Both JavaScript and WASM are hash-checked.
-Preparation reconstructs the pinned Dolphin source, verifies every patch and
-resulting tree, and packages the corresponding source alongside the binary.
-The adapter source is also retained in the generated `adapter-source/` directory.
-No ROMs, BIOS dumps, keys, accounts or production settings are included.
+PSP remains available without a beta flag. The beta publishes AMD64 images only.
+The standard `web` Docker target excludes GameCube; beta uses `web-gamecube`.
+GameCube availability follows the packaged core, with no global renderer/read
+change. Its disc URL threshold is50,000,000bytes. Larger games stream through
+strict HTTP206 requests with strong ETag/Last-Modified and If-Range validation.
+The existing LazyRom disk reader retains2MiB chunks, eight-entry LRU and16MiB
+cache. A helper worker adds one2MiB shared transfer buffer. Full-file200 responses
+are rejected before reading the body. Local Files use WORKERFS at every size.
+Compressed RVZ and Wii discs are unsupported. Header inspection alone never
+counts as a boot: Dolphin must accept the disc and reach its Running state.
+
+Browsers require HTTPS or localhost, shared-memory isolation, OffscreenCanvas
+and hardware WebGPU. Software adapters and CPU rasterizer fallback are rejected.
+Rendering runs entirely on the browser device. CPU emulation uses Dolphin's
+cached interpreter; dynamic JIT is disabled. No server GPU dependency exists.
+The pinned binary reserves1.5GiB of initial WASM memory; small devices may lack
+sufficient memory. Performance depends on browser, device and game.
+
+The core uses [wasm-dolphin](https://github.com/dougchansan/wasm-dolphin) at the
+exact commit in `core.json`, with SHA256-verified JavaScript/WASM. Preparation
+reconstructs and verifies Dolphin's pinned source and66patches, packages its
+corresponding source, and includes our modified host and save SDK source. The
+save SDK uses pinned webRcade common9a7cf19 and locked npm dependencies. Dolphin's
+Apache-licensed replacement GameCube fonts and license ship with the core.
+No games, BIOS dumps, keys, accounts or operator settings are packaged.
+The binary is pinned upstream, not a claimed local native rebuild. A Linux
+native build and broader device/game qualification remain promotion requirements.
 
 ```sh
 python3 deploy/webrcade/retro-dolphin/prepare.py
 python3 deploy/webrcade/retro-dolphin/serve.py
-# Open http://127.0.0.1:18572/ and explicitly initialize the experimental core.
-```
-
-Prerequisites: Git, Node22 or newer, Python3.10 or newer, tar and network access.
-`WORK` selects a dedicated upstream checkout. `OUT` selects a new generated
-output directory (default `release/gamecube`). Preparation rejects tracked
-edits, unexpected remotes, mismatching binaries and existing output directories.
-The server binds to localhost and adds the headers required for shared memory.
-Browsers need a secure context, cross-origin isolation, shared-memory workers,
-OffscreenCanvas and WebGPU access to the device GPU. Software adapters and
-CPU rasterizer fallback are rejected. Headless software-GPU checks cannot
-qualify actual device performance or game rendering.
-
-ISO/GCM validation reads only the 32-byte header. The worker mounts the original
-File through WORKERFS rather than copying a multi-gigabyte disc into MEMFS.
-URL-loaded games over **50 MB (50,000,000 bytes)** use bounded HTTP ranges.
-The existing disk reader supplies exactly the same **2 MiB chunks**, eight-chunk
-LRU and **16 MiB maximum cache** used by the other large-disc integrations.
-An asynchronous network worker fills a single **2 MiB transfer buffer**; the
-Dolphin worker waits through shared memory while the browser UI remains free.
-A ready handshake and MessagePort avoid nested-worker startup/message deadlocks.
-Each response must match the requested range, total file size and selected
-disc validator. A strong ETag or Last-Modified value is required for streaming;
-If-Range detects replacements. Full-file 200 responses are cancelled before
-reading their bodies. Short, oversized and changed responses fail closed.
-URL selection and worker reads have 60-second deadlines; Close cancels selection.
-Smaller URL games
-can download into a bounded File; local Files always use WORKERFS reads.
-Cross-origin URLs require CORS with Range/If-Range allowed and exposed
-Content-Range plus ETag or Last-Modified headers.
-Compressed RVZ and Wii discs are outside this first milestone. A disc inspected
-by DiscIO is not reported as running unless the real Dolphin core accepts boot.
-The **real Dolphin WebGPU hardware backend** is mandatory, with no software
-rasterizer. The cached interpreter handles CPU emulation; dynamic JIT is off.
-The main-thread input loop reuses state storage and sends only changed controls.
-Pausing suspends the loop and releases input; resuming restarts it. GPU presentation
-is independent of status polling, which runs at most once per second.
-Boot is reported as running only after the presentation worker acknowledges start.
-
-The binary is **pinned upstream**, not a claimed local native rebuild. Upstream's
-current build lock is Windows-specific. A reproducible Linux source build must
-be qualified before adding the core to release images. This prototype is not
-registered by the scanner, bundled by Docker, or exposed as a playable library
-system. PSP remains available without an experimental setting, and beta still
-publishes AMD64 only.
-The pinned binary reserves 1.5 GiB of initial WASM memory; mobile memory behavior
-also needs qualification before integration.
-
-```sh
 node tests/test_webrcade_gamecube.cjs
 NODE_PATH=<Playwright modules> node tests/browser_webrcade_gamecube.cjs
 ```
 
-The browser test requires a running prepared lab and uses no games or accounts.
-It verifies capability rejection, real WASM initialization, streaming and cleanup,
-not gameplay or hardware speed. Device GPU qualification remains required.
-
-Next milestones: qualify the Linux source build and real gameplay; add bounded
-native app registration behind a default-off GameCube
-Experimental Settings switch; then scanner entries, touch controls, local and
-Nextcloud memory cards/save states, mobile behavior and packaged-image checks.
-Preserve the existing PSP app identity, saves, controls and flag-free behavior.
+Preparation requires Git, Node22+, npm, Python3.10+, tar and network access.
+`WORK` is a dedicated upstream checkout; `OUT` is a new output directory (default
+`release/gamecube`). Unexpected remotes, tracked edits, mismatching artifacts and
+existing outputs are rejected. The localhost lab's manual disc controls are at
+`/experimental/gamecube/` in beta. Its native `props` launch automatically selects
+and boots a library disc. The lab server does not supply the CloudRcade save API;
+use a packaged image to test full saves. Synthetic browser checks validate DiscIO,
+streaming and lifecycle; actual GPU/game qualification requires a hardware browser.

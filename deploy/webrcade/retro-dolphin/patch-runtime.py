@@ -13,11 +13,70 @@ def patch_runtime(app):
         text = text.replace(old,new)
 
     text = 'import {RemoteDisc} from "../../remote-disc.mjs";\n' + text
+    replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
+  for (const name of ["font_western.bin", "font_japanese.bin"]) {
+    const response = await fetch(new URL("../../sys/GC/" + name, import.meta.url));
+    if (!response.ok) throw new Error("GameCube system font missing: " + name);
+    moduleInstance.FS.writeFile("/dolphin-sys/GC/" + name, new Uint8Array(await response.arrayBuffer()));
+  }
+  api.coreInit?.();''')
     replace('let mounted = false;', 'let mounted = false;\nlet streamedDisc = null;')
+    replace('        if (size > 0) bytes = moduleInstance.FS.readFile(path); // Uint8Array',
+            '        if (rc === 1 && stable >= 3 && size > 0 && size <= 256 * 1024 * 1024) bytes = moduleInstance.FS.readFile(path); // Uint8Array')
     replace('    case "mountFile":\n      return mountFile(payload.file);',
             '    case "mountFile":\n      return mountFile(payload.file);\n'
             '    case "mountUrl":\n      return mountFile({...payload, remote:true});\n'
             '    case "streamStats":\n      return {stream:streamedDisc?.stats() || null};')
+    replace('    case "setInputMask":', '''    case "importCards": {
+      if (coreBoot.accepted) throw new Error("Load memory cards before boot");
+      const fs = moduleInstance.FS;
+      let total = 0;
+      for (const file of payload.files || []) {
+        if (!/^(USA|EUR|JAP)\\/Card A\\/[A-Za-z0-9_. -]+\\.gci$/.test(file.name)) throw new Error("Invalid memory card path");
+        const bytes = new Uint8Array(file.content);
+        total += bytes.length;
+        if (total > 64 * 1024 * 1024) throw new Error("Memory card data exceeds 64 MiB");
+        const path = "/dolphin-user/GC/" + file.name;
+        fs.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+        fs.writeFile(path, bytes);
+      }
+      return {};
+    }
+    case "exportCards": {
+      const fs = moduleInstance.FS, files = [];
+      for (const region of ["USA", "EUR", "JAP"]) {
+        const folder = region + "/Card A/", path = "/dolphin-user/GC/" + folder;
+        let names;
+        try { names = fs.readdir(path); } catch { continue; }
+        for (const name of names) {
+          if (!/^[A-Za-z0-9_. -]+\\.gci$/.test(name)) continue;
+          const stat = fs.stat(path + name);
+          if (!fs.isFile(stat.mode)) continue;
+          files.push({name:folder + name, content:fs.readFile(path + name)});
+        }
+      }
+      return {files};
+    }
+    case "start":
+    case "pause": {
+      const paused = type === "pause";
+      if (!coreBoot.accepted || !api?.setCorePaused) throw new Error("GameCube is not booted");
+      const deadline = performance.now() + 30000;
+      while (performance.now() < deadline) {
+        api.pumpHostJobs?.();
+        api.setCorePaused(paused ? 1 : 0);
+        const state = api.getCoreStateName?.();
+        if (state === (paused ? "Paused" : "Running")) {
+          ppcWasmJitCorePaused = paused;
+          resetPpcWasmJitTiming();
+          workletAudioProducer.transition();
+          return {paused, coreStateName:state, ...framePayload()};
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      throw new Error("GameCube did not reach the requested run state");
+    }
+    case "setInputMask":''')
     replace('  fs.mount(resolveWorkerFs(moduleInstance), { blobs: [{ name: safeName, data: file }] }, WORKERFS_MOUNT_DIR);\n  mounted = true;',
             '''  streamedDisc?.close();
   streamedDisc = null;

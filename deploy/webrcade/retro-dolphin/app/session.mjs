@@ -96,12 +96,13 @@ export class GameCubeSession {
     catch (error) { this.dispose(); throw error; }
   }
 
-  async boot(file) {
+  async boot(file, beforeBoot = async () => {}) {
     if (this.booted || this.booting) throw new Error('Close this session before loading another disc.');
     this.booting = true;
     try {
       const disc = await inspectDisc(file.remote ? {...file,slice:()=>new Blob([file.header])} : file);
       const adapter = await this.initialize();
+      await beforeBoot(adapter, disc);
       let metadata;
       if (file.remote) {
         metadata = await this.bounded(adapter.request('mountUrl',{url:file.url,name:file.name,size:file.size,validator:file.validator}));
@@ -133,15 +134,22 @@ export class GameCubeSession {
     for (const field of INPUT_FIELDS) this.lastInput[field] = state[field];
     this.adapter.setInputState(state);
   }
-  pause() {
+  async pause() {
     if (!this.booted || this.closed || this.paused) return;
     this.lastInput = null;
     this.adapter.setInputState({mask: 0, stickX: 128, stickY: 128,
       cStickX: 128, cStickY: 128, triggerLeft: 0, triggerRight: 0, analogA: 0, analogB: 0});
-    this.adapter.pause();
     this.paused = true;
+    try { return await this.bounded(this.adapter.request('pause')); }
+    catch (error) { this.dispose(); throw error; }
   }
-  resume() { if (this.booted && !this.closed) { this.adapter.start(); this.paused = false; } }
+  async resume() {
+    if (this.booted && !this.closed) {
+      const result = await this.bounded(this.adapter.request('start'));
+      this.paused = false;
+      return result;
+    }
+  }
   poll() { if (this.booted && !this.closed && !this.paused) this.adapter.pollFrame(); }
   dispose() {
     if (this.closed) return;

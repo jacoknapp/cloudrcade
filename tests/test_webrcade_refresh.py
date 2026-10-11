@@ -5,6 +5,15 @@ os.environ.update(WEBRCADE_ENABLE_3DS='true', WEBRCADE_REQUIRE_ROM_MOUNT='true',
 spec=importlib.util.spec_from_file_location('refresh',Path(__file__).parents[1]/'deploy/webrcade/refresh-feed.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class RefreshTests(unittest.TestCase):
+ def test_gamecube_header_without_disc_hash(self):
+  self.put('GameCube/game.iso',b'TEST01'+bytes(22)+bytes.fromhex('c2339f3d'))
+  path=self.root/'GameCube/game.iso'
+  with path.open('r+b') as stream: stream.truncate(1459978240)
+  self.assertEqual(m.gamecube_game(path),'gamecube:5445535430310000:1459978240')
+  self.put('GameCube/wii.iso',b'TEST01'+bytes(18)+bytes.fromhex('5d1c9ea3c2339f3d'))
+  self.assertIsNone(m.gamecube_game(self.root/'GameCube/wii.iso'))
+  self.put('GameCube/invalid.iso',bytes(32))
+  self.assertIsNone(m.gamecube_game(self.root/'GameCube/invalid.iso'))
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=Path(self.tmp.name)/'roms';self.state=Path(self.tmp.name)/'state'

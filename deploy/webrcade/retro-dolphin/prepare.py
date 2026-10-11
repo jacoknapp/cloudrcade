@@ -18,6 +18,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 
 HERE = Path(__file__).resolve().parent
 LOCK = json.loads((HERE / 'core.json').read_text())
+COMMON_COMMIT = '9a7cf19b64a440df8ca9b22a4136b34dc6e9f3db'
 
 
 def run(*args, cwd=None):
@@ -62,7 +63,31 @@ def prepare(work, out):
         stage = Path(tmp)
         shutil.copytree(HERE / 'app', stage / 'app')
         shutil.copytree(work / 'src', stage / 'app/vendor/src')
+        fonts = stage / 'app/sys/GC'
+        fonts.mkdir(parents=True)
+        for name in ['font_western.bin','font_japanese.bin','font-licenses.txt']:
+            shutil.copy2(work / 'vendor/dolphin/Data/Sys/GC' / name, fonts / name)
         shutil.copy2(HERE.parent / 'retro-azahar/app/src/emulator/lazyrom.js', stage / 'app/lazyrom.mjs')
+        common = work.parent / 'cloudrcade-gamecube-common'
+        if not (common / '.git').is_dir():
+            run('git', 'clone', '--depth', '1', 'https://github.com/webrcade/webrcade-app-common.git', str(common))
+        if subprocess.check_output(['git','remote','get-url','origin'],cwd=common,text=True).strip() != 'https://github.com/webrcade/webrcade-app-common.git':
+            raise SystemExit('Unexpected GameCube common SDK remote')
+        if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=common,text=True):
+            raise SystemExit('GameCube common SDK checkout has tracked edits')
+        run('git','fetch','--depth','1','origin',COMMON_COMMIT,cwd=common)
+        run('git','checkout','--detach',COMMON_COMMIT,cwd=common)
+        sdk = stage / 'sdk-build'
+        shutil.copytree(HERE / 'sdk', sdk, ignore=shutil.ignore_patterns('node_modules'))
+        run('npm','ci','--ignore-scripts','--no-audit','--no-fund',cwd=sdk)
+        run('node',str(sdk / 'build.mjs'),str(common),str(stage / 'app/save-sdk.mjs'))
+        licenses = stage / 'app/sdk-licenses'
+        licenses.mkdir()
+        for package in (sdk / 'node_modules').iterdir():
+            if not package.is_dir() or package.name.startswith('.') or package.name.startswith('@'): continue
+            for license in package.iterdir():
+                if license.is_file() and license.name.lower().startswith(('license','copying')):
+                    shutil.copy2(license, licenses / (package.name + '-' + license.name))
         spec = spec_from_file_location('gamecube_runtime_patch', HERE / 'patch-runtime.py')
         patch = module_from_spec(spec)
         spec.loader.exec_module(patch)
@@ -73,11 +98,15 @@ def prepare(work, out):
             shutil.copy2(work / 'cores/dolphin' / name, cores / name)
         shutil.copy2(work / 'LICENSE', stage / 'app/LICENSE.dolphin')
         shutil.copy2(archives[0], stage / 'app/gamecube-source.tar.gz')
-        shutil.copytree(HERE, stage / 'adapter-source', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(HERE, stage / 'adapter-source', ignore=shutil.ignore_patterns('__pycache__','node_modules'))
+        shutil.copytree(common / 'src', stage / 'adapter-source/sdk/common/src')
+        shutil.copy2(common / 'LICENSE', stage / 'adapter-source/sdk/common/LICENSE')
         shutil.copy2(HERE.parent / 'retro-azahar/app/src/emulator/lazyrom.js', stage / 'adapter-source/app/lazyrom.mjs')
+        shutil.copytree(stage / 'adapter-source', stage / 'app/adapter-source')
         (stage / 'app/core-info.json').write_text(json.dumps({
             **LOCK, 'experimental': True, 'binaryOrigin': 'pinned-upstream',
             'locallySourceBuilt': False,
+            'saveSdkCommit': COMMON_COMMIT,
             'videoBackend': 'WebGPU-Real', 'streamThresholdBytes': 50_000_000,
             'rangeReaderSha256': hashlib.sha256((stage / 'app/lazyrom.mjs').read_bytes()).hexdigest(),
             'adapterFilesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()

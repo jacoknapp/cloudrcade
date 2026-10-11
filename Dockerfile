@@ -46,3 +46,8 @@ ENV WEBRCADE_APP_NAME=cloudЯcade WEBRCADE_STORAGE_PREFIX=cloudrcade \
 CMD ["python3", "/usr/local/share/cloudrcade/service.py"]
 STOPSIGNAL SIGTERM
 EXPOSE 80 443
+
+# Beta-only prototype. The standard `web` target remains the stable release.
+FROM web AS web-gamecube
+COPY release/gamecube/app/ /var/www/html/experimental/gamecube/
+COPY deploy/webrcade/retro-dolphin/apache.conf /etc/apache2/conf-enabled/gamecube.conf
