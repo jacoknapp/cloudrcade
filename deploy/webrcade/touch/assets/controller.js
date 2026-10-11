@@ -412,6 +412,39 @@
         canvas.style.setProperty(name, value, 'important');
     }
   }
+  // The other single-screen cores retain their native size and screen options.
+  // Opaque installed iPhone status bars sit outside innerHeight. Account for
+  // that excluded top strip when centering the picture on the physical phone,
+  // without enlarging the iframe or shifting any touch controls.
+  const centeredScreen = ['nes', 'snes', 'gb', 'gbc', 'gba', 'n64', 'genesis', 'psx'].includes(system);
+  function alignCenteredScreen(emulator) {
+    if (!centeredScreen || !emulator?.started || !emulator.canvas) return;
+    const bounds = visibleViewport(), canvas = emulator.canvas;
+    if (!bounds.width || !bounds.height) return;
+    let excludedTop = 0;
+    try {
+      const outer = window.top;
+      const installedApple = outer.document.documentElement.hasAttribute('data-cr-status-top') &&
+        (outer.navigator.standalone || outer.matchMedia('(display-mode: standalone)').matches);
+      const difference = outer.screen.height - outer.innerHeight;
+      if (installedApple && !outer.document.fullscreenElement && outer.innerWidth < outer.innerHeight &&
+          Math.abs(outer.screen.width - outer.innerWidth) < 1 && difference > 0 && difference <= 100)
+        excludedTop = difference;
+    } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
+    const height = canvas.getBoundingClientRect().height;
+    const middle = bounds.top + (bounds.height - excludedTop) / 2;
+    // Fill/zoom can leave no room to move: keep the native picture visible.
+    const center = height <= bounds.height ?
+      Math.max(bounds.top + height / 2, Math.min(bounds.bottom - height / 2, middle)) :
+      bounds.top + bounds.height / 2;
+    const pixels = value => `${Math.round(value * 1000) / 1000}px`;
+    for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
+      left: pixels(bounds.left + bounds.width / 2), top: pixels(center)})) {
+      if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')
+        canvas.style.setProperty(name, value, 'important');
+    }
+  }
+  let centeredEmulator = null;
   let pspEmulator = null;
   function fitVisibleViewport() {
     controllerBounds = visibleViewport();
@@ -638,6 +671,7 @@
   function draw() {
     fitVisibleViewport();
     if (system === 'psp') alignPSPScreen(window.app?.emulator);
+    else alignCenteredScreen(window.app?.emulator);
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
@@ -942,6 +976,14 @@
       const resize = emulator.updateScreenSize;
       emulator.updateScreenSize = function(...args) {
         const result = resize.apply(this, args); alignPSPScreen(this); return result;
+      };
+      emulator.updateScreenSize();
+    }
+    if (centeredScreen && emulator?.started && centeredEmulator !== emulator) {
+      centeredEmulator = emulator;
+      const resize = emulator.updateScreenSize;
+      emulator.updateScreenSize = function(...args) {
+        const result = resize.apply(this, args); alignCenteredScreen(this); return result;
       };
       emulator.updateScreenSize();
     }
