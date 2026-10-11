@@ -19,13 +19,13 @@ const rom=process.env.GAMECUBE_TEST_ROM;if(!rom)throw new Error('GAMECUBE_TEST_R
  await page.locator('.cr-mobile-card').filter({hasText:'GameCube'}).first().tap();await page.locator('.cr-mobile-card').filter({hasText:'GameCube hardware test'}).tap();
  await page.getByRole('dialog').getByRole('button').filter({hasText:/^\s*PLAY\s*$/}).tap();await page.locator('#webrcade-app-iframe').waitFor();const game=await(await page.locator('#webrcade-app-iframe').elementHandle()).contentFrame();
  console.log('IFRAME',new URL(game.url()).pathname);assert.equal(new URL(game.url()).pathname,'/experimental/gamecube/');
- await game.waitForFunction(()=>__session?.booted,null,{timeout:120000});console.log('LIBRARY PLAY BOOT PASS');
+ await game.waitForFunction(()=>globalThis.__session?.booted,null,{timeout:120000});console.log('LIBRARY PLAY BOOT PASS');
  assert.equal(await game.locator('#launcher').isVisible(),false);assert.equal(await game.locator('#touch').count(),0);assert.equal(await game.locator('#pause').count(),0);
  await game.locator('.kt-pad').waitFor({state:'visible'});
  await game.locator('#gamecube-perf').filter({hasText:/core fps/}).waitFor({timeout:60000});
  await game.locator('.kt-tab').tap();assert.equal(await game.locator('#kt-drawer .kt-gc-save').count(),0,'controller settings contain no core actions');await game.locator('.kt-close').tap();
  async function menu(){await game.locator('.kt-menu').tap();await game.getByRole('button',{name:/^Resume/}).waitFor();await game.waitForFunction(()=>__session.paused);}
- await menu();await game.locator('#gamecube-perf').filter({hasText:'GameCube paused'}).waitFor();assert.equal(await game.locator('.kt-tab').isVisible(),false);
+ await menu();await game.locator('#gamecube-perf').filter({hasText:'GameCube paused'}).waitFor();await game.waitForFunction(()=>document.getElementById('wrcad-touch').hidden);assert.equal(await game.locator('.kt-tab').isVisible(),false);
  const stopped=await game.evaluate(async()=>(await __session.adapter.request('runFrame')).frame);await page.waitForTimeout(700);
  assert.equal(await game.evaluate(async()=>(await __session.adapter.request('runFrame')).frame),stopped,'standard menu really stops emulation');
  await page.screenshot({path:process.env.GAMECUBE_PAUSE_SCREENSHOT||'/tmp/cloudrcade-gamecube-pause.png'});
@@ -38,6 +38,8 @@ const rom=process.env.GAMECUBE_TEST_ROM;if(!rom)throw new Error('GAMECUBE_TEST_R
  await game.getByRole('button').filter({has:game.getByText('Save',{exact:true})}).tap();await game.waitForFunction(()=>WrcadGameCube.status==='State saved.'&&!app.isPauseScreen(),null,{timeout:60000});
  await game.locator('.kt-pad').waitFor({state:'visible'});await menu();await game.getByRole('button',{name:/^Save States/i}).tap();
  await game.getByRole('button').filter({has:game.getByText('Load',{exact:true})}).tap();await game.waitForFunction(()=>WrcadGameCube.status==='State loaded.'&&!app.isPauseScreen(),null,{timeout:60000});
+ const restored=await game.evaluate(()=>__session.adapter.request('runFrame')),deadline=Date.now()+60000;
+ for(;;){const frame=await game.evaluate(()=>__session.adapter.request('runFrame'));if(frame.frame>=restored.frame+30)break;if(Date.now()>deadline)throw new Error('Loaded state did not resume native frames');await page.waitForTimeout(250);}
  console.log('STANDARD SAVE SLOT EDITOR STATE ROUNDTRIP PASS');await game.locator('.kt-pad').waitFor({state:'visible'});
   const a=game.locator('.kt-actions [data-cid="4"]'), rect=await a.boundingBox();await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();await page.waitForTimeout(200);assert.equal(await game.evaluate(()=>__session.lastInput.mask&1),1);await page.mouse.up();console.log('EXISTING TOUCH INPUT PASS');
  const stream=await game.evaluate(async()=>(await __session.adapter.request('streamStats')).stream);
