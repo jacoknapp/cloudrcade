@@ -155,6 +155,7 @@
     '3ds': ['3ds', 'retro-azahar'],
     genesis: ['genesis', 'genplusgx-md', 'retro-genplusgx-md', 'retro-genesis'],
     psx: ['psx', 'beetle-psx'],
+    psp: ['psp', 'retro-ppsspp'],
   };
   const core = launchProps?.type || emulatorPath;
   const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || emulatorPath;
@@ -285,7 +286,7 @@
       system === 'psx' ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
-  configureDirection(stick, n64 || n3ds ? 'analog' : 'digital');
+  configureDirection(stick, n64 || n3ds || system === 'psp' ? 'analog' : 'digital');
   function addDirection(id, kind, index, className) {
     const element = stick.cloneNode(true);
     element.dataset.layoutId = id;
@@ -294,7 +295,7 @@
     pad.append(element); directions.push(element);
     return element;
   }
-  if (n64 || n3ds) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
+  if (n64 || n3ds || system === 'psp') addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
   if (n3ds) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
   const psxSticks = system === 'psx' ? [
     addDirection('stick-left', 'analog', 0, 'kt-analog-left'),
@@ -328,6 +329,74 @@
     const value = layouts[layoutKey()] ?? layouts[legacyKey];
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
+  // A game iframe can be taller than the visible installed-app window. Its
+  // own visualViewport describes the iframe, so also intersect its ancestors.
+  // Keep saved normalized coordinates in the existing game-frame dimensions.
+  function visibleViewport() {
+    let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+    if (system !== 'psp') return {left, top, right, bottom, width: right, height: bottom};
+    let view = window, offsetX = 0, offsetY = 0;
+    try {
+      while (view) {
+        const visual = view.visualViewport;
+        const x = visual?.offsetLeft || 0, y = visual?.offsetTop || 0;
+        left = Math.max(left, x - offsetX);
+        top = Math.max(top, y - offsetY);
+        right = Math.min(right, view.innerWidth - offsetX,
+          x + (visual?.width || view.innerWidth) - offsetX);
+        bottom = Math.min(bottom, view.innerHeight - offsetY,
+          y + (visual?.height || view.innerHeight) - offsetY);
+        if (view === view.top || !view.frameElement) break;
+        const frame = view.frameElement, rect = frame.getBoundingClientRect();
+        offsetX += rect.left + frame.clientLeft;
+        offsetY += rect.top + frame.clientTop;
+        view = view.parent;
+      }
+    } catch (_) { /* Cross-origin ancestors cannot supply their bounds. */ }
+    return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
+  }
+  const pspOrigin = system === 'psp' ? safeArea('kt-psp-origin') : null;
+  let controllerBounds = visibleViewport();
+  function alignPSPScreen(emulator) {
+    if (system !== 'psp' || !emulator?.started || !emulator.canvas) return;
+    const bounds = visibleViewport(), canvas = emulator.canvas;
+    if (!bounds.width || !bounds.height) return;
+    // Portrait touch controls have their own lower area. Center the picture in
+    // the remaining safe space, even when pause/settings hide the controls.
+    if (enabled && bounds.width < bounds.height) {
+      const safe = pspOrigin.getBoundingClientRect(), controls = getComputedStyle(pad);
+      bounds.left = Math.max(bounds.left, safe.left);
+      bounds.right = Math.min(bounds.right, safe.right);
+      bounds.top = Math.max(bounds.top, safe.top);
+      bounds.bottom -= parseFloat(controls.bottom) + parseFloat(controls.height) + 20;
+      bounds.width = Math.max(0, bounds.right - bounds.left);
+      bounds.height = Math.max(0, bounds.bottom - bounds.top);
+      if (!bounds.width || !bounds.height) return;
+    }
+    const screen = emulator.getScreenSize?.();
+    const ratio = screen === emulator.SS_16_9 ? 16 / 9 : emulator.getDefaultAspectRatio?.();
+    if (!Number.isFinite(ratio) || ratio <= 0) return;
+    const zoom = Number(emulator.getProps?.().zoomLevel) || 0;
+    const scale = (96 + zoom) / 100;
+    let width = bounds.width * scale, height = bounds.height * scale;
+    if (screen !== emulator.SS_FILL) { width = Math.min(width, height * ratio); height = width / ratio; }
+    const pixels = value => `${Math.round(value * 1000) / 1000}px`;
+    // Only CSS placement changes here. RetroArch owns the WebGL drawing buffer
+    // and observes canvas size itself; resetting it would erase the game image.
+    for (const [name, value] of Object.entries({position: 'fixed', width: pixels(width), height: pixels(height),
+      'max-width': 'none', 'max-height': 'none',
+      left: pixels(bounds.left + bounds.width / 2), top: pixels(bounds.top + bounds.height / 2)})) {
+      if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')
+        canvas.style.setProperty(name, value, 'important');
+    }
+  }
+  let pspEmulator = null;
+  function fitVisibleViewport() {
+    controllerBounds = visibleViewport();
+    if (system !== 'psp') return;
+    Object.assign(host.style, {left: `${controllerBounds.left}px`, top: `${controllerBounds.top}px`,
+      width: `${controllerBounds.width}px`, height: `${controllerBounds.height}px`, right: 'auto', bottom: 'auto'});
+  }
   function applyLayout() {
     for (const element of movable) { element.style.transform = ''; element.style.visibility = ''; }
     if (pad.hidden) return;
@@ -343,8 +412,10 @@
       const custom = Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
-      const clampX = x => Math.max(8 + r.width / 2, Math.min(innerWidth - 8 - r.width / 2, x));
-      const clampY = y => Math.max(8 + r.height / 2, Math.min(innerHeight - 8 - r.height / 2, y));
+      const clampX = x => Math.max(controllerBounds.left + 8 + r.width / 2,
+        Math.min(controllerBounds.right - 8 - r.width / 2, x));
+      const clampY = y => Math.max(controllerBounds.top + 8 + r.height / 2,
+        Math.min(controllerBounds.bottom - 8 - r.height / 2, y));
       // Apply the exclusion area to defaults, restored layouts, and live drags.
       // Choose the closest free position alongside/above/below the tab.
       const xs = [desiredX, ...obstacles.flatMap(o => [o.left - gap - r.width / 2, o.right + gap + r.width / 2])].map(clampX);
@@ -428,6 +499,7 @@
   });
   host.classList.toggle('kt-n64', n64);
   host.classList.toggle('kt-3ds', n3ds);
+  host.classList.toggle('kt-psp', system === 'psp');
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
   if (['nes', 'gb', 'gbc', 'gba', 'snes', 'nds'].includes(system)) {
@@ -459,10 +531,16 @@
     $('[data-cid="11"]').hidden = true;
     $('[data-cid="12"]').hidden = true;
   }
-  if (system === 'psx') {
+  if (system === 'psx' || system === 'psp') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
     $('[data-cid="8"]').textContent = 'L1';
     $('[data-cid="9"]').textContent = 'R1';
+    if (system === 'psp') {
+      $('[data-cid="8"]').textContent = 'L';
+      $('[data-cid="9"]').textContent = 'R';
+      $('[data-cid="10"]').hidden = true;
+      $('[data-cid="11"]').hidden = true;
+    }
   }
   // Add hit surfaces after platform labels, which replace each button's content.
   // Near misses stay out of native game touch handling. Menu still needs a direct
@@ -527,12 +605,15 @@
     // Keep the tab clear of the editor; allow the drawer to extend upward when
     // its handle has been placed near the bottom of the screen.
     const toolbarBottom = system === 'nds' ? document.querySelector('.touch-overlay-buttons')?.getBoundingClientRect().bottom || 0 : 0;
-    const minimum = editing ? $('.kt-editor').getBoundingClientRect().bottom + 10 : Math.max(8, toolbarBottom + 10);
-    const top = Math.max(minimum, Math.min(innerHeight - 56, y * innerHeight - 24));
-    host.style.setProperty('--kt-dock-top', `${top}px`);
-    drawer.style.marginTop = `${drawerOpen ? Math.min(0, innerHeight - 8 - top - drawer.offsetHeight) : 0}px`;
+    const minimum = editing ? $('.kt-editor').getBoundingClientRect().bottom + 10 :
+      Math.max(controllerBounds.top + 8, toolbarBottom + 10);
+    const top = Math.max(minimum, Math.min(controllerBounds.bottom - 56, y * innerHeight - 24));
+    host.style.setProperty('--kt-dock-top', `${top - controllerBounds.top}px`);
+    drawer.style.marginTop = `${drawerOpen ? Math.min(0, controllerBounds.bottom - 8 - top - drawer.offsetHeight) : 0}px`;
   }
   function draw() {
+    fitVisibleViewport();
+    if (system === 'psp') alignPSPScreen(window.app?.emulator);
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
@@ -547,7 +628,7 @@
       document.documentElement.classList.toggle('kt-ds-playing', gameReady && !editing && !drawerOpen);
     }
     const tabRect = tab.getBoundingClientRect();
-    const stamp = `${innerWidth}:${innerHeight}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
+    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
     host.classList.toggle('kt-enabled', enabled);
   }
@@ -790,6 +871,7 @@
   function resizeLayout() { clear(); layoutStamp = ''; draw(); }
   window.addEventListener('resize', resizeLayout);
   window.visualViewport?.addEventListener('resize', resizeLayout);
+  if (system === 'psp') window.visualViewport?.addEventListener('scroll', resizeLayout);
   document.addEventListener('visibilitychange', clear);
   function refreshPreferences() {
     if (editing) return; // Keep unsaved drags intact until Save or Cancel.
@@ -823,6 +905,14 @@
   });
   function attach() {
     const emulator = window.app?.emulator;
+    if (system === 'psp' && emulator?.started && pspEmulator !== emulator) {
+      pspEmulator = emulator;
+      const resize = emulator.updateScreenSize;
+      emulator.updateScreenSize = function(...args) {
+        const result = resize.apply(this, args); alignPSPScreen(this); return result;
+      };
+      emulator.updateScreenSize();
+    }
     if (system === 'nds') {
       if (emulator?.started) {
         if (dsEmulator !== emulator) {

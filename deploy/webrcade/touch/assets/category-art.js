@@ -3,8 +3,9 @@
   'use strict';
   const aliases = {nes: 'nes', snes: 'snes', gb: 'gb', gbc: 'gbc', gba: 'gba', n64: 'n64',
     nds: 'ds', 'retro-melonds': 'ds', genesis: 'genesis', psx: 'psx',
-    'retro-pcsx-rearmed': 'psx', '3ds': '3ds', 'retro-azahar': '3ds'};
+    'retro-pcsx-rearmed': 'psx', '3ds': '3ds', 'retro-azahar': '3ds', psp: 'psp', 'retro-ppsspp': 'psp'};
   const artwork = {
+    psp: ['PSP', '<rect x="16" y="18" width="128" height="48" rx="20" fill="#363a45" stroke="#727784" stroke-width="2"/><rect x="49" y="25" width="62" height="34" rx="3" fill="#284d61"/><path d="M25 37h16m-8-8v16" stroke="#aaa" stroke-width="4"/><circle cx="34" cy="54" r="5" fill="#888"/><circle cx="133" cy="40" r="3" fill="#aaa"/><circle cx="120" cy="40" r="3" fill="#aaa"/><circle cx="127" cy="32" r="3" fill="#aaa"/><circle cx="127" cy="49" r="3" fill="#aaa"/>'],
     recent: ['RECENT', '<path d="M53 41a27 27 0 1 0 27-27c-7.47 0-14.79 2.97-20.22 8.22L53 29M53 14v15h15" fill="none" stroke="#e50914" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M80 25v16l12 7" fill="none" stroke="#f1f1f1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>'],
     nes: ['NES', '<rect x="25" y="17" width="110" height="50" rx="5" fill="#bababa"/><path d="M27 50h106" stroke="#777" stroke-width="3"/><rect x="37" y="29" width="61" height="12" rx="2" fill="#333"/><rect x="107" y="23" width="15" height="31" fill="#e50914"/><rect x="37" y="55" width="18" height="5" fill="#333"/><rect x="61" y="55" width="18" height="5" fill="#333"/>'],
     snes: ['SNES', '<rect x="27" y="15" width="106" height="54" rx="13" fill="#bdbdbd"/><rect x="50" y="20" width="60" height="20" rx="5" fill="#777"/><path d="M55 30h50" stroke="#333" stroke-width="4"/><rect x="44" y="48" width="20" height="9" fill="#927ac4"/><rect x="98" y="48" width="20" height="9" fill="#927ac4"/>'],

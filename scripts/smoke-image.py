@@ -8,6 +8,7 @@ import hashlib
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 import runpy
 import ssl
 import subprocess
@@ -54,10 +55,11 @@ class IconLinks(HTMLParser):
 with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     root = Path(temp)
     roms, state, bios = root / 'roms', root / 'data', root / 'bios'
-    for folder in [roms / 'nes/roms', roms / 'fixtures', roms / '3DS/bios',
+    for folder in [roms / 'nes/roms', roms / 'psp/roms', roms / 'fixtures', roms / '3DS/bios',
                    state / 'feeds', state / 'derived', bios]:
         folder.mkdir(parents=True, exist_ok=True)
     (roms / 'nes/roms/first.nes').write_bytes(b'NES\x1a' + bytes(12) + b'first-fixture')
+    (roms / 'psp/roms/psp-fixture.elf').write_bytes(b'\x7fELF' + bytes(16))
     (roms / 'fixtures/disc.bin').write_bytes(bytes(2352 * 32))
     (roms / 'fixtures/disc.cue').write_text('FILE "disc.bin" BINARY\n TRACK 01 MODE1/2352\n INDEX 01 00:00:00\n')
     synthetic_keys = 'slot0x18KeyX=' + '00' * 16 + '\n'
@@ -93,6 +95,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             return [item for category in feed['categories'] for item in category['items']]
 
         until(lambda: any(item['title'] == 'first' for item in items()))
+        assert any(item['title'] == 'psp-fixture' and item['type'] == 'psp' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.
         docker('exec', name, 'chdman', 'createcd', '-np', '4', '-i',
                '/var/www/html/content/fixtures/disc.cue', '-o', '/data/derived/smoke-disc.chd')
@@ -140,6 +143,21 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         for path in ['/apple-touch-icon.png', '/apple-touch-icon-precomposed.png']:
             with get(path) as response:
                 assert response.read() == Path('deploy/webrcade/touch/assets/cloudrcade-180.png').read_bytes()
+        with get('/play/app/retro-ppsspp/') as response:
+            psp_html = response.read().decode()
+            assert '/arcade-bundles/retro-ppsspp/cloud-main.' in psp_html
+            assert '/touch-controls/controller.js?v=' in psp_html
+            assert 'viewport-fit=cover' in psp_html
+        psp_main = re.search(r'src="([^"]*/arcade-bundles/retro-ppsspp/cloud-main\.[^"]+\.js)"', psp_html)
+        assert psp_main, 'PSP wrapper script is missing'
+        with get(psp_main.group(1)) as response:
+            assert b'RETRO_PPSSPP:"retro-ppsspp"' in response.read(), 'PSP canonical app type is missing'
+        with get('/play/app/retro-ppsspp/js/experimental-v2/ppsspp_libretro.wasm') as response:
+            assert response.read(4) == b'\0asm'
+        with get('/play/app/retro-ppsspp/assets/manifest.json') as response:
+            assert 'compat.ini' in json.load(response)
+        with get('/licenses/sources/psp-source.tar.gz') as response:
+            assert response.read(2) == b'\x1f\x8b'
         with get('/cloud-saves/manifest.php') as response:
             manifest = json.load(response)
             assert manifest['name'] == 'Release Test Arcade' and manifest['start_url'] == '/play/'

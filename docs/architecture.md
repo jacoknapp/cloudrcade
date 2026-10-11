@@ -23,6 +23,7 @@ and runtime keys are never committed. To build locally:
 
 ```sh
 python3 scripts/prepare-core.py
+bash deploy/webrcade/retro-ppsspp/build.sh
 docker build --target web -t cloudrcade:local .
 ```
 
@@ -51,6 +52,14 @@ runtime; physical ARM hardware and game performance require device testing.
 Core changes require Docker, Git, Python 3.12+, rsync and ample build space;
 the Emscripten and Node images are selected by the core build script. First-time
 core builds are substantially slower than ordinary overlay/image updates.
+
+The experimental PSP application is source-built with
+`bash deploy/webrcade/retro-ppsspp/build.sh` into `release/psp`. It pins PPSSPP,
+FFmpeg (the pinned PPSSPP submodule), RetroArch, wrapper/scaffold, filesystem
+dependency and Emscripten. The image includes both its runtime assets and
+corresponding source archive. Players enable it in Experimental Settings; it
+has no Docker enable flag and defaults off. The `beta/psp-core` branch publishes
+the separate `beta-psp-core` image tag; only master updates `latest`.
 Internal JavaScript and WASM interface names use a generic `Wrcad` namespace.
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.

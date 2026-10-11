@@ -13,6 +13,16 @@ class RefreshTests(unittest.TestCase):
   for p in self.patches:p.start();self.addCleanup(p.stop)
  def put(self,path,data):
   p=self.root/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+ def test_psp_scan_formats_and_bios_exclusion(self):
+  for extension in ('iso','cso','pbp','elf'):
+   self.put('psp/roms/Test.'+extension,extension.encode())
+  self.put('psp/bios/Not a game.pbp',b'bios')
+  self.put('psp/roms/Not a game.sav',b'save')
+  self.put('nes/roms/game.nes',b'nes')
+  m.main();feed=json.loads((self.state/'feeds/combined.json').read_text())
+  category=next(c for c in feed['categories'] if c['title']=='PlayStation Portable (experimental)')
+  self.assertEqual(len(category['items']),4)
+  self.assertTrue(all(i['type']=='psp' and '/psp/roms/' in i['props']['rom'] for i in category['items']))
  def test_portable_env_without_gaseous_or_a_mounted_snes_library(self):
   self.put('nes/roms/game.nes',b'portable-game')
   (self.root/'snes/roms').rmdir();(self.root/'snes').rmdir()
