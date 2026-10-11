@@ -35,8 +35,8 @@ const config={appName:'PSP Test',storagePrefix:'psp_test',enabled:false,autoRedi
     const resources=await page.evaluate(()=>({frames:Module._get_current_frame_count(),heap:Module.HEAPU8.length,
       workers:Module.PThread.runningWorkers.length+Module.PThread.unusedWorkers.length,audio:Module.RWA.context.state}));
     console.log('PSP resources',JSON.stringify(resources));
-    // PPSSPP uses six pool workers plus loader, rendering and I/O threads.
-    assert(resources.workers<=12,'bounded worker startup');
+    // Sixteen ready workers prevent transient savedata/video thread deadlocks.
+    assert(resources.workers<=20,'bounded worker startup with the sixteen-worker pool');
     assert(resources.heap<1024*1024*1024,'bounded startup memory');
     assert(await page.locator('.kt-extra-dpad').isVisible());
     assert.equal(await page.locator('[data-cid="10"]').isVisible(),false,'PSP has no L2');
