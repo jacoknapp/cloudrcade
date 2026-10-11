@@ -35,14 +35,26 @@ File through WORKERFS rather than copying a multi-gigabyte disc into MEMFS.
 URL-loaded games over **50 MB (50,000,000 bytes)** use bounded HTTP ranges.
 The existing disk reader supplies exactly the same **2 MiB chunks**, eight-chunk
 LRU and **16 MiB maximum cache** used by the other large-disc integrations.
-Each worker response must match the requested range and total file size;
-servers that return a full-file 200 response are rejected. Smaller URL games
+An asynchronous network worker fills a single **2 MiB transfer buffer**; the
+Dolphin worker waits through shared memory while the browser UI remains free.
+A ready handshake and MessagePort avoid nested-worker startup/message deadlocks.
+Each response must match the requested range, total file size and selected
+disc validator. A strong ETag or Last-Modified value is required for streaming;
+If-Range detects replacements. Full-file 200 responses are cancelled before
+reading their bodies. Short, oversized and changed responses fail closed.
+URL selection and worker reads have 60-second deadlines; Close cancels selection.
+Smaller URL games
 can download into a bounded File; local Files always use WORKERFS reads.
-Cross-origin URLs require CORS and an exposed `Content-Range` header.
+Cross-origin URLs require CORS with Range/If-Range allowed and exposed
+Content-Range plus ETag or Last-Modified headers.
 Compressed RVZ and Wii discs are outside this first milestone. A disc inspected
 by DiscIO is not reported as running unless the real Dolphin core accepts boot.
 The **real Dolphin WebGPU hardware backend** is mandatory, with no software
 rasterizer. The cached interpreter handles CPU emulation; dynamic JIT is off.
+The main-thread input loop reuses state storage and sends only changed controls.
+Pausing suspends the loop and releases input; resuming restarts it. GPU presentation
+is independent of status polling, which runs at most once per second.
+Boot is reported as running only after the presentation worker acknowledges start.
 
 The binary is **pinned upstream**, not a claimed local native rebuild. Upstream's
 current build lock is Windows-specific. A reproducible Linux source build must
@@ -50,6 +62,8 @@ be qualified before adding the core to release images. This prototype is not
 registered by the scanner, bundled by Docker, or exposed as a playable library
 system. PSP remains available without an experimental setting, and beta still
 publishes AMD64 only.
+The pinned binary reserves 1.5 GiB of initial WASM memory; mobile memory behavior
+also needs qualification before integration.
 
 ```sh
 node tests/test_webrcade_gamecube.cjs

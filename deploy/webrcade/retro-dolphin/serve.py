@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import os
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -24,22 +25,29 @@ class Handler(SimpleHTTPRequestHandler):
         path = Path(self.translate_path(self.path))
         if not path.is_file():
             return super().send_head()
-        size = path.stat().st_size
+        stream = path.open('rb')
+        stat = os.fstat(stream.fileno())
+        size = stat.st_size
+        etag = f'"{stat.st_ino:x}-{size:x}-{stat.st_mtime_ns:x}"'
+        if self.headers.get('If-Range') not in (None, etag):
+            stream.close()
+            return super().send_head()
         match = re.fullmatch(r'bytes=(\d+)-(\d*)', requested)
         first = int(match[1]) if match else size
         last = min(int(match[2]) if match and match[2] else size - 1, size - 1)
         if first > last or first >= size:
+            stream.close()
             self.send_response(416)
             self.send_header('Content-Range', f'bytes */{size}')
             self.send_header('Content-Length', '0')
             self.end_headers()
             return None
-        stream = path.open('rb')
         stream.seek(first)
         self.range_remaining = last - first + 1
         self.send_response(206)
         self.send_header('Content-Type', self.guess_type(str(path)))
         self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('ETag', etag)
         self.send_header('Content-Range', f'bytes {first}-{last}/{size}')
         self.send_header('Content-Length', str(self.range_remaining))
         self.end_headers()

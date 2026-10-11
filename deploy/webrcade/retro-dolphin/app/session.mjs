@@ -1,3 +1,4 @@
+const INPUT_FIELDS = ['mask','stickX','stickY','cStickX','cStickY','triggerLeft','triggerRight','analogA','analogB'];
 // CloudRcade experimental GameCube session. The upstream Dolphin runtime is GPL-2.0-or-later.
 export function requireCapabilities(scope = globalThis) {
   if (!scope.isSecureContext || !scope.crossOriginIsolated ||
@@ -50,6 +51,7 @@ export class GameCubeSession {
     this.booted = false;
     this.booting = false;
     this.paused = false;
+    this.lastInput = null;
   }
 
   async bounded(operation) {
@@ -83,6 +85,8 @@ export class GameCubeSession {
       });
       const adapter = await this.bounded(creating);
       this.adapter = adapter;
+      // The GPU presents directly; status polling does not need a 4 Hz cadence.
+      adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());
       if (this.closed) throw new Error('GameCube session is closed.');
       adapter.setAudioMuted(true);
@@ -100,24 +104,38 @@ export class GameCubeSession {
       const adapter = await this.initialize();
       let metadata;
       if (file.remote) {
-        metadata = await this.bounded(adapter.request('mountUrl',{url:file.url,name:file.name,size:file.size}));
+        metadata = await this.bounded(adapter.request('mountUrl',{url:file.url,name:file.name,size:file.size,validator:file.validator}));
         adapter.applyMetadata(metadata); adapter.applyFrame(metadata);
       } else metadata = await this.bounded(adapter.mountGame(file));
       if (this.closed) throw new Error('GameCube session is closed.');
       if (!metadata.fullCore || !metadata.coreBoot?.accepted) {
         throw new Error('Dolphin could inspect the disc but did not boot it.');
       }
+      const started = await this.bounded(adapter.request('start'));
+      if (this.closed) throw new Error('GameCube session is closed.');
+      adapter.applyFrame(started);
       this.booted = true;
       this.paused = false;
-      adapter.start();
       return {...disc, ...metadata};
     } catch (error) { this.dispose(); throw error; }
     finally { this.booting = false; }
   }
 
-  setInput(state) { if (this.booted && !this.paused && !this.closed) this.adapter.setInputState(state); }
+  setInput(state) {
+    if (!this.booted || this.paused || this.closed) return;
+    const previous = this.lastInput;
+    let changed = !previous;
+    if (previous) for (const field of INPUT_FIELDS) {
+      if (previous[field] !== state[field]) { changed = true; break; }
+    }
+    if (!changed) return;
+    if (!previous) this.lastInput = {};
+    for (const field of INPUT_FIELDS) this.lastInput[field] = state[field];
+    this.adapter.setInputState(state);
+  }
   pause() {
-    if (!this.booted || this.closed) return;
+    if (!this.booted || this.closed || this.paused) return;
+    this.lastInput = null;
     this.adapter.setInputState({mask: 0, stickX: 128, stickY: 128,
       cStickX: 128, cStickY: 128, triggerLeft: 0, triggerRight: 0, analogA: 0, analogB: 0});
     this.adapter.pause();

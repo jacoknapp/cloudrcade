@@ -16,27 +16,28 @@ function axis(value = 0, invert = false) {
 }
 const trigger = value => byte(Math.max(0, Math.min(1, Number(value) || 0)) * 255);
 
-export function padState(pressed = new Set(), gamepad = null) {
-  const buttons = new Set(pressed);
-  if (gamepad?.mapping === 'standard') {
-    for (const [index, name] of Object.entries(PAD)) {
-      if (gamepad.buttons[index]?.pressed) buttons.add(name);
-    }
-  } else gamepad = null;
-  const state = {mask:0, stickX:axis(gamepad?.axes[0]), stickY:axis(gamepad?.axes[1], true),
-    cStickX:axis(gamepad?.axes[2]), cStickY:axis(gamepad?.axes[3], true),
-    triggerLeft:trigger(gamepad?.buttons[6]?.value), triggerRight:trigger(gamepad?.buttons[7]?.value),
-    analogA:buttons.has('A') ? 255 : 0, analogB:buttons.has('B') ? 255 : 0};
-  if (buttons.has('L')) state.triggerLeft = 255;
-  if (buttons.has('R')) state.triggerRight = 255;
-  if (state.triggerLeft >= 128) buttons.add('L');
-  if (state.triggerRight >= 128) buttons.add('R');
-  for (const button of buttons) state.mask |= BUTTONS[button] || 0;
-  for (const [field, negative, positive] of [
-    ['stickX','STICK_LEFT','STICK_RIGHT'], ['stickY','STICK_DOWN','STICK_UP'],
-    ['cStickX','C_LEFT','C_RIGHT'], ['cStickY','C_DOWN','C_UP']]) {
-    if (buttons.has(negative) || buttons.has(positive)) {
-      state[field] = buttons.has(negative) === buttons.has(positive) ? 128 : buttons.has(positive) ? 224 : 32;
+const PAD_BUTTONS = Object.entries(PAD);
+const AXES = [['stickX','STICK_LEFT','STICK_RIGHT'], ['stickY','STICK_DOWN','STICK_UP'],
+  ['cStickX','C_LEFT','C_RIGHT'], ['cStickY','C_DOWN','C_UP']];
+const NO_KEYS = new Set();
+export function padState(pressed = NO_KEYS, gamepad = null, state = {}) {
+  if (gamepad?.mapping !== 'standard') gamepad = null;
+  state.mask = 0;
+  for (const button of pressed) state.mask |= BUTTONS[button] || 0;
+  if (gamepad) for (const [index,name] of PAD_BUTTONS) {
+    if (gamepad.buttons[index]?.pressed) state.mask |= BUTTONS[name];
+  }
+  state.stickX = axis(gamepad?.axes[0]); state.stickY = axis(gamepad?.axes[1],true);
+  state.cStickX = axis(gamepad?.axes[2]); state.cStickY = axis(gamepad?.axes[3],true);
+  state.triggerLeft = state.mask & BUTTONS.L ? 255 : trigger(gamepad?.buttons[6]?.value);
+  state.triggerRight = state.mask & BUTTONS.R ? 255 : trigger(gamepad?.buttons[7]?.value);
+  if (state.triggerLeft >= 128) state.mask |= BUTTONS.L;
+  if (state.triggerRight >= 128) state.mask |= BUTTONS.R;
+  state.analogA = state.mask & BUTTONS.A ? 255 : 0;
+  state.analogB = state.mask & BUTTONS.B ? 255 : 0;
+  for (const [field,negative,positive] of AXES) {
+    if (pressed.has(negative) || pressed.has(positive)) {
+      state[field] = pressed.has(negative) === pressed.has(positive) ? 128 : pressed.has(positive) ? 224 : 32;
     }
   }
   return state;

@@ -6,6 +6,8 @@ const get = id => document.getElementById(id);
 let canvas = get('screen');
 let session = null, selected = null, busy = false, animation = null, generation = 0;
 const pressed = new Set();
+const input = {};
+let selectionAbort = null;
 function status(text) { get('status').textContent = text; }
 function controls() {
   get('initialize').disabled = busy || !!session;
@@ -14,11 +16,12 @@ function controls() {
   get('selectUrl').disabled = busy || !!session?.booted;
   get('boot').disabled = busy || !selected || !!session?.booted;
   get('pause').disabled = busy || !session?.booted;
-  get('close').disabled = !session;
+  get('close').disabled = !session && !busy;
   get('pause').textContent = session?.paused ? 'Resume' : 'Pause';
 }
 function close() {
   generation++;
+  selectionAbort?.abort(); selectionAbort = null;
   if (animation !== null) cancelAnimationFrame(animation);
   animation = null;
   session?.dispose(); session = null;
@@ -29,7 +32,10 @@ function close() {
 async function perform(action) {
   if (busy) return;
   busy = true;
-  if (!session) session = new GameCubeSession({canvas,onStatus: status});
+  if (!session) {
+    const current = generation;
+    session = new GameCubeSession({canvas,onStatus:text=>{if (current === generation) status(text);}});
+  }
   const owned = session;
   const current = generation;
   controls();
@@ -43,33 +49,43 @@ get('initialize').onclick = () => perform(async owned => {
   await owned.initialize();
   if (session === owned) status('Dolphin initialized. Select a disc to boot.');
 });
-get('disc').onchange = async event => {
-  selected = null; controls();
-  const file = event.target.files[0];
-  if (!file) return;
-  try {
-    const disc = await inspectDisc(file);
-    selected = file; status(`Selected ${disc.gameId} (${(disc.size / 1048576).toFixed(1)} MiB).`);
-  } catch (error) { status(error.message); }
-  controls();
-};
-get('selectUrl').onclick = async () => {
-  if (busy) return;
-  busy = true; selected = null; controls();
+async function select(load) {
+  if (busy || session?.booted) return;
+  busy = true; selected = null;
   const current = generation;
+  const abort = selectionAbort = new AbortController();
+  controls();
   try {
-    status('Checking GameCube disc URL…');
-    const disc = await remoteDisc(get('url').value);
-    if (current !== generation) return;
+    const disc = await load(abort.signal);
+    if (current !== generation || abort.signal.aborted) return;
     selected = disc;
     status(`Selected ${disc.name}${disc.remote ? ' — HTTP range streaming' : ''}.`);
   } catch (error) { if (current === generation) status(error.message); }
-  finally { if (current === generation) { busy = false; controls(); } }
+  finally { if (current === generation) { selectionAbort = null; busy = false; controls(); } }
+}
+get('disc').onchange = event => {
+  const file = event.target.files[0];
+  if (!file) { selected = null; controls(); return; }
+  select(async()=>{ await inspectDisc(file); return file; });
 };
+get('selectUrl').onclick = () => select(signal => {
+  status('Checking GameCube disc URL…');
+  return remoteDisc(get('url').value,{signal});
+});
+function stopFrames() {
+  if (animation !== null) cancelAnimationFrame(animation);
+  animation = null;
+}
+function pause() { pressed.clear(); session?.pause(); stopFrames(); controls(); }
+function startFrames() { if (animation === null) animation = requestAnimationFrame(frame); }
 function frame() {
-  if (!session?.booted) return;
-  const gamepad = Array.from(navigator.getGamepads?.() || []).find(p => p?.connected && p.mapping === 'standard');
-  session.setInput(padState(pressed, gamepad)); session.poll();
+  animation = null;
+  if (!session?.booted || session.paused) return;
+  let gamepad = null;
+  for (const pad of navigator.getGamepads?.() || []) {
+    if (pad?.connected && pad.mapping === 'standard') { gamepad = pad; break; }
+  }
+  session.setInput(padState(pressed, gamepad, input)); session.poll();
   // Dolphin's WebGPU renderer owns the OffscreenCanvas; never rasterize on the CPU.
   animation = requestAnimationFrame(frame);
 }
@@ -78,18 +94,22 @@ get('boot').onclick = () => perform(async owned => {
   const metadata = await owned.boot(selected);
   if (session !== owned) return;
   status(`Running ${metadata.title || metadata.gameId}. Experimental compatibility.`);
-  animation = requestAnimationFrame(frame);
+  canvas.tabIndex = 0; canvas.focus();
+  startFrames();
 });
-get('pause').onclick = () => { session?.paused ? session.resume() : session?.pause(); controls(); };
+get('pause').onclick = () => {
+  if (session?.paused) { session.resume(); canvas.focus(); startFrames(); controls(); }
+  else pause();
+};
 get('close').onclick = close;
 addEventListener('keydown', event => {
-  if (!session?.booted || /^(INPUT|BUTTON)$/.test(event.target?.tagName)) return;
+  if (!session?.booted || session.paused || event.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName)) return;
   if (KEYS[event.code]) { pressed.add(KEYS[event.code]); event.preventDefault(); }
 });
 addEventListener('keyup', event => { if (KEYS[event.code]) pressed.delete(KEYS[event.code]); });
-addEventListener('blur', () => { pressed.clear(); session?.pause(); controls(); });
+addEventListener('blur', pause);
 addEventListener('pagehide', close);
-document.addEventListener('visibilitychange', () => { if (document.hidden) { pressed.clear(); session?.pause(); controls(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 fetch('core-info.json').then(r => r.json()).then(info => {
   get('details').textContent = `Pinned upstream Dolphin core ${info.commit.slice(0,7)}; native source build pending qualification.`;
 }).catch(() => {});

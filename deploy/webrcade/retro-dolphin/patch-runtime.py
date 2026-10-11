@@ -19,10 +19,11 @@ def patch_runtime(app):
             '    case "mountUrl":\n      return mountFile({...payload, remote:true});\n'
             '    case "streamStats":\n      return {stream:streamedDisc?.stats() || null};')
     replace('  fs.mount(resolveWorkerFs(moduleInstance), { blobs: [{ name: safeName, data: file }] }, WORKERFS_MOUNT_DIR);\n  mounted = true;',
-            '''  streamedDisc?.chunks.clear();
+            '''  streamedDisc?.close();
   streamedDisc = null;
   if (file.remote) {
-    streamedDisc = new RemoteDisc(file.url, file.size);
+    streamedDisc = new RemoteDisc(file.url, file.size, file.validator);
+    await streamedDisc.reader.ready;
     streamedDisc.node = streamedDisc.mount(fs, path);
   } else {
     fs.mount(resolveWorkerFs(moduleInstance), { blobs: [{ name: safeName, data: file }] }, WORKERFS_MOUNT_DIR);
@@ -40,10 +41,10 @@ def patch_runtime(app):
             '  }')
     replace('      const message = error instanceof Error ? error.message : String(error);\n      rendererDiagnostics.fallback',
             '      if (hardwareVideoBackend) throw error;\n      const message = error instanceof Error ? error.message : String(error);\n      rendererDiagnostics.fallback')
-    replace('  let adapterInfo = adapter.info || null;',
-            '''  let adapterInfo = adapter.info || null;
-  if (hardwareVideoBackend && (adapterInfo?.isFallbackAdapter || adapter.isFallbackAdapter ||
+    replace('  rendererDiagnostics.adapter = {',
+            '''  if (hardwareVideoBackend && (adapterInfo?.isFallbackAdapter || adapter.isFallbackAdapter ||
       /swiftshader|llvmpipe|lavapipe|software/i.test(adapterInfo?.description || ""))) {
     throw new Error("GameCube requires the device GPU; software WebGPU adapters are unsupported");
-  }''')
+  }
+  rendererDiagnostics.adapter = {''')
     worker.write_text(text)

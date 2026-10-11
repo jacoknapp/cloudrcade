@@ -26,6 +26,8 @@ def run(*args, cwd=None):
 
 def prepare(work, out):
     work, out = work.resolve(), out.resolve()
+    if out.exists():
+        raise SystemExit('OUT already exists; use a new output directory')
     if not (work / '.git').is_dir():
         work.mkdir(parents=True, exist_ok=True)
         if any(work.iterdir()):
@@ -55,8 +57,6 @@ def prepare(work, out):
     archives = list((work / 'dist').glob('wasm-dolphin-corresponding-source-*.tar.gz'))
     if len(archives) != 1:
         raise SystemExit('Expected exactly one verified corresponding source archive')
-    if out.exists():
-        raise SystemExit('OUT already exists; use a new output directory')
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='gamecube-', dir=out.parent) as tmp:
         stage = Path(tmp)
@@ -80,6 +80,8 @@ def prepare(work, out):
             'locallySourceBuilt': False,
             'videoBackend': 'WebGPU-Real', 'streamThresholdBytes': 50_000_000,
             'rangeReaderSha256': hashlib.sha256((stage / 'app/lazyrom.mjs').read_bytes()).hexdigest(),
+            'adapterFilesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                                   for path in sorted((stage / 'app').glob('*.mjs'))},
             'hostPatchSha256': hashlib.sha256((HERE / 'patch-runtime.py').read_bytes()).hexdigest(),
             'sourceSha256': hashlib.sha256(archives[0].read_bytes()).hexdigest(),
         }, indent=2) + '\n')

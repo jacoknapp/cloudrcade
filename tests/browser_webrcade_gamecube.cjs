@@ -41,6 +41,21 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         await page.getByRole('status').filter({hasText:/requires browser WebGPU|device GPU/}).waitFor({timeout:90000});
         assert.equal(workers.size,0,'unsupported GPU does not start a core worker');
       }
+      // Selection can be cancelled before a session exists; stale fetches cannot
+      // enable Boot or overwrite the next selection's status.
+      await page.route('**/fixtures/hanging.gcm',()=>{});
+      await page.locator('#url').fill('/fixtures/hanging.gcm');
+      await page.locator('#selectUrl').click();
+      await page.getByRole('status').filter({hasText:'Checking GameCube disc URL'}).waitFor();
+      assert.equal(await page.locator('#close').isEnabled(),true);
+      await page.locator('#close').click();
+      await page.waitForTimeout(100);
+      assert.equal(await page.getByRole('status').textContent(),'Core is stopped.');
+      assert.equal(await page.locator('#boot').isDisabled(),true);
+      await page.locator('#url').fill('/fixtures/'+fixtureName);
+      await page.locator('#selectUrl').click();
+      await page.getByRole('status').filter({hasText:'HTTP range streaming'}).waitFor();
+      assert.equal(await page.locator('#boot').isEnabled(),true);
       for (let attempt=0;attempt<2;attempt++) {
         const result = await page.evaluate(async fixtureName => {
           const {UpstreamWorkerAdapter}=await import('./vendor/src/upstream-worker-adapter.js');
@@ -49,7 +64,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
           try {
             await Promise.race([adapter.load(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Core load timed out')),60000))]);
             const disc=await remoteDisc('/fixtures/'+fixtureName);
-            const metadata=await adapter.request('mountUrl',{name:disc.name,url:disc.url,size:disc.size,inspectOnly:true});
+            const metadata=await adapter.request('mountUrl',{name:disc.name,url:disc.url,size:disc.size,validator:disc.validator,inspectOnly:true});
             const stats=await adapter.request('streamStats');
             return {loaded:adapter.loaded,gameId:metadata.gameId,boot:metadata.coreBoot,
               stream:stats.stream};
@@ -68,6 +83,61 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       await page.locator('#disc').setInputFiles({name:'invalid.iso',mimeType:'application/octet-stream',buffer:Buffer.alloc(32)});
       await page.getByRole('status').filter({hasText:'no GameCube disc header'}).waitFor();
       assert.equal(workers.size,0); assert.equal(await page.locator('#boot').isDisabled(),true);
+      // Exercise the actual blocking bridge without loading Dolphin: the
+      // asynchronous helper rejects changed files before buffering the body.
+      const changed = await page.evaluate(async fixtureName => {
+        const {remoteDisc}=await import('./transport.mjs');
+        const disc=await remoteDisc('/fixtures/'+fixtureName);
+        const code=`import {RangeReader} from ${JSON.stringify(new URL('./range-reader.mjs',location.href).href)};
+          onmessage=async({data})=>{const reader=new RangeReader(2*1024*1024,5000);
+            try {await reader.ready;reader.read(data);postMessage('unexpected success');}
+            catch(error){postMessage(error.message);}finally{reader.close();}};`;
+        const blobUrl=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+        const worker=new Worker(blobUrl,{type:'module'});
+        try { return await new Promise((resolve,reject)=>{
+          const timer=setTimeout(()=>reject(new Error('range bridge did not respond')),10000);
+          worker.onmessage=({data})=>{clearTimeout(timer);resolve(data);};
+          worker.onerror=error=>{clearTimeout(timer);reject(new Error(error.message));};
+          worker.postMessage({url:disc.url,size:disc.size,first:0,last:31,
+            validator:{header:'ETag',value:'"changed-disc"'}});
+        }); }finally{worker.terminate();URL.revokeObjectURL(blobUrl);}
+      },fixtureName);
+      assert.match(changed,/changed or returned an invalid HTTP/);
+      for(let retry=0;retry<20 && workers.size;retry++) await page.waitForTimeout(100);
+      assert.equal(workers.size,0,'nested range workers are cleaned up after success and failure');
+      // Isolated UI test doubles exercise input/pause behavior. They provide
+      // no renderer, GPU, or evidence of real game compatibility.
+      await page.evaluate(async()=>{
+        const {GameCubeSession}=await import('./session.mjs');
+        window.uiCalls={inputs:[],polls:0,pauses:0};
+        GameCubeSession.prototype.boot=async function() {
+          this.booted=true;
+          this.adapter={setInputState(state){uiCalls.inputs.push({...state});},
+            pollFrame(){uiCalls.polls++;},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
+          return {gameId:'TEST01'};
+        };
+      });
+      await page.locator('#url').fill('/fixtures/'+fixtureName);
+      await page.locator('#selectUrl').click();
+      await page.getByRole('status').filter({hasText:'HTTP range streaming'}).waitFor();
+      await page.locator('#boot').click();
+      await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'screen');
+      await page.locator('#pause').focus();
+      await page.keyboard.down('x'); await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(()=>uiCalls.inputs.at(-1).mask),1,'keyboard works after button focus');
+      await page.keyboard.up('x'); await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(()=>uiCalls.inputs.at(-1).mask),0);
+      const inputCount=await page.evaluate(()=>uiCalls.inputs.length);
+      await page.waitForTimeout(150);
+      assert.equal(await page.evaluate(()=>uiCalls.inputs.length),inputCount,'unchanged frames bypass adapter input');
+      await page.locator('#pause').click();
+      const pollCount=await page.evaluate(()=>uiCalls.polls);
+      await page.waitForTimeout(150);
+      assert.equal(await page.evaluate(()=>uiCalls.polls),pollCount,'pause stops the animation/poll loop');
+      await page.locator('#pause').click(); await page.waitForTimeout(100);
+      assert(await page.evaluate(count=>uiCalls.polls>count,pollCount),'resume restarts polling');
+      await page.locator('#close').click();
       assert.deepEqual(errors,[]);
       await context.close();
       console.log('PASS',engine.name(),'device-GPU guard, real Dolphin WASM/range-streamed DiscIO, reinitialization and worker cleanup; no GPU gameplay claim');
