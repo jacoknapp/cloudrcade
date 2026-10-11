@@ -27,6 +27,7 @@ const asset = name => fs.readFileSync(path.join(__dirname,
             isAxisUp: () => false, isAxisDown: () => false};
           window.app = {isShowOverlay: () => false, isPauseScreen: () => false,
             emulator: {started: true, paused: false, controllers: {getController: () => controller},
+              getPrefs() {return {getScreenLayout: () => 0};},
               updateScreenSize() {}, pause(value) {this.paused = value; return true;}}};
         });
         await target.addScriptTag({content: asset('controller.js')});
@@ -128,7 +129,22 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await page.waitForTimeout(250);
       const start = await game.locator('[data-cid="13"]').boundingBox();
       assert(Math.abs(744-50-start.y-start.height-22)<.5, 'Start stays above visual viewport bottom');
+      // Even in the same oversized frame, every other console keeps its legacy
+      // CSS viewport. The PSP repair must not reposition another platform.
+      await page.setViewportSize({width:390,height:844});
+      for (const core of ['nes','snes','gb','gbc','gba','n64','nds','3ds','genesis','psx']) {
+        await game.goto(`http://controller.test/play/app/${core}/`);
+        await game.evaluate(() => document.documentElement.setAttribute('data-cr-installed', ''));
+        await install(game);
+        const host = await game.locator('#wrcad-touch').evaluate(element => ({
+          overrides: ['left','top','width','height','right','bottom'].map(key => element.style[key]),
+          height: element.getBoundingClientRect().height, psp: element.classList.contains('kt-psp')}));
+        assert.deepEqual(host.overrides, ['','','','','',''], `${core}: no PSP viewport override`);
+        assert.equal(host.height, 904, `${core}: existing installed CSS viewport retained`);
+        assert.equal(host.psp, false, `${core}: PSP spacing is not applied`);
+      }
       console.log('PASS', engine.name(), 'PSP defaults, rotation, independent input, saved layout and fully visible Start/Select in oversized frames/browser chrome');
+      console.log('PASS', engine.name(), 'all 10 other console layouts retain their existing viewport behavior');
     } finally {await browser.close();}
   }
 })().catch(error => {console.error(error); process.exitCode = 1;});
