@@ -4,9 +4,11 @@ The beta image adds Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
 files under the GameCube content directory launch Dolphin in the browser, using
 the device GPU through WebGPU. Keyboard, standard gamepad and touch controls,
 acknowledged pause/resume, Web Audio, memory cards and eight save-state slots are
-included. Enable sound after launch to satisfy browser audio permission rules.
+included. These actions use CloudRcade's existing pop-out controller drawer;
+the game view has no separate toolbar, menu or duplicate touch controls. Enable
+sound in the drawer after launch to satisfy browser audio permission rules.
 Memory cards autosave every15seconds, on pause and when returning to the library.
-Use the Library/Close buttons to finish saving before leaving the game.
+Use Return to library in the drawer to finish saving before leaving the game.
 Local and connected Nextcloud saves use the existing CloudRcade account isolation,
 conflict handling and offline recovery bridge. States are scoped to the exact
 core binary version. Game compatibility and mobile memory support are experimental.

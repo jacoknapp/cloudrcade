@@ -2,7 +2,9 @@
 (() => {
   'use strict';
   const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
-  if (!(navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches)) return;
+  const touchDevice = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+  const gamecubePage = location.pathname.startsWith('/experimental/gamecube/') || document.documentElement.dataset.cloudrcadeCore === 'gamecube';
+  if (!touchDevice && !gamecubePage) return;
   const KEY = prefix + '.touch.enabled.v1';
   const MUTE_KEY = prefix + '.touch.muted.v1';
   const DS_VIEW_KEY = prefix + '.touch.ds-view.v1';
@@ -156,9 +158,29 @@
     genesis: ['genesis', 'genplusgx-md', 'retro-genplusgx-md', 'retro-genesis'],
     psx: ['psx', 'beetle-psx'],
     psp: ['psp', 'retro-ppsspp'],
+    gamecube: ['gamecube', 'retro-dolphin'],
   };
   const core = launchProps?.type || emulatorPath;
-  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || emulatorPath;
+  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (gamecubePage ? 'gamecube' : emulatorPath);
+  const gamecube = system === 'gamecube' || gamecubePage;
+  if (gamecube) {
+    drawer.querySelector('strong').textContent = 'Game controls';
+    const section = document.createElement('div');
+    section.className = 'kt-gamecube';
+    section.innerHTML = `<strong>GameCube</strong><button class="kt-gc-pause">Pause</button>
+      <label>Save slot <select aria-label="GameCube save slot">${Array.from({length:8},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+      <button class="kt-gc-save">Save state</button><button class="kt-gc-load">Load state</button>
+      <button class="kt-gc-exit">Return to library</button><p role="status" class="kt-gc-status"></p>`;
+    drawer.insertBefore(section, $('.kt-close'));
+    const action = (name, method) => section.querySelector(name).addEventListener('click', async () => {
+      try { await window.WrcadGameCube?.[method](Number(section.querySelector('select').value)); }
+      catch (error) { section.querySelector('[role="status"]').textContent = error.message; }
+    });
+    action('.kt-gc-pause','togglePause');
+    action('.kt-gc-save','saveState');action('.kt-gc-load','loadState');action('.kt-gc-exit','exit');
+    addEventListener('cloudrcade-game-menu', () => setDrawer(!drawerOpen));
+    if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
+  }
   document.documentElement.classList.toggle('kt-ds-active', system === 'nds');
   const dsScreens = $('.kt-ds-screens');
   // Measures the safe area for screen placement. It lives outside the controller
@@ -286,7 +308,7 @@
       system === 'psx' ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
-  configureDirection(stick, n64 || n3ds || system === 'psp' ? 'analog' : 'digital');
+  configureDirection(stick, n64 || n3ds || system === 'psp' || gamecube ? 'analog' : 'digital');
   function addDirection(id, kind, index, className) {
     const element = stick.cloneNode(true);
     element.dataset.layoutId = id;
@@ -295,8 +317,8 @@
     pad.append(element); directions.push(element);
     return element;
   }
-  if (n64 || n3ds || system === 'psp') addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
-  if (n3ds) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
+  if (n64 || n3ds || system === 'psp' || gamecube) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
+  if (n3ds || gamecube) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
   const psxSticks = system === 'psx' ? [
     addDirection('stick-left', 'analog', 0, 'kt-analog-left'),
     addDirection('stick-right', 'analog', 1, 'kt-analog-right'),
@@ -530,6 +552,9 @@
     $('[data-cid="11"]').hidden = true;
     $('[data-cid="12"]').hidden = true;
   }
+  if (gamecube) {
+    $('[data-cid="12"]').textContent='Z';$('[data-cid="10"]').hidden=true;$('[data-cid="11"]').hidden=true;
+  }
   if (system === 'psx' || system === 'psp') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
     $('[data-cid="8"]').textContent = 'L1';
@@ -616,7 +641,13 @@
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
-    pad.hidden = drawerOpen || (!editing && (!enabled || !gameReady));
+    pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!enabled || !gameReady));
+    if (gamecube) {
+      const api = window.WrcadGameCube;
+      $('.kt-gc-pause').textContent = api?.paused ? 'Resume' : 'Pause';
+      $('.kt-gc-status').textContent = api?.status || '';
+      for (const button of $('.kt-gamecube').querySelectorAll('button,select')) button.disabled = !api?.ready || api.busy;
+    }
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
@@ -636,6 +667,7 @@
     tab.setAttribute('aria-expanded', String(open));
     draw();
     if (open) cloud()?.syncControls?.();
+    if (gamecube) window.WrcadGameCube?.menuOpen(open);
   }
   toggle.addEventListener('click', () => {
     if (editing) finishEdit(false);
@@ -695,6 +727,7 @@
   $('.kt-menu').addEventListener('click', () => {
     if (editing) return;
     clear();
+    if (gamecube) { setDrawer(true); return; }
     const emulator = window.app?.emulator;
     touchPauseBlocked = false;
     if (emulator && emulator.pause(true)) {
@@ -988,7 +1021,7 @@
     const framed = Boolean(document.getElementById('webrcade-app-iframe'));
     // Layout editing intentionally pauses the emulator. Keep its toolbar and
     // dock usable until Save/Cancel, while hiding controls on native pause screens.
-    host.hidden = framed || !(ready || (editing && emulator === editEmulator));
+    host.hidden = framed || !(ready || (gamecube && emulator?.started) || (editing && emulator === editEmulator));
     if (host.hidden && drawerOpen) setDrawer(false);
     if (ready !== gameReady || controller !== activeController || framed) clear();
     activeController = controller; gameReady = ready;

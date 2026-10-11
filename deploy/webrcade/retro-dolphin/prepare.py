@@ -62,6 +62,12 @@ def prepare(work, out):
     with tempfile.TemporaryDirectory(prefix='gamecube-', dir=out.parent) as tmp:
         stage = Path(tmp)
         shutil.copytree(HERE / 'app', stage / 'app')
+        index = stage / 'app/index.html'
+        html = index.read_text()
+        for name in ['brand.js','controller.js','viewport.css','controller.css']:
+            revision = hashlib.sha256((HERE.parent / 'touch/assets' / name).read_bytes()).hexdigest()[:16]
+            html = html.replace('/touch-controls/' + name + '"', '/touch-controls/' + name + '?v=' + revision + '"')
+        index.write_text(html)
         shutil.copytree(work / 'src', stage / 'app/vendor/src')
         fonts = stage / 'app/sys/GC'
         fonts.mkdir(parents=True)

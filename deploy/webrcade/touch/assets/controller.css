@@ -120,3 +120,12 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 }
 @media (min-width: 461px) { #wrcad-touch.kt-n64 .kt-shoulders [data-cid="10"] { position: absolute; left: 25%; } }
 @media (min-width: 600px) { #wrcad-touch .kt-pad { left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); max-width: 1000px; margin: auto; } #wrcad-touch .kt-center { bottom: 14px; } }
+/* GameCube uses the existing control drawer; its core contains no menu. */
+#wrcad-touch .kt-gamecube { margin-top: 16px; }
+#wrcad-touch .kt-gamecube strong { margin-bottom: 8px; }
+#wrcad-touch .kt-gamecube button { display: block; width: 100%; margin-top: 8px; }
+#wrcad-touch .kt-gamecube label { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+#wrcad-touch .kt-gamecube select { font: inherit; color: inherit; background: #15213c; border: 1px solid #b7c8f05e; border-radius: 10px; min-height: 44px; padding: 8px; }
+#wrcad-touch .kt-gamecube [role="status"] { font-size: 12px; overflow-wrap: anywhere; margin: 8px 0 0; }
+#wrcad-touch[data-platform="gamecube"] .kt-c-stick { left: auto; right: 156px; bottom: 56px; width: 88px; height: 88px; }
+#wrcad-touch[data-platform="gamecube"] .kt-c-stick::after { content: "C"; position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 11px; }

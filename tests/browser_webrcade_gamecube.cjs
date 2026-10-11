@@ -63,6 +63,11 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
           const adapter=new UpstreamWorkerAdapter({videoBackend:'Null',noJitCache:true,ppcWasmJit:false});
           try {
             await Promise.race([adapter.load(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Core load timed out')),60000))]);
+            await adapter.request('importCards',{files:[{name:'USA/Card A/fixture.gci',content:new Uint8Array([1,2,3,4])}]});
+            const cards=await adapter.request('exportCards');
+            if(cards.files.length!==1 || cards.files[0].content.join(',')!=='1,2,3,4')throw new Error('Memory card filesystem roundtrip failed');
+            try { await adapter.request('importCards',{files:[{name:'../../invalid.gci',content:new Uint8Array(1)}]});throw new Error('Invalid card path accepted'); }
+            catch(error){if(!/Invalid memory card path/.test(error.message))throw error;}
             const disc=await remoteDisc('/fixtures/'+fixtureName);
             const metadata=await adapter.request('mountUrl',{name:disc.name,url:disc.url,size:disc.size,validator:disc.validator,inspectOnly:true});
             const stats=await adapter.request('streamStats');
@@ -123,7 +128,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       await page.locator('#boot').click();
       await page.waitForTimeout(100);
       assert.equal(await page.evaluate(()=>document.activeElement.id),'screen');
-      await page.locator('#pause').focus();
+      await page.locator('#screen').focus();
       await page.keyboard.down('x'); await page.waitForTimeout(100);
       assert.equal(await page.evaluate(()=>uiCalls.inputs.at(-1).mask),1,'keyboard works after button focus');
       await page.keyboard.up('x'); await page.waitForTimeout(100);
@@ -131,13 +136,13 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       const inputCount=await page.evaluate(()=>uiCalls.inputs.length);
       await page.waitForTimeout(150);
       assert.equal(await page.evaluate(()=>uiCalls.inputs.length),inputCount,'unchanged frames bypass adapter input');
-      await page.locator('#pause').click();
+      await page.evaluate(()=>WrcadGameCube.togglePause());
       const pollCount=await page.evaluate(()=>uiCalls.polls);
       await page.waitForTimeout(150);
       assert.equal(await page.evaluate(()=>uiCalls.polls),pollCount,'pause stops the animation/poll loop');
-      await page.locator('#pause').click(); await page.waitForTimeout(100);
+      await page.evaluate(()=>WrcadGameCube.togglePause()); await page.waitForTimeout(100);
       assert(await page.evaluate(count=>uiCalls.polls>count,pollCount),'resume restarts polling');
-      await page.locator('#close').click();
+      await page.evaluate(()=>WrcadGameCube.exit());
       assert.deepEqual(errors,[]);
       await context.close();
       console.log('PASS',engine.name(),'device-GPU guard, real Dolphin WASM/range-streamed DiscIO, reinitialization and worker cleanup; no GPU gameplay claim');
