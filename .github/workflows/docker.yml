@@ -37,6 +37,7 @@ jobs:
       - name: Build experimental PSP app and corresponding source
         run: bash deploy/webrcade/retro-ppsspp/build.sh
       - uses: docker/setup-qemu-action@v3
+        if: github.ref != 'refs/heads/beta/psp-core'
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@v3
@@ -59,6 +60,8 @@ jobs:
           echo "web=$image:sha-$COMMIT" >> "$GITHUB_OUTPUT"
           if [ "$REF_NAME" = master ]; then tag=latest; elif [ "$REF_NAME" = beta/psp-core ]; then tag=beta-psp-core; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
           echo "web_alias=$image:$tag" >> "$GITHUB_OUTPUT"
+          if [ "$REF_NAME" = beta/psp-core ]; then platforms=linux/amd64; else platforms=linux/amd64,linux/arm64; fi
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
       - name: Build AMD64 app image
         uses: docker/build-push-action@v6
         with:
@@ -72,6 +75,7 @@ jobs:
       - name: Verify AMD64 app and scheduled feed builder
         run: python3 scripts/smoke-image.py cloudrcade:test linux/amd64
       - name: Build ARM64 app image
+        if: github.ref != 'refs/heads/beta/psp-core'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -82,14 +86,15 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
       - name: Verify ARM64 app and scheduled feed builder under QEMU
+        if: github.ref != 'refs/heads/beta/psp-core'
         run: python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64
-      - name: Publish verified AMD64 and ARM64 app images
+      - name: Publish verified app images
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           target: web
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ steps.tags.outputs.platforms }}
           push: true
           tags: |
             ${{ steps.tags.outputs.web }}
