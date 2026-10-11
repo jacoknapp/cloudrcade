@@ -140,7 +140,7 @@ function fitCanvas(){
  if(!session?.booted)return;
  const viewport=visualViewport, width=viewport?.width||innerWidth;
  let height=viewport?.height||innerHeight;
- if(navigator.maxTouchPoints>0&&height>width){const pad=document.querySelector('.kt-pad');height=Math.max(100,height-(pad?.getBoundingClientRect().height||260)-16);}
+ if(navigator.maxTouchPoints>0&&height>width){const pad=document.querySelector('.kt-pad');height=Math.max(100,height-(pad?parseFloat(getComputedStyle(pad).height)||260:260)-16);}
  const w=Math.min(width,height*4/3),h=w*3/4;
  Object.assign(canvas.style,{position:'fixed',width:w+'px',height:h+'px',left:((viewport?.offsetLeft||0)+width/2)+'px',top:((viewport?.offsetTop||0)+height/2)+'px',transform:'translate(-50%,-50%)'});
 }
@@ -149,7 +149,7 @@ window.app={emulator:{get started(){return !!session?.booted&&!session.closed;},
  pause(value){if(!!session?.paused!==!!value)void(value?pause():togglePause()).catch(error=>status(error.message));return true;},showPauseMenu(){dispatchEvent(new Event('cloudrcade-game-menu'));},updateScreenSize:fitCanvas},
  isPauseScreen:()=>false,isShowOverlay:()=>!session?.booted||exiting};
 window.WrcadGameCube={get ready(){return !!session?.booted&&!session.closed;},get busy(){return busy||exiting;},get paused(){return !!session?.paused;},get sound(){return sound;},get status(){return statusText;},
- togglePause,toggleAudio,saveState:slot=>stateAction(false,slot),loadState:slot=>stateAction(true,slot),exit:()=>close({leave:true}),menuOpen(open){menuVisible=!!open;pressed.clear();if(open&&!sound)void toggleAudio().catch(error=>status(error.message));if(open)session?.setInput({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:0,triggerRight:0,analogA:0,analogB:0});},
+ togglePause,toggleAudio,fitCanvas,saveState:slot=>stateAction(false,slot),loadState:slot=>stateAction(true,slot),exit:()=>close({leave:true}),menuOpen(open){menuVisible=!!open;pressed.clear();if(open&&!sound)void toggleAudio().catch(error=>status(error.message));if(open)session?.setInput({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:0,triggerRight:0,analogA:0,analogB:0});},
 };
 addEventListener('resize',fitCanvas);visualViewport?.addEventListener('resize',fitCanvas);
 fetch('core-info.json').then(r=>r.json()).then(info=>{get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});

@@ -519,7 +519,7 @@
     cancelDrag(); layouts[layoutKey()] = {}; layoutStamp = ''; draw();
   });
   host.classList.toggle('kt-n64', n64);
-  host.classList.toggle('kt-3ds', n3ds);
+  host.classList.toggle('kt-3ds', n3ds || gamecube);
   host.classList.toggle('kt-psp', system === 'psp');
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
@@ -643,7 +643,7 @@
     const wasHidden = pad.hidden;
     pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!enabled || !gameReady));
     if (gamecube) {
-      const api = window.WrcadGameCube;
+      const api = window.WrcadGameCube;api?.fitCanvas?.();
       $('.kt-gc-pause').textContent = api?.paused ? 'Resume' : 'Pause';
       $('.kt-gc-status').textContent = api?.status || '';
       for (const button of $('.kt-gamecube').querySelectorAll('button,select')) button.disabled = !api?.ready || api.busy;
