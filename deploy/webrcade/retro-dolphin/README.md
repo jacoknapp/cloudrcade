@@ -9,6 +9,12 @@ the game view has no separate toolbar, menu or duplicate touch controls. Enable
 sound in the drawer after launch to satisfy browser audio permission rules.
 Memory cards autosave every15seconds, on pause and when returning to the library.
 Use Return to library in the drawer to finish saving before leaving the game.
+The Menu button opens that drawer with save/load state controls. The built-in
+GameCube performance readout is enabled by default; switch it off or on in the
+library's Experimental Settings before launching. It samples native frame and
+emulated-time counters once per second, reports core fps and speed independently
+of a game's frame-rate target, and shows device WebGPU resolution and WASM memory.
+It resets after pause/resume or loading states and adds no GPU timing probes.
 Local and connected Nextcloud saves use the existing CloudRcade account isolation,
 conflict handling and offline recovery bridge. States are scoped to the exact
 core binary version. Game compatibility and mobile memory support are experimental.

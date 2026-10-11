@@ -13,6 +13,9 @@ def patch_runtime(app):
         text = text.replace(old,new)
 
     text = 'import {RemoteDisc} from "../../remote-disc.mjs";\n' + text
+    replace('    frame: api.getFrame(),\n    coreTicks: readCoreTicks(),',
+            '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
+            '    heapBytes: moduleInstance.HEAPU8.byteLength,\n    coreTicks: readCoreTicks(),')
     replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
   for (const name of ["font_western.bin", "font_japanese.bin"]) {
     const response = await fetch(new URL("../../sys/GC/" + name, import.meta.url));

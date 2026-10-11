@@ -36,13 +36,14 @@ export async function inspectDisc(file) {
 }
 
 export class GameCubeSession {
-  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, timeoutMs = 60000} = {}) {
+  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, onTelemetry = () => {}, timeoutMs = 60000} = {}) {
     this.scope = scope;
     this.createAdapter = createAdapter || (async options => {
       const {UpstreamWorkerAdapter} = await import('./vendor/src/upstream-worker-adapter.js');
       return new UpstreamWorkerAdapter(options);
     });
     this.onStatus = onStatus;
+    this.onTelemetry = onTelemetry;
     this.canvas = canvas;
     this.timeoutMs = timeoutMs;
     this.adapter = null;
@@ -85,6 +86,11 @@ export class GameCubeSession {
       });
       const adapter = await this.bounded(creating);
       this.adapter = adapter;
+      const applyFrame = adapter.applyFrame.bind(adapter);
+      adapter.applyFrame = response => {
+        applyFrame(response);
+        if (!this.closed) this.onTelemetry(response);
+      };
       // The GPU presents directly; status polling does not need a 4 Hz cadence.
       adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());

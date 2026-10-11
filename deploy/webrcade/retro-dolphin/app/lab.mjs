@@ -3,10 +3,12 @@ import {KEYS, padState, BUTTONS} from './input.mjs';
 import {remoteDisc} from './transport.mjs';
 import {GameCubeSaves} from './saves.mjs';
 import {AudioController} from './vendor/src/audio.js';
+import {perfEnabled, createPerfReadout} from './perf.mjs';
 
 const get=id=>document.getElementById(id);
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
 let selectionAbort=null, saves=null, saveTimer=null, exiting=false, sound=false, audio=null;
+let perf=null;
 const pressed=new Set(), input={};
 let props=null;
 try {
@@ -39,6 +41,7 @@ function dispose(){
  generation++;selectionAbort?.abort();selectionAbort=null;stopFrames();clearInterval(saveTimer);saveTimer=null;
  audio?.setSource(null);audio?.stopPump();audio?.workletNode?.disconnect();audio?.gain?.disconnect();audio?.context?.close().catch(()=>{});audio=null;sound=false;
  session?.dispose();session=null;saves=null;pressed.clear();busy=false;document.body.classList.remove('running');
+ perf?.element.remove();perf=null;
  const replacement=canvas.cloneNode();canvas.replaceWith(replacement);canvas=replacement;
  controls();
 }
@@ -58,7 +61,7 @@ async function close({leave=false}={}){
 }
 async function perform(action){
  if(busy||exiting)return;busy=true;
- if(!session){const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);}});}
+ if(!session){const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation)perf?.sample(frame);}});}
  const owned=session,current=generation;controls();
  try{await action(owned);}
  catch(error){if(current===generation){dispose();status(error.message);}}
@@ -80,6 +83,7 @@ async function boot(){
   saves=new GameCubeSaves(props?.title||selected.name,props||{},text=>status(text));
   const metadata=await owned.boot(selected,(adapter,disc)=>saves.initialize(adapter,disc));
   if(session!==owned)return;
+  if(perfEnabled())perf=createPerfReadout();
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
@@ -89,12 +93,12 @@ async function boot(){
 get('boot').onclick=boot;
 async function pause(){
  pressed.clear();if(!session?.booted||session.paused)return;stopFrames();
- try{await session.pause();await audio?.setMuted(true);await audio?.context?.suspend();await saves?.cards(session.adapter);}
+ try{await session.pause();perf?.reset(true);await audio?.setMuted(true);await audio?.context?.suspend();await saves?.cards(session.adapter);}
  catch(error){status(error.message);}controls();
 }
 async function togglePause(){
  if(!session?.paused)return pause();
- try{if(sound)await audio?.ensureContext();await session.resume();if(sound)await audio?.setMuted(false);canvas.focus();startFrames();}
+ try{if(sound)await audio?.ensureContext();await session.resume();perf?.reset();if(sound)await audio?.setMuted(false);canvas.focus();startFrames();}
  catch(error){status(error.message);}controls();
 };
 async function toggleAudio(){
@@ -108,10 +112,11 @@ async function stateAction(load,slot){
   status(load?'Loading state…':'Saving state…');await audio?.setMuted(true);
   // Dolphin file state functions marshal onto its CPU thread and work while paused.
   await owned.pause();stopFrames();
+  perf?.reset(true);
   await (load?saves.loadState(owned.adapter,slot):saves.saveState(owned.adapter,slot));
   status(load?'State loaded.':'State saved.');
  }catch(error){status(error.message);}
- finally{if(session===owned&&!owned.closed){if(!wasPaused){await owned.resume();if(sound)await audio?.setMuted(false);startFrames();}busy=false;controls();}}
+ finally{if(session===owned&&!owned.closed){if(!wasPaused){await owned.resume();perf?.reset();if(sound)await audio?.setMuted(false);startFrames();}busy=false;controls();}}
 }
 
 get('backLibrary').onclick=event=>{event.preventDefault();close({leave:true});};

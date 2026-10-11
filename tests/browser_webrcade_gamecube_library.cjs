@@ -19,8 +19,10 @@ const rom=process.env.GAMECUBE_TEST_ROM;if(!rom)throw new Error('GAMECUBE_TEST_R
  console.log('IFRAME',new URL(game.url()).pathname);assert.equal(new URL(game.url()).pathname,'/experimental/gamecube/');
  await game.waitForFunction(()=>__session?.booted,null,{timeout:120000});console.log('LIBRARY PLAY BOOT PASS');
  assert.equal(await game.locator('#launcher').isVisible(),false);assert.equal(await game.locator('#touch').count(),0);assert.equal(await game.locator('#pause').count(),0);
- await game.locator('.kt-pad').waitFor({state:'visible'});await game.locator('.kt-tab').tap();await game.locator('#kt-drawer').waitFor({state:'visible'});console.log('EXISTING DRAWER PASS');
- await game.locator('.kt-gc-pause').tap();await game.waitForFunction(()=>__session.paused);assert.equal(await game.locator('.kt-tab').isVisible(),true);await game.locator('.kt-gc-pause').filter({hasText:'Resume'}).tap();await game.waitForFunction(()=>!__session.paused);console.log('PAUSE RESUME PASS');
+ await game.locator('.kt-pad').waitFor({state:'visible'});await game.locator('.kt-menu').tap();await game.locator('#kt-drawer').waitFor({state:'visible'});console.log('MENU OPENS EXISTING SAVE-STATE DRAWER PASS');
+ await game.locator('#gamecube-perf').filter({hasText:/core fps/}).waitFor({timeout:60000});console.log('BUILT-IN PERFORMANCE READOUT PASS',await game.locator('#gamecube-perf').textContent());
+ await game.locator('.kt-gc-pause').tap();await game.waitForFunction(()=>__session.paused);await game.locator('#gamecube-perf').filter({hasText:'GameCube paused'}).waitFor();assert.equal(await game.locator('.kt-tab').isVisible(),true);await game.locator('.kt-gc-pause').filter({hasText:'Resume'}).tap();await game.waitForFunction(()=>!__session.paused);console.log('PAUSE RESUME PASS');
+ await game.waitForFunction(()=>Number(document.querySelector('#gamecube-perf')?.textContent.match(/GameCube ([\d.]+) core fps/)?.[1])>0,null,{timeout:60000});
  await game.locator('.kt-gc-save').tap();await game.locator('.kt-gc-status').filter({hasText:'State saved.'}).waitFor({timeout:60000});
  await game.locator('.kt-gc-load').tap();await game.locator('.kt-gc-status').filter({hasText:'State loaded.'}).waitFor({timeout:60000});console.log('DRAWER STATE ROUNDTRIP PASS');
  await game.locator('.kt-close').tap();await game.locator('.kt-pad').waitFor({state:'visible'});
