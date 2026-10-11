@@ -9,16 +9,18 @@ const css = name => asset(name).replaceAll('100lvh', 'calc(100vh + 60px)')
   .replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '0px')
   .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px');
 const fixture = `
-  const canvas = document.createElement('canvas'); canvas.width=480; canvas.height=272;
+  const handheld = ['gb','gbc'].includes(location.pathname.split('/')[3]);
+  const dimensions = handheld ? [160,144] : [480,272], ratio = dimensions[0]/dimensions[1];
+  const canvas = document.createElement('canvas'); [canvas.width,canvas.height]=dimensions;
   document.body.append(canvas);
   const controller={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,
     isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
   window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{canvas,started:true,paused:false,
-    SS_16_9:2,SS_FILL:3,getScreenSize:()=>0,getDefaultAspectRatio:()=>480/272,getProps:()=>({}),
+    SS_16_9:2,SS_FILL:3,getScreenSize:()=>0,getDefaultAspectRatio:()=>ratio,getProps:()=>({}),
     getScreenLayout:()=>0,getPrefs:()=>({getScreenLayout:()=>0}),
     controllers:{getController:()=>controller},updateScreenSize(){
-      canvas.style.width=Math.min(innerWidth*.96,innerHeight*.96*480/272)+'px';
-      canvas.style.height=parseFloat(canvas.style.width)*272/480+'px';
+      canvas.style.width=Math.min(innerWidth*.96,innerHeight*.96*ratio)+'px';
+      canvas.style.height=parseFloat(canvas.style.width)/ratio+'px';
     },pause(value){this.paused=value;return true}}};
   app.emulator.updateScreenSize(); addEventListener('resize',()=>app.emulator.updateScreenSize());
 `;
@@ -27,10 +29,12 @@ const fixture = `
     const browser=await engine.launch({headless:true,...(engine===chromium ?
       {executablePath:process.env.CHROME,args:['--no-sandbox']} : {executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
     try {
-      const context=await browser.newContext({hasTouch:true,viewport:{width:390,height:784}});
+      const context=await browser.newContext({hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1',viewport:{width:390,height:784}});
       await context.addInitScript(() => {
-        Object.defineProperty(navigator,'standalone',{value:window===window.top});
+        Object.defineProperty(navigator,'standalone',{get:()=>window===window.top && window.fixtureInstalled!==false});
         if(window===window.top) {
+          Object.defineProperty(screen,'width',{get:()=>innerWidth});
+          Object.defineProperty(screen,'height',{get:()=>innerHeight+(window.opaqueInset||0)});
           const visual=new EventTarget();
           Object.defineProperties(visual,{
             width:{get:()=>innerWidth},height:{get:()=>innerHeight-(window.chromeInset||0)},
@@ -93,8 +97,33 @@ const fixture = `
               assert(picture.y+picture.height<=pad.y-19.5,'PSP game clears default portrait controls');
               assert(Math.abs(picture.y+picture.height/2-(pad.y-20)/2)<.5,'PSP centered above controls');
             }
-            assert.deepEqual(await game.locator('canvas').evaluate(el=>[el.width,el.height]),[480,272],'native drawing buffer preserved');
+            assert.deepEqual(await game.locator('canvas').evaluate(el=>[el.width,el.height]),['gb','gbc'].includes(core)?[160,144]:[480,272],'native drawing buffer preserved');
           }
+        }
+        if(!['nds','3ds','psp'].includes(core)) {
+          await page.setViewportSize({width:390,height:784});
+          const expectedCenter=async (center) => {
+            await page.waitForTimeout(180);
+            const r=await game.locator('canvas').boundingBox();
+            assert(Math.abs(r.x+r.width/2-195)<.5 && Math.abs(r.y+r.height/2-center)<.5,
+              core+' whole-phone centering: '+JSON.stringify({r,center}));
+            return r;
+          };
+          const original=await expectedCenter(392);
+          await page.evaluate(()=>window.opaqueInset=60);
+          const adjusted=await expectedCenter(362);
+          assert.equal(adjusted.width,original.width,'native width unchanged by status compensation');
+          assert.equal(adjusted.height,original.height,'native height unchanged by status compensation');
+          // Disabling touch controls does not move a whole-screen-centered game.
+          await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();
+          await expectedCenter(362);
+          await game.locator('.kt-toggle').click();
+          await expectedCenter(362);
+          await game.locator('.kt-tab').click();
+          // Browser chrome and keyboard/split-window gaps are not status strips.
+          await page.evaluate(()=>window.fixtureInstalled=false);await expectedCenter(392);
+          await page.evaluate(()=>{window.fixtureInstalled=true;window.opaqueInset=200});await expectedCenter(392);
+          await page.evaluate(()=>window.opaqueInset=0);
         }
       }
       // Pinch zoom must not feed a zoomed visual size back into layout sizing.
@@ -114,7 +143,7 @@ const fixture = `
       }));
       assert.equal(stable,0,'no repeated viewport writes while dimensions are stable');
       assert.deepEqual(errors,[]);
-      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; PSP above controls; native buffers intact');
+      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering and PSP above controls; native buffers intact');
       await context.close();
       const desktop=await browser.newPage({viewport:{width:1440,height:900}});
       await desktop.goto('data:text/html,<html><head></head><body></body></html>');
