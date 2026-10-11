@@ -40,18 +40,34 @@ cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
 thread. Native WebGPU uses packed geometry, mapped uploads and the replay pump;
 heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
 No server GPU dependency exists.
-The pinned binary reserves1.5GiB of initial WASM memory; small devices may lack
+The native binary reserves1.5GiB of initial WASM memory; small devices may lack
 sufficient memory. Performance depends on browser, device and game.
 
+The renderer translates generated GX shaders through GLSL, SPIR-V and Naga to
+WGSL. Texture decoding remains on the CPU. Integer texture bindings and generic
+GPU-to-CPU texture readback still have incomplete paths; this is not a claim that
+every GameCube effect translates correctly. The native texture destructor now
+releases its browser GPU texture, and replaced texture bind groups retire after
+the owning render pass publishes. Physical resource destruction follows GPU
+submission. Slow scenes keep guarded JIT acceleration while native frames advance;
+five seconds without progress still trips the JIT fuse. Only the unused legacy
+CPU notification image is reduced; the native GPU render resolution is unchanged.
+Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
+session and offer restart or return to the library.
+
 The core uses [wasm-dolphin](https://github.com/dougchansan/wasm-dolphin) at the
-exact commit in `core.json`, with SHA256-verified JavaScript/WASM. Preparation
-reconstructs and verifies Dolphin's pinned source and66patches, packages its
-corresponding source, and includes our modified host and save SDK source. The
+exact base commit in `core.json`, with independently verified upstream artifacts. Preparation
+reconstructs and verifies Dolphin's pinned source and66patches, then applies our
+locked native patches and builds using the AMD64 Linux SDK digest and Rust
+nightly in `native-build.json`. The native source tree, build recipe, patches and
+resulting JavaScript/WASM are independently SHA256-locked. CI rebuilds them from
+source and rejects differences. The corresponding source includes both patch
+series and the Linux recipe; the modified host and save SDK source ship separately. The
 save SDK uses pinned webRcade common9a7cf19 and locked npm dependencies. Dolphin's
 Apache-licensed replacement GameCube fonts and license ship with the core.
 No games, BIOS dumps, keys, accounts or operator settings are packaged.
-The binary is pinned upstream, not a claimed local native rebuild. A Linux
-native build and broader device/game qualification remain promotion requirements.
+The binary is a CloudRcade Linux source build. Broader device/game qualification
+remains a promotion requirement.
 
 ```sh
 python3 deploy/webrcade/retro-dolphin/prepare.py
@@ -60,7 +76,13 @@ node tests/test_webrcade_gamecube.cjs
 NODE_PATH=<Playwright modules> node tests/browser_webrcade_gamecube.cjs
 ```
 
-Preparation requires Git, Node22+, npm, Python3.10+, tar and network access.
+Preparation requires Git, Node22+, npm, Python3.10+, Docker, tar and network access.
+The native builder uses a disposable SDK container, pinned Ninja/pkg-config and
+Rust with `cargo --locked`, a fixed source-date epoch, fixed shared-memory pages,
+and explicit Dolphin revision metadata. `GAMECUBE_BUILD_JOBS` defaults to8.
+`GAMECUBE_NATIVE_CACHE` can point to artifacts from a previous qualified Linux
+build; source/recipe and both artifact hashes are still verified. CI leaves this
+unset and rebuilds independently.
 `WORK` is a dedicated upstream checkout; `OUT` is a new output directory (default
 `release/gamecube`). Unexpected remotes, tracked edits, mismatching artifacts and
 existing outputs are rejected. The localhost lab's manual disc controls are at

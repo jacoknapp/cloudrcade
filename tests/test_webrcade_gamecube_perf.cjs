@@ -26,5 +26,7 @@ const path = require('node:path');
   perf.sample(frame(19000,90,1458000000,1));assert.match(element.textContent,/30.0 core fps  100% speed/);
   perf.sample(frame(19500,100,1500000000,1));assert.match(element.textContent,/100% speed/,'subsecond replies do not flicker');
   perf.sample(frame(20000,10,100,1));assert.equal(element.textContent,'GameCube measuring…','counter resets never display negative rates');
+  perf.sample({...frame(21000,40,486000100,1),width:160,height:112,renderWidth:640,renderHeight:480});
+  assert.match(element.textContent,/WebGPU · 640×480/,'monitor reports the real GPU canvas, not its unused CPU image');
   console.log('PASS GameCube native fps/speed, switch, paused time and loaded-state resets');
 })().catch(error=>{console.error(error);process.exitCode=1;});

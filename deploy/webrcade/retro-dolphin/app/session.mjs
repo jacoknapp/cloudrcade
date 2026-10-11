@@ -36,7 +36,7 @@ export async function inspectDisc(file) {
 }
 
 export class GameCubeSession {
-  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, onTelemetry = () => {}, timeoutMs = 60000} = {}) {
+  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, onTelemetry = () => {}, onFatal = () => {}, timeoutMs = 60000} = {}) {
     this.scope = scope;
     this.createAdapter = createAdapter || (async options => {
       const {UpstreamWorkerAdapter} = await import('./vendor/src/upstream-worker-adapter.js');
@@ -44,6 +44,7 @@ export class GameCubeSession {
     });
     this.onStatus = onStatus;
     this.onTelemetry = onTelemetry;
+    this.onFatal = onFatal;
     this.canvas = canvas;
     this.timeoutMs = timeoutMs;
     this.adapter = null;
@@ -53,6 +54,10 @@ export class GameCubeSession {
     this.booting = false;
     this.paused = false;
     this.lastInput = null;
+    this.pollPending = false;
+    this.lastPollAt = -Infinity;
+    this.progressFrame = null;
+    this.progressAt = null;
   }
 
   async bounded(operation) {
@@ -78,6 +83,9 @@ export class GameCubeSession {
         transferCanvas:()=>this.canvas.transferControlToOffscreen(),
         cpuThread: true, cpuCore: 'cached', ppcWasmJit: true,
         ppcWasmJitTier: 'guarded', ppcWasmJitForce: false, ppcWasmJitWarmupFrames: 120,
+        // The hardware command ring presents at native resolution. Minimize
+        // its unused legacy CPU XFB notification image, not the GPU render.
+        presentationScale: 0.25,
         // GameCube-only native device-GPU path. Keep diagnostic GPU probes off.
         wgpuGeometryPack: true, wgpuUploadTransport: 'mapped',
         wgpuReplayPump: true, wgpuDiagnosticQuiet: true,
@@ -92,6 +100,16 @@ export class GameCubeSession {
       this.adapter = adapter;
       const applyFrame = adapter.applyFrame.bind(adapter);
       adapter.applyFrame = response => {
+        if (this.closed) return;
+        if (response.runtimeFailure) { this.fail(new Error(response.runtimeFailure)); return; }
+        if (this.booted && !this.paused && Number.isFinite(response.frame)) {
+          const now = performance.now();
+          if (response.frame !== this.progressFrame || this.progressAt === null) {
+            this.progressFrame = response.frame; this.progressAt = now;
+          } else if (now - this.progressAt >= this.timeoutMs) {
+            this.fail(new Error('GameCube stopped producing frames.')); return;
+          }
+        }
         applyFrame(response);
         if (!this.closed) this.onTelemetry(response);
       };
@@ -99,6 +117,11 @@ export class GameCubeSession {
       adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());
       if (this.closed) throw new Error('GameCube session is closed.');
+      adapter.worker?.addEventListener?.('error', event => this.fail(new Error(event.message || 'GameCube worker failed.')));
+      adapter.worker?.addEventListener?.('messageerror', () => this.fail(new Error('GameCube worker communication failed.')));
+      adapter.worker?.addEventListener?.('message', event => {
+        if (event.data?.type === 'gamecube-fatal') this.fail(new Error(event.data.message || 'GameCube core failed.'));
+      });
       adapter.setAudioMuted(true);
       return adapter;
     })();
@@ -125,6 +148,7 @@ export class GameCubeSession {
       const started = await this.bounded(adapter.request('start'));
       if (this.closed) throw new Error('GameCube session is closed.');
       adapter.applyFrame(started);
+      if (this.closed) throw new Error('GameCube session failed during startup.');
       this.booted = true;
       this.paused = false;
       return {...disc, ...metadata};
@@ -157,10 +181,26 @@ export class GameCubeSession {
     if (this.booted && !this.closed) {
       const result = await this.bounded(this.adapter.request('start'));
       this.paused = false;
+      this.lastPollAt = -Infinity;
+      this.progressAt = null;
       return result;
     }
   }
-  poll() { if (this.booted && !this.closed && !this.paused) this.adapter.pollFrame(); }
+  poll() {
+    if (!this.booted || this.closed || this.paused || this.pollPending) return;
+    const now = performance.now();
+    if (now - this.lastPollAt < 1000) return;
+    this.lastPollAt = now; this.pollPending = true;
+    const adapter = this.adapter;
+    void this.bounded(Promise.resolve().then(() => adapter.request('runFrame'))).then(frame => {
+      if (!this.closed && !this.paused) adapter.applyFrame(frame);
+    }).catch(error => this.fail(error)).finally(() => { this.pollPending = false; });
+  }
+  fail(error) {
+    if (this.closed) return;
+    this.dispose();
+    this.onFatal(error instanceof Error ? error : new Error(String(error)));
+  }
   dispose() {
     if (this.closed) return;
     this.closed = true;

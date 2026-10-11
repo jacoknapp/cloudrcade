@@ -48,6 +48,7 @@ function fake() {
   const adapter = fake();
   const session = new GameCubeSession({...options, createAdapter:async config => {
     assert.equal(config.videoBackend,'WebGPU-Real'); assert.equal(config.presenterBackend,'webgpu');
+    assert.equal(config.presentationScale,0.25,'only the unused CPU notification image is reduced');
     assert.equal(typeof config.transferCanvas,'function'); return adapter;
   }});
   await Promise.all([session.initialize(), session.initialize()]);
@@ -91,6 +92,79 @@ function fake() {
   finishFactory(lateAdapter); await new Promise(resolve=>setImmediate(resolve));
   assert.equal(lateAdapter.calls.load,0); assert.equal(lateAdapter.calls.terminated,1,
     'an adapter delivered after timeout cannot leave a worker behind');
+
+  const {JitLivenessGuard}=await import(pathToFileURL(path.join(root,'jit-guard.mjs')));
+  const guard=new JitLivenessGuard();
+  for(let i=0;i<100;i++)assert.equal(guard.stalled(i,i*1000),false,
+    'a slow but progressing scene keeps JIT acceleration');
+  assert.equal(guard.stalled(99,103999),false);
+  assert.equal(guard.stalled(99,104000),true,'five seconds without progress trips the fuse');
+  guard.reset();assert.equal(guard.stalled(99,200000),false,'pause/load resets the liveness window');
+  assert.equal(guard.stalled(99,190000),false,'clock rollback resets the window');
+  assert.equal(guard.stalled(NaN,200000),false);
+
+  const {releaseGpuResource}=await import(pathToFileURL(path.join(root,'gpu-resources.mjs')));
+  const events=[],texture={tex:{destroy(){events.push('destroy');}}};
+  const maps={textures:new Map([[7,texture]]),buffers:new Map(),
+    bindGroups:new Map([[8,{}]]),bindGroupSamplingMasks:new Map([[8,1]])};
+  assert.equal(releaseGpuResource(maps,2,7,{flush:()=>false}),false);
+  assert.equal(maps.textures.get(7),texture,'failed submission retains the live resource');
+  assert.deepEqual(events,[]);
+  assert.equal(releaseGpuResource(maps,2,7,{flush(){events.push('submit');return true;},
+    invalidate(){events.push('invalidate');}}),true);
+  assert.deepEqual(events,['submit','invalidate','destroy']);assert.equal(maps.textures.size,0);
+  releaseGpuResource(maps,3,8,{flush(){throw new Error('bind group deletion needs no submit');}});
+  assert.equal(maps.bindGroups.size,0);assert.equal(maps.bindGroupSamplingMasks.size,0);
+  assert.equal(releaseGpuResource(maps,2,7,{flush(){throw new Error('already released');}}),true);
+
+  const stalledAdapter=fake(),faults=[];
+  const stalledSession=new GameCubeSession({...options,timeoutMs:10,createAdapter:async()=>stalledAdapter,
+    onFatal:error=>faults.push(error.message)});
+  await stalledSession.boot(disc());
+  let polls=0;stalledAdapter.request=()=>{polls++;return new Promise(()=>{});};
+  stalledSession.poll();stalledSession.poll();
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(polls,1,'only one frame poll can be in flight');
+  assert.equal(stalledSession.closed,true);assert.equal(stalledAdapter.calls.terminated,1);
+  assert.deepEqual(faults,['GameCube core timed out.']);
+  stalledSession.fail(new Error('late error'));assert.equal(faults.length,1,'a failure reports once');
+
+  const gpuAdapter=fake(),gpuFaults=[];
+  const gpuSession=new GameCubeSession({...options,createAdapter:async()=>gpuAdapter,
+    onFatal:error=>gpuFaults.push(error.message)});
+  await gpuSession.boot(disc());
+  gpuAdapter.applyFrame({runtimeFailure:'WebGPU device-lost: test loss'});
+  assert.equal(gpuSession.closed,true);assert.equal(gpuAdapter.calls.terminated,1);
+  assert.deepEqual(gpuFaults,['WebGPU device-lost: test loss']);
+
+  const failedWorker=fake(),workerFaults=[];
+  failedWorker.worker=Object.assign(new EventTarget(),{terminate(){failedWorker.calls.terminated++;}});
+  const workerSession=new GameCubeSession({...options,createAdapter:async()=>failedWorker,
+    onFatal:error=>workerFaults.push(error.message)});
+  await workerSession.boot(disc());
+  failedWorker.worker.dispatchEvent(Object.assign(new Event('error'),{message:'WASM runtime trap'}));
+  assert.equal(workerSession.closed,true);assert.equal(failedWorker.calls.terminated,1);
+  assert.deepEqual(workerFaults,['WASM runtime trap']);
+
+  const frozenAdapter=fake(),frozenFaults=[];
+  const frozenSession=new GameCubeSession({...options,timeoutMs:10,createAdapter:async()=>frozenAdapter,
+    onFatal:error=>frozenFaults.push(error.message)});
+  await frozenSession.boot(disc());
+  frozenAdapter.applyFrame({frame:100});
+  frozenSession.progressAt=performance.now()-11;
+  frozenAdapter.applyFrame({frame:100});
+  assert.equal(frozenSession.closed,true);
+  assert.deepEqual(frozenFaults,['GameCube stopped producing frames.'],
+    'responsive worker with a frozen native CPU also reports failure');
+
+  const abortedAdapter=fake(),abortFaults=[];
+  abortedAdapter.worker=Object.assign(new EventTarget(),{terminate(){abortedAdapter.calls.terminated++;}});
+  const abortedSession=new GameCubeSession({...options,createAdapter:async()=>abortedAdapter,
+    onFatal:error=>abortFaults.push(error.message)});
+  await abortedSession.boot(disc());
+  abortedAdapter.worker.dispatchEvent(Object.assign(new Event('message'),
+    {data:{type:'gamecube-fatal',message:'GameCube core aborted: OOM'}}));
+  assert.equal(abortedSession.closed,true);assert.deepEqual(abortFaults,['GameCube core aborted: OOM']);
 
   assert.equal(state.stickY,224); assert.equal(state.cStickX,224);
   assert.equal(state.mask, BUTTONS.A|BUTTONS.D_LEFT|BUTTONS.L);

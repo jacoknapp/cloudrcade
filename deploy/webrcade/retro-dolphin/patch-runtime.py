@@ -1,8 +1,18 @@
-"""Adapt only the pinned browser host; the Dolphin core binaries stay intact."""
+"""Adapt the pinned browser host; native patches use a separate source build."""
 from pathlib import Path
+import re
 
 
-def patch_runtime(app):
+def patch_runtime(app, native_core_sha=None):
+    if native_core_sha is not None:
+        if not re.fullmatch(r'[0-9a-f]{64}', native_core_sha):
+            raise ValueError('Invalid native core hash')
+        protocol = Path(app) / 'vendor/src/upstream-worker-protocol.js'
+        original = 'd7395b3a94080f5b7d08a0522f59096007419d117b7b0eb868246429adee6f5c'
+        data = protocol.read_text()
+        if data.count(original) != 1:
+            raise RuntimeError('Unexpected pinned worker protocol core hash')
+        protocol.write_text(data.replace(original, native_core_sha))
     worker = Path(app) / 'vendor/src/upstream-discio-worker.js'
     text = worker.read_text()
 
@@ -12,10 +22,76 @@ def patch_runtime(app):
             raise RuntimeError(f'Unexpected pinned Dolphin worker anchor: {old[:70]}')
         text = text.replace(old,new)
 
-    text = 'import {RemoteDisc} from "../../remote-disc.mjs";\n' + text
+    text = ('import {RemoteDisc} from "../../remote-disc.mjs";\n'
+            'import {JitLivenessGuard} from "../../jit-guard.mjs";\n'
+            'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
+            'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
+    replace('    ...rendererDiagnostics,', '''    ...rendererDiagnostics,
+    gpuResources: {
+      textures: webGpuObjects.textures.size, buffers: webGpuObjects.buffers.size,
+      bindGroups: webGpuObjects.bindGroups.size, pipelines: webGpuObjects.pipeVar.size,
+      shaders: webGpuObjects.shaders.size, shaderOk: webGpuObjects.shaderOk,
+      shaderFail: webGpuObjects.shaderFail,
+    },''')
+    # Physical destroy must follow submission even without mapped coalescing.
+    # Bind groups have no destroy API and can leave the map without a submit.
+    start = text.index('        case WGPU_CMD_OP_DESTROY: {')
+    end = text.index('        case WGPU_CMD_OP_BLIT_TEXTURE: {', start)
+    text = text[:start] + '''        case WGPU_CMD_OP_DESTROY: {
+          const tag = u32[recWord + 1], id = u32[recWord + 2];
+          const released = releaseGpuResource(webGpuObjects, tag, id, {
+            flush: () => {
+              if (pass) {
+                markWgpuReplayFatal("destroy-order", "resource destroyed inside a render pass");
+                return false;
+              }
+              if (enc && !submitEnc("destroy")) return false;
+              if (pendingWgpuUploadSnapshot().pendingUploads > 0)
+                flushMappedUploadsOnly("destroy");
+              return !wgpuReplayFatal && pendingWgpuUploadSnapshot().pendingUploads === 0;
+            },
+            invalidate: (kind, resource) => {
+              if (wgpuConsumerStateCacheEnabled)
+                wgpuPassStateCache.invalidateDestroyedResource(kind, resource);
+            },
+          });
+          if (!released) markWgpuReplayFatal("destroy-order", "resource work could not be submitted");
+          break;
+        }
+''' + text[end:]
+    # A light intro and a heavy world cannot provide a causal JIT comparison.
+    # Keep the safety fuse for five seconds without native frame progress.
+    start = text.index('function maybeDisablePpcWasmJit(')
+    end = text.index('function normalizePpcWasmJitWarmupFrames(', start)
+    text = text[:start] + '''function maybeDisablePpcWasmJit(coreFrame = api?.getFrame?.() ?? 0) {
+  if (ppcWasmJitCorePaused || ppcWasmJitTimingSuspensions > 0 ||
+      !ppcWasmJitActive || ppcWasmJitForce || !api?.setPpcWasmJitEnabled) {
+    gamecubeJitGuard.reset();
+    return;
+  }
+  if (!gamecubeJitGuard.stalled(coreFrame, performance.now())) return;
+  api.setPpcWasmJitEnabled(0);
+  ppcWasmJitActive = false;
+  ppcWasmJitDisabledForSession = true;
+  postStatus("Experimental WASM JIT disabled after five seconds without core frame progress");
+}
+
+''' + text[end:]
+    replace('function resetPpcWasmJitTiming(invalidateBaseline = false) {',
+            'function resetPpcWasmJitTiming(invalidateBaseline = false) {\n  gamecubeJitGuard.reset();')
     replace('    frame: api.getFrame(),\n    coreTicks: readCoreTicks(),',
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
-            '    heapBytes: moduleInstance.HEAPU8.byteLength,\n    coreTicks: readCoreTicks(),')
+            '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
+            '    renderWidth: hardwareVideoBackend ? renderCanvas?.width : width,\n'
+            '    renderHeight: hardwareVideoBackend ? renderCanvas?.height : height,\n'
+            '    runtimeFailure: wgpuReplayFatal ? `WebGPU ${wgpuReplayFatal.scope}: ${wgpuReplayFatal.detail}` : null,\n'
+            '    coreTicks: readCoreTicks(),')
+    replace('      recordRendererError("emscripten-abort", reason);',
+            '      recordRendererError("emscripten-abort", reason);\n'
+            '      self.postMessage({type:"gamecube-fatal",message:`GameCube core aborted: ${reason}`});')
+    replace('      postStatus,\n    });\n  });\n\n  return state;',
+            '      postStatus: message => { postStatus(message); self.postMessage({type:"gamecube-fatal",message}); },\n'
+            '    });\n  });\n\n  return state;')
     replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
   for (const name of ["font_western.bin", "font_japanese.bin"]) {
     const response = await fetch(new URL("../../sys/GC/" + name, import.meta.url));

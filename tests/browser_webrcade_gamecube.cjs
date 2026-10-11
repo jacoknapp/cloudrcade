@@ -56,6 +56,15 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       await page.locator('#selectUrl').click();
       await page.getByRole('status').filter({hasText:'HTTP range streaming'}).waitFor();
       assert.equal(await page.locator('#boot').isEnabled(),true);
+      const mismatch=await page.evaluate(async()=>{
+        const {UpstreamWorkerAdapter}=await import('./vendor/src/upstream-worker-adapter.js');
+        const adapter=new UpstreamWorkerAdapter({videoBackend:'Null',noJitCache:true,
+          expectedCoreSha256:'0'.repeat(64)});
+        try {await adapter.load();return 'unexpected acceptance';}
+        catch(error){return error.message;}
+        finally {adapter.rejectAll('integrity test exit');adapter.worker?.terminate();}
+      });
+      assert.match(mismatch,/Core WASM SHA-256 mismatch/,'downstream pin still rejects unexpected core bytes');
       for (let attempt=0;attempt<2;attempt++) {
         const result = await page.evaluate(async fixtureName => {
           const {UpstreamWorkerAdapter}=await import('./vendor/src/upstream-worker-adapter.js');
@@ -116,9 +125,9 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         const {GameCubeSession}=await import('./session.mjs');
         window.uiCalls={inputs:[],polls:0,pauses:0};
         GameCubeSession.prototype.boot=async function() {
-          this.booted=true;
+          this.booted=true;window.uiSession=this;
           this.adapter={setInputState(state){uiCalls.inputs.push({...state});},
-            pollFrame(){uiCalls.polls++;},async request(type){if(type==='pause')uiCalls.pauses++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
+            applyFrame(){},async request(type){if(type==='pause')uiCalls.pauses++;if(type==='runFrame')uiCalls.polls++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
           return {gameId:'TEST01'};
         };
       });
@@ -142,9 +151,27 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       assert.equal(await page.evaluate(()=>uiCalls.polls),pollCount,'pause stops the animation/poll loop');
       await page.evaluate(()=>WrcadGameCube.togglePause()); await page.waitForTimeout(100);
       assert(await page.evaluate(count=>uiCalls.polls>count,pollCount),'resume restarts polling');
+      await page.evaluate(()=>uiSession.fail(new Error('Synthetic WebGPU device loss')));
+      await page.getByRole('alert').filter({hasText:'Synthetic WebGPU device loss'}).waitFor();
+      assert.equal(await page.evaluate(()=>WrcadGameCube.ready),false,'failed worker is stopped');
+      await page.getByRole('button',{name:'Restart game',exact:true}).click();
+      await page.waitForFunction(()=>WrcadGameCube.ready);
+      assert.equal(await page.locator('#gamecube-failure').isVisible(),false);
       await page.evaluate(()=>WrcadGameCube.exit());
       assert.deepEqual(errors,[]);
       await context.close();
+      const failureContext=await browser.newContext({serviceWorkers:'block'});
+      const failedPage=await failureContext.newPage();
+      await failedPage.route('**/library-invalid.iso',route=>route.fulfill({status:206,
+        headers:{'Content-Range':'bytes 0-31/50000001',ETag:'"invalid-disc"'},body:Buffer.alloc(32)}));
+      const launch=Buffer.from(encodeURIComponent(JSON.stringify({rom:origin+'/library-invalid.iso',
+        title:'Invalid library fixture'}))).toString('base64');
+      await failedPage.goto(origin+'/?props='+encodeURIComponent(launch));
+      await failedPage.getByRole('alert').filter({hasText:'no GameCube disc header'}).waitFor();
+      assert.equal(await failedPage.getByRole('button',{name:'Restart game',exact:true}).isVisible(),false);
+      await failedPage.getByRole('button',{name:'Return to library',exact:true}).click();
+      await failedPage.waitForURL('**/play/');
+      await failureContext.close();
       console.log('PASS',engine.name(),'device-GPU guard, real Dolphin WASM/range-streamed DiscIO, reinitialization and worker cleanup; no GPU gameplay claim');
     } finally { await browser.close(); }
   }

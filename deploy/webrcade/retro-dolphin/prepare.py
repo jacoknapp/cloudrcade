@@ -4,8 +4,8 @@
 Requires Git, Node >=22, Python >=3.10, tar and network access. WORK is a
 dedicated upstream checkout; OUT is generated release/gamecube. No ROMs,
 BIOS, accounts or production configuration are read. Run serve.py afterward.
-This packages the upstream binary and verified corresponding source; it does
-not claim a local native rebuild (the upstream toolchain is Windows-specific).
+This verifies the original upstream artifacts and source, then builds the
+downstream native patches with the separately pinned Linux toolchain.
 """
 import hashlib
 import json
@@ -61,6 +61,10 @@ def prepare(work, out):
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='gamecube-', dir=out.parent) as tmp:
         stage = Path(tmp)
+        spec = spec_from_file_location('gamecube_native_build', HERE / 'native-build.py')
+        native = module_from_spec(spec)
+        spec.loader.exec_module(native)
+        artifacts, source_archive, native_lock = native.build(work, stage / 'native-build')
         shutil.copytree(HERE / 'app', stage / 'app')
         index = stage / 'app/index.html'
         html = index.read_text()
@@ -97,29 +101,32 @@ def prepare(work, out):
         spec = spec_from_file_location('gamecube_runtime_patch', HERE / 'patch-runtime.py')
         patch = module_from_spec(spec)
         spec.loader.exec_module(patch)
-        patch.patch_runtime(stage / 'app')
+        patch.patch_runtime(stage / 'app', native_lock['artifacts']['dolphin-core-upstream.wasm'])
         cores = stage / 'app/cores/dolphin'
         cores.mkdir(parents=True)
-        for name in LOCK['artifacts']:
-            shutil.copy2(work / 'cores/dolphin' / name, cores / name)
+        for name in native_lock['artifacts']:
+            shutil.copy2(artifacts / name, cores / name)
         shutil.copy2(work / 'LICENSE', stage / 'app/LICENSE.dolphin')
-        shutil.copy2(archives[0], stage / 'app/gamecube-source.tar.gz')
+        shutil.copy2(source_archive, stage / 'app/gamecube-source.tar.gz')
         shutil.copytree(HERE, stage / 'adapter-source', ignore=shutil.ignore_patterns('__pycache__','node_modules'))
         shutil.copytree(common / 'src', stage / 'adapter-source/sdk/common/src')
         shutil.copy2(common / 'LICENSE', stage / 'adapter-source/sdk/common/LICENSE')
         shutil.copy2(HERE.parent / 'retro-azahar/app/src/emulator/lazyrom.js', stage / 'adapter-source/app/lazyrom.mjs')
         shutil.copytree(stage / 'adapter-source', stage / 'app/adapter-source')
         (stage / 'app/core-info.json').write_text(json.dumps({
-            **LOCK, 'experimental': True, 'binaryOrigin': 'pinned-upstream',
-            'locallySourceBuilt': False,
+            **LOCK, 'experimental': True, 'binaryOrigin': 'cloudrcade-linux-source-build',
+            'locallySourceBuilt': True, 'upstreamArtifacts': LOCK['artifacts'],
+            'artifacts': native_lock['artifacts'], 'nativeBuild': native_lock,
             'saveSdkCommit': COMMON_COMMIT,
             'videoBackend': 'WebGPU-Real', 'streamThresholdBytes': 50_000_000,
             'rangeReaderSha256': hashlib.sha256((stage / 'app/lazyrom.mjs').read_bytes()).hexdigest(),
             'adapterFilesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in sorted((stage / 'app').glob('*.mjs'))},
             'hostPatchSha256': hashlib.sha256((HERE / 'patch-runtime.py').read_bytes()).hexdigest(),
-            'sourceSha256': hashlib.sha256(archives[0].read_bytes()).hexdigest(),
+            'sourceSha256': native.sha(source_archive),
         }, indent=2) + '\n')
+        # Distribute sources and artifacts, not the compiler/cache/build objects.
+        shutil.rmtree(stage / 'native-build')
         # Rename only after all sources and runtime files have been staged.
         stage.rename(out)
     print(f'Prepared experimental GameCube prototype: {out / "app"}')

@@ -22,6 +22,9 @@
  .running #launcher,.running #status { display:none; }
  #gamecube-menu { position:fixed; inset:0; z-index:100; font-family:Quicksand,sans-serif; }
  #gamecube-menu[hidden] { display:none; }
+ #gamecube-failure { position:fixed; inset:0; z-index:101; background:#000; display:grid; place-content:center; padding:24px; text-align:center; }
+ #gamecube-failure[hidden] { display:none; }
+ #gamecube-failure-detail { max-width:560px; overflow-wrap:anywhere; }
  #gamecube-menu-error { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); z-index:100; padding:12px; background:#161616; color:#eee; border:1px solid #e50914; font-size:14px; }
  html.gc-paused-menu { font-size:1vw; }
  @media (pointer:coarse) and (max-width:1366px) {
@@ -59,5 +62,10 @@
 <p id="status" role="status">Core is stopped.</p>
 <canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
 <div id="gamecube-menu" hidden></div>
+<div id="gamecube-failure" hidden role="alert">
+<p>GameCube stopped.</p>
+<p id="gamecube-failure-detail"></p>
+<p><button id="restartGame">Restart game</button><button id="leaveFailedGame">Return to library</button></p>
+</div>
 <script type="module" src="lab.mjs"></script>
 </body></html>

@@ -26,7 +26,7 @@ export class GameCubePerf {
     const speed = (frame.coreTicks - previous.coreTicks) / frame.coreTicksPerSecond / seconds * 100;
     // Ticks measure emulated time, so 30 fps games need no guessed 60 fps target.
     this.element.textContent = `GameCube ${fps.toFixed(1)} core fps  ${Math.round(speed)}% speed\n` +
-      `WebGPU · ${frame.width}×${frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB`;
+      `WebGPU · ${frame.renderWidth || frame.width}×${frame.renderHeight || frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB`;
   }
 }
 

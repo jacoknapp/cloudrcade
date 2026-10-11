@@ -21,6 +21,10 @@ if(embedded) { if(frameElement)frameElement.style.display='block';parent.postMes
 if(props?.rom) { document.body.classList.add('library');get('title').textContent=props.title || 'GameCube'; }
 let statusText='',menuVisible=false,controllerMenuVisible=false;
 function status(text){statusText=text;get('status').textContent=text;}
+function runtimeFailure(error){
+ dispose();exiting=false;pausing=null;status(error.message);get('gamecube-failure-detail').textContent=error.message;
+ get('restartGame').hidden=!selected;get('gamecube-failure').hidden=false;
+}
 function controls(){
  get('initialize').disabled=busy||!!session;
  for(const id of ['disc','url','selectUrl'])get(id).disabled=busy||!!session?.booted;
@@ -63,17 +67,17 @@ async function close({leave=false}={}){
 }
 async function perform(action){
  if(busy||exiting)return;busy=true;
- if(!session){const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation)perf?.sample(frame);}});}
+ if(!session){const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation)perf?.sample(frame);},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
  const owned=session,current=generation;controls();
  try{await action(owned);}
- catch(error){if(current===generation){dispose();status(error.message);}}
+ catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}
  finally{if(current===generation){busy=false;controls();}}
 }
 async function select(load){
  if(busy||session?.booted)return;busy=true;selected=null;
  const current=generation,abort=selectionAbort=new AbortController();controls();
  try{const disc=await load(abort.signal);if(current!==generation||abort.signal.aborted)return;selected=disc;status(`Selected ${disc.name}${disc.remote?' — HTTP range streaming':''}.`);}
- catch(error){if(current===generation)status(error.message);}
+ catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else status(error.message);}}
  finally{if(current===generation){selectionAbort=null;busy=false;controls();}}
 }
 get('initialize').onclick=()=>perform(async owned=>{status('Initializing experimental Dolphin core…');await owned.initialize();if(session===owned)status('Dolphin initialized. Select a disc to boot.');});
@@ -94,6 +98,8 @@ async function boot(){
  });
 }
 get('boot').onclick=boot;
+get('restartGame').onclick=()=>{get('gamecube-failure').hidden=true;void boot();};
+get('leaveFailedGame').onclick=()=>{get('gamecube-failure').hidden=true;void close({leave:true});};
 async function pause(){
  pressed.clear();if(pausing)return pausing;if(!session?.booted||session.paused)return;
  stopFrames();const owned=session;

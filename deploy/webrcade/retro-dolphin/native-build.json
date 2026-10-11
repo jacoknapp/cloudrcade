@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "image": "emscripten/emsdk@sha256:c2ac84c26ee40ae2f2c5a15bd3f9e608d1959e1b37413fa7f08138046a188dc5",
+  "platform": "linux/amd64",
+  "rustToolchain": "nightly-2026-05-10",
+  "sourceDateEpoch": 1789334235,
+  "memoryPages": 24576,
+  "patches": {
+    "0001-release-webgpu-resources.patch": "abb08ed6fffb9c1a633dd3207e5f60bbdc3cf62546c22feab8032ce6285fba69"
+  },
+  "artifacts": {
+    "dolphin-core-upstream.js": "7381fc76a766ad59ab7f4184a5df46771724d5a830fa7c92726e6308306e8c18",
+    "dolphin-core-upstream.wasm": "aa4dfa6098fe5745e3d37816996b5d1b5c3e7e4abe6b3b200061ba3d99a49aff"
+  },
+  "recipeSha256": "94a8bd57156411d475889327f67d087d5d47cf0436b44af8ed237b6c640cac50",
+  "sourceTreeSha256": "b320256838dd138a5f49bc5d8a322aa1b321168753f504505807b98fd0642cd1"
+}
