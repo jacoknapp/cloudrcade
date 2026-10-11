@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>CloudRcade — experimental GameCube</title>
+<style>
+  :root { color-scheme:dark; font:16px system-ui,sans-serif; background:#15151f; color:#eee; }
+  body { max-width:960px; margin:32px auto; padding:0 20px; }
+  h1 { font-size:1.6rem; } p { line-height:1.5; }
+  button,input { font:inherit; margin:6px 8px 6px 0; } button { padding:8px 16px; cursor:pointer; }
+  canvas { width:100%; aspect-ratio:4/3; object-fit:contain; background:#000; display:block; }
+  #status { min-height:1.5em; } #details { overflow-wrap:anywhere; }
+  a { color:#b5a4ff; }
+</style>
+<h1>Experimental GameCube</h1>
+<p>Dolphin prototype. Select a local GameCube ISO or GCM to try it. Compatibility and performance are unverified.</p>
+<p>Sound and saves are disabled in this prototype. Closing it discards progress.</p>
+<button id="initialize">Initialize core</button>
+<label>Disc <input id="disc" type="file" accept=".iso,.gcm"></label>
+<label>or URL <input id="url" type="url" placeholder="https://…/game.iso"></label>
+<button id="selectUrl">Select URL</button>
+<button id="boot" disabled>Boot disc</button>
+<button id="pause" disabled>Pause</button>
+<button id="close" disabled>Close session</button>
+<p>Requires WebGPU and the device’s GPU. Games over 50 MB stream with a 16 MiB disk cache.</p>
+<p id="status" role="status">Core is stopped.</p>
+<canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
+<p>Keyboard: X/Z/V/B = A/B/X/Y; Q/E/C = L/R/Z; Enter = Start; arrows = D-pad; WASD = stick; IJKL = C-stick. Standard gamepads are supported.</p>
+<p id="details"></p>
+<p><a href="LICENSE.dolphin">Dolphin license</a> · <a href="gamecube-source.tar.gz">Pinned Dolphin corresponding source</a></p>
+<script type="module" src="lab.mjs"></script>
+</html>

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/dougchansan/wasm-dolphin.git",
+  "commit": "7e38409ace3dda709c178312ff63fd92a3653cc7",
+  "dolphinCommit": "e22551eae1c84a7e4d0b6a5c519ef4ed4ef69df1",
+  "artifacts": {
+    "dolphin-core-upstream.js": "7c78f3fc2207daab059af3b15c230c23d11205584cf1dfe89c65f66996e18b99",
+    "dolphin-core-upstream.wasm": "d7395b3a94080f5b7d08a0522f59096007419d117b7b0eb868246429adee6f5c"
+  }
+}

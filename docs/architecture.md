@@ -61,6 +61,9 @@ corresponding source archive. PSP is available by default with no player
 or Docker enable flag. The `beta/psp-core` branch publishes
 the separate `beta-psp-core` image tag; only master updates `latest`.
 Internal JavaScript and WASM interface names use a generic `Wrcad` namespace.
+Experimental GameCube development starts with the isolated
+[Dolphin prototype](../deploy/webrcade/retro-dolphin/README.md). It is not yet
+registered in the library or bundled into the release image.
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 
