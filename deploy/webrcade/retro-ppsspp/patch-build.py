@@ -17,6 +17,12 @@ replace(work/'ppsspp/libretro/libretro.cpp', '"elf|iso|cso|prx|pbp|chd"', '"elf|
 replace(work/'ppsspp/Core/FileSystems/BlockDevices.cpp',
         '\t\tdevice = new CHDFileBlockDevice(fileLoader);',
         '#ifndef __EMSCRIPTEN__\n\t\tdevice = new CHDFileBlockDevice(fileLoader);\n#endif')
+# Browser workers cannot be created synchronously while the renderer waits for
+# video decoding. Keep FFmpeg decoding within the existing PSP worker instead
+# of opening another pool at the first movie frame.
+replace(work/'ppsspp/Core/HW/MediaEngine.cpp',
+        '\t\tav_dict_set(&opt, "threads", "0", 0);',
+        '\t\tav_dict_set(&opt, "threads", "1", 0);')
 replace(work/'RetroArch/Makefile.emulatorjs', 'EXPORTS := Browser,', 'EXPORTS := PThread,RWA,Browser,')
 replace(work/'RetroArch/Makefile.emulatorjs', '-s ERROR_ON_UNDEFINED_SYMBOLS=0', '-s ERROR_ON_UNDEFINED_SYMBOLS=1')
 # Reuse gesture-created audio and handle a rejected resume on mobile browsers.

@@ -27,6 +27,10 @@ core, terminating workers, clearing streamed chunks and closing audio.
 
 `build.sh` builds PPSSPP, FFmpeg, RetroArch and the native React wrapper from
 pinned sources. It reuses the existing 3DS range reader and Safari save codec.
+The PSP build preloads sixteen workers before starting the core, leaving ready
+workers for savedata operations. FFmpeg movie decoding uses one thread. This
+avoids waiting for new worker initialization while the renderer synchronously
+waits for emulation. These settings apply only to the PSP build.
 Run from the repository root:
 
 ```sh
@@ -48,7 +52,10 @@ Validation uses `tests/test_webrcade_psp.cjs` for adapter boundaries,
 `tests/browser_webrcade_psp.cjs` for the compiled core's lifecycle.
 `tests/browser_webrcade_psp_launch.cjs` verifies the mobile library's category,
 game details and Play flow in Chromium and WebKit, including the canonical
-`retro-ppsspp` core registration. Both launch tests require `PSP_TEST_ROM`
+`retro-ppsspp` core registration, centered picture in clipped game frames,
+advancing frames through rotation, and pause/resume. The PSP layout fixture
+also verifies visual viewport offsets, saved controls and other console layouts.
+Both launch tests require `PSP_TEST_ROM`
 pointing at an open-source homebrew demo or an
 operator-owned game on a disposable instance. The pinned upstream
 `pspautotests/demos/sprite.pbp` works as a homebrew fixture. Browser tests

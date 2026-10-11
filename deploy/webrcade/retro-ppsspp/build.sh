@@ -46,8 +46,11 @@ run -e JOBS="$JOBS" -v "$WORK/ppsspp:/src" -w /src/libretro "$EMSDK" bash -c \
 mkdir -p "$WORK/RetroArch/ffmpeg"
 cp "$WORK/ppsspp/ffmpeg/linux/wasm32/lib/"*.a "$WORK/RetroArch/ffmpeg/"
 cp "$WORK/ppsspp/libretro/ppsspp_libretro_emscripten.bc" "$WORK/RetroArch/libretro_emscripten.bc"
+# Leave ready workers for transient savedata operations as well as the core's
+# permanent threads. Starting a new browser worker while the renderer waits
+# for the emulation thread can deadlock the save dialog's synchronous join.
 run -e JOBS="$JOBS" -v "$WORK/RetroArch:/src" -w /src "$EMSDK" bash -c \
-  'emmake make -f Makefile.emulatorjs HAVE_7ZIP=1 HAVE_CHD=1 HAVE_THREADS=1 PTHREAD_POOL_SIZE=4 ASYNC=1 HAVE_OPENGLES3=1 STACK_SIZE=8388608 INITIAL_HEAP=268435456 HAVE_AL=0 HAVE_RWEBAUDIO=1 TARGET=ppsspp_libretro.js -j"$JOBS"' \
+  'emmake make -f Makefile.emulatorjs HAVE_7ZIP=1 HAVE_CHD=1 HAVE_THREADS=1 PTHREAD_POOL_SIZE=16 ASYNC=1 HAVE_OPENGLES3=1 STACK_SIZE=8388608 INITIAL_HEAP=268435456 HAVE_AL=0 HAVE_RWEBAUDIO=1 TARGET=ppsspp_libretro.js -j"$JOBS"' \
   > "$WORK/retroarch-build.log" 2>&1
 
 APP="$WORK/webrcade-app-retro-ppsspp"
@@ -56,8 +59,8 @@ rm -rf "${APP:?}/src" "${APP:?}/public"
 cp -r "$HERE/app/src" "$HERE/app/public" "$APP/"
 # Share the existing, tested bounded HTTP range reader without another copy.
 cp "$HERE/../retro-azahar/app/src/emulator/lazyrom.js" "$APP/src/emulator/"
-mkdir -p "$APP/public/js/experimental-v1" "$APP/public/assets"
-cp "$WORK/RetroArch/ppsspp_libretro.js" "$WORK/RetroArch/ppsspp_libretro.wasm" "$APP/public/js/experimental-v1/"
+mkdir -p "$APP/public/js/experimental-v2" "$APP/public/assets"
+cp "$WORK/RetroArch/ppsspp_libretro.js" "$WORK/RetroArch/ppsspp_libretro.wasm" "$APP/public/js/experimental-v2/"
 python3 "$HERE/package-assets.py" "$WORK/ppsspp/assets" "$APP/public/assets"
 sed -i 's#@webrcade/app-retro-melonds#@webrcade/app-retro-ppsspp#' "$APP/package.json"
 run -e CI=false -v "$WORK:/w" -w /w node:16 bash -c \

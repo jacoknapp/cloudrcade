@@ -356,6 +356,28 @@
     return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
   }
   let controllerBounds = visibleViewport();
+  function alignPSPScreen(emulator) {
+    if (system !== 'psp' || !emulator?.started || !emulator.canvas) return;
+    const bounds = visibleViewport(), canvas = emulator.canvas;
+    if (!bounds.width || !bounds.height) return;
+    const screen = emulator.getScreenSize?.();
+    const ratio = screen === emulator.SS_16_9 ? 16 / 9 : emulator.getDefaultAspectRatio?.();
+    if (!Number.isFinite(ratio) || ratio <= 0) return;
+    const zoom = Number(emulator.getProps?.().zoomLevel) || 0;
+    const scale = (96 + zoom) / 100;
+    let width = bounds.width * scale, height = bounds.height * scale;
+    if (screen !== emulator.SS_FILL) { width = Math.min(width, height * ratio); height = width / ratio; }
+    const pixels = value => `${Math.round(value * 1000) / 1000}px`;
+    // Only CSS placement changes here. RetroArch owns the WebGL drawing buffer
+    // and observes canvas size itself; resetting it would erase the game image.
+    for (const [name, value] of Object.entries({width: pixels(width), height: pixels(height),
+      'max-width': 'none', 'max-height': 'none',
+      left: pixels(bounds.left + bounds.width / 2), top: pixels(bounds.top + bounds.height / 2)})) {
+      if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')
+        canvas.style.setProperty(name, value, 'important');
+    }
+  }
+  let pspEmulator = null;
   function fitVisibleViewport() {
     controllerBounds = visibleViewport();
     if (system !== 'psp') return;
@@ -578,6 +600,7 @@
   }
   function draw() {
     fitVisibleViewport();
+    if (system === 'psp') alignPSPScreen(window.app?.emulator);
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
@@ -869,6 +892,14 @@
   });
   function attach() {
     const emulator = window.app?.emulator;
+    if (system === 'psp' && emulator?.started && pspEmulator !== emulator) {
+      pspEmulator = emulator;
+      const resize = emulator.updateScreenSize;
+      emulator.updateScreenSize = function(...args) {
+        const result = resize.apply(this, args); alignPSPScreen(this); return result;
+      };
+      emulator.updateScreenSize();
+    }
     if (system === 'nds') {
       if (emulator?.started) {
         if (dsEmulator !== emulator) {

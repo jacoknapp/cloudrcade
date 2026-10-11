@@ -41,12 +41,30 @@ const feed={title:'PSP launch fixture',categories:[{title:'PSP',items:[{
    const props=JSON.parse(decodeURIComponent(Buffer.from(url.searchParams.get('props'),'base64').toString()));
    assert.equal(props.type,'retro-ppsspp','library passes the canonical core key');
    await game.waitForFunction(()=>window.emulator?.mainStarted&&window.Module?._get_current_frame_count()>120,null,{timeout:180000});
+   if(await game.locator('.release-screen-content').isVisible())await game.locator('.release-screen-content').tap();
+   await game.waitForFunction(()=>emulator.loopResumed);
+   for(const viewport of [{width:390,height:844},{width:844,height:390},{width:390,height:844}]){
+    const before=await game.evaluate(()=>Module._get_current_frame_count());
+    await page.setViewportSize(viewport);
+    await page.locator('#webrcade-app-iframe').evaluate((frame,height)=>
+      frame.style.setProperty('height',height+'px','important'),viewport.height+60);
+    await game.waitForFunction(n=>Module._get_current_frame_count()>n+30,before,{timeout:30000});
+    const picture=await game.locator('#canvas').boundingBox();
+    assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5 &&
+      Math.abs(picture.y+picture.height/2-viewport.height/2)<.5,'PSP picture centered in visible host');
+    assert(Math.abs(picture.width/picture.height-480/272)<.005,'native PSP aspect ratio retained');
+   }
+   const beforePause=await game.evaluate(()=>{emulator.pause(true);return Module._get_current_frame_count();});
+   await page.waitForTimeout(250);
+   assert.equal(await game.evaluate(()=>Module._get_current_frame_count()),beforePause,'native pause stops frames');
+   await game.evaluate(()=>emulator.pause(false));
+   await game.waitForFunction(n=>Module._get_current_frame_count()>n+30,beforePause,{timeout:30000});
    assert(!(await game.locator('body').innerText()).includes('Whoops, something went wrong'));
    assert.equal(errors.length,0,errors.join('\n'));
    await page.screenshot({path:'/tmp/cloudrcade-psp-library-launch-'+engine.name()+'.png'});
    await game.evaluate(async()=>{emulator.pause(true);await app.onPreExit();});
    assert.equal(await game.evaluate(()=>Module.PThread.runningWorkers.length+Module.PThread.unusedWorkers.length),0);
-   console.log('PASS',engine.name(),'native mobile PSP category/details/Play, canonical type, real frames and cleanup');
+   console.log('PASS',engine.name(),'native mobile PSP Play, centered picture in oversized frames, advancing frames through rotation/pause/resume and cleanup');
   }finally{await browser.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});

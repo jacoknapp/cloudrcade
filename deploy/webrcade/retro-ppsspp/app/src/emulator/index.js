@@ -6,7 +6,7 @@ const HOME = '/home/web_user';
 const SAVES = HOME + '/retroarch/userdata/saves';
 const USER = SAVES + '/PSP';
 const STATE = HOME + '/retroarch/userdata/states/game.state';
-const CORE_BASE = 'js/experimental-v1/';
+const CORE_BASE = 'js/experimental-v2/';
 const SAVE_ROOTS = ['SAVEDATA'];
 // Standard gamepad positions: cross, square, circle, triangle.
 const BUTTONS = [['INP_A', 0], ['INP_X', 1], ['INP_SELECT', 2], ['INP_START', 3],

@@ -22,13 +22,26 @@ const asset = name => fs.readFileSync(path.join(__dirname,
           .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px')});
         await target.addStyleTag({content: 'html,body {margin:0;background:black}'});
         await target.evaluate(() => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 480; canvas.height = 272;
+          canvas.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)';
+          document.body.append(canvas);
           const controller = {isControlDown: () => false, isPadButtonDown: () => false,
             getAxisValue: () => 0, isAxisLeft: () => false, isAxisRight: () => false,
             isAxisUp: () => false, isAxisDown: () => false};
           window.app = {isShowOverlay: () => false, isPauseScreen: () => false,
-            emulator: {started: true, paused: false, controllers: {getController: () => controller},
+            emulator: {canvas, started: true, paused: false, screenSize: 0,
+              SS_16_9: 2, SS_FILL: 3, getScreenSize() {return this.screenSize;},
+              getDefaultAspectRatio: () => 480 / 272, getProps: () => ({}),
+              getScreenLayout: () => 2,
+              controllers: {getController: () => controller},
               getPrefs() {return {getScreenLayout: () => 0};},
-              updateScreenSize() {}, pause(value) {this.paused = value; return true;}}};
+              updateScreenSize() {
+                for (const [name, value] of Object.entries({width:'96vw',height:'96vh',
+                  'max-width':`calc(96vh * ${480 / 272})`,'max-height':`calc(96vw * ${272 / 480})`}))
+                  canvas.style.setProperty(name, value, 'important');
+              }, pause(value) {this.paused = value; return true;}}};
+          app.emulator.updateScreenSize();
         });
         await target.addScriptTag({content: asset('controller.js')});
         await target.locator('.kt-pad').waitFor({state: 'visible'});
@@ -106,10 +119,24 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       const game = await (await page.locator('iframe').elementHandle()).contentFrame();
       await game.waitForURL('http://controller.test/play/app/retro-ppsspp/');
       await game.waitForLoadState(); await install(game);
+      const checkPicture = async (width, height, left = 0, top = 0) => {
+        const picture = await game.evaluate(() => {
+          const canvas = app.emulator.canvas, r = canvas.getBoundingClientRect();
+          return {x:r.x,y:r.y,width:r.width,height:r.height,buffer:[canvas.width,canvas.height]};
+        });
+        assert(Math.abs(picture.x + picture.width / 2 - left - width / 2)<.5 &&
+          Math.abs(picture.y + picture.height / 2 - top - height / 2)<.5,
+          'PSP picture centered in visible host: '+JSON.stringify(picture));
+        assert(Math.abs(picture.width / picture.height - 480 / 272)<.005, 'PSP aspect ratio retained');
+        assert(picture.width<=width && picture.height<=height, 'PSP picture fits the visible host');
+        assert.deepEqual(picture.buffer,[480,272], 'placement leaves drawing buffer to the core');
+      };
+      await checkPicture(390,844);
       for (const installed of [false, true]) {
         await game.evaluate(value => document.documentElement.toggleAttribute('data-cr-installed', value), installed);
         for (const viewport of [{width:390,height:844}, {width:390,height:744}]) {
           await page.setViewportSize(viewport); await page.waitForTimeout(250);
+          await checkPicture(viewport.width,viewport.height);
           for (const button of ['button-12','button-13','menu']) {
             const r = await game.locator(`[data-layout-id="${button}"]`).boundingBox();
             const bottomGap = viewport.height-r.y-r.height;
@@ -129,6 +156,29 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await page.waitForTimeout(250);
       const start = await game.locator('[data-cid="13"]').boundingBox();
       assert(Math.abs(744-50-start.y-start.height-22)<.5, 'Start stays above visual viewport bottom');
+      await checkPicture(390,694);
+      // Visual viewport offsets may change without a child window resize.
+      await page.evaluate(() => Object.assign(visualViewport,{offsetLeft:10,offsetTop:20,width:370,height:650}));
+      await page.waitForTimeout(250); await checkPicture(370,650,10,20);
+      const stable = await game.evaluate(() => new Promise(resolve => {
+        let changes=0;
+        const observer=new MutationObserver(records=>changes+=records.length);
+        observer.observe(app.emulator.canvas,{attributes:true,attributeFilter:['style','width','height']});
+        setTimeout(()=>{observer.disconnect();resolve(changes);},500);
+      }));
+      assert.equal(stable,0,'steady placement does not repeatedly resize or rewrite the canvas');
+      // A native resize/settings update must not put the picture back in the
+      // oversized iframe, even while the controller is hidden by a pause menu.
+      await game.evaluate(() => {app.emulator.paused=true; app.emulator.updateScreenSize();});
+      await page.waitForTimeout(250); await checkPicture(370,650,10,20);
+      await game.evaluate(() => {app.emulator.paused=false;});
+      await page.evaluate(() => Object.assign(visualViewport,{offsetLeft:0,offsetTop:0,width:390,height:744}));
+      await game.evaluate(() => {app.emulator.screenSize=app.emulator.SS_FILL; app.emulator.updateScreenSize();});
+      const fill = await game.locator('canvas').boundingBox();
+      assert(Math.abs(fill.width-390*.96)<.5 && Math.abs(fill.height-744*.96)<.5, 'Fill setting retained');
+      await game.evaluate(() => {app.emulator.screenSize=app.emulator.SS_16_9; app.emulator.updateScreenSize();});
+      const wide = await game.locator('canvas').boundingBox();
+      assert(Math.abs(wide.width/wide.height-16/9)<.005, '16:9 setting retained');
       // Even in the same oversized frame, every other console keeps its legacy
       // CSS viewport. The PSP repair must not reposition another platform.
       await page.setViewportSize({width:390,height:844});
