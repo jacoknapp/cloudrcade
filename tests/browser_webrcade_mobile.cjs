@@ -15,7 +15,7 @@ const origin = process.env.WEBRCADE_TEST_ORIGIN || 'https://arcade.example.test'
 const port = process.env.WEBRCADE_TEST_PORT || '18477';
 const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.browseScreenRef)return n.stateNode;return find(n.child)||find(n.sibling)}return find(document.getElementById('root')._reactRootContainer._internalRoot.current)};
 (async () => {
- const browser = safari ? await webkit.launch({executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH}) : await chromium.launch({args:['--no-sandbox','--ignore-certificate-errors','--use-angle=swiftshader','--enable-unsafe-swiftshader',
+ const browser = safari ? await webkit.launch({executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH}) : await chromium.launch({executablePath:process.env.CHROME,args:['--no-sandbox','--ignore-certificate-errors','--use-angle=swiftshader','--enable-unsafe-swiftshader',
   '--host-resolver-rules=MAP '+new URL(origin).hostname+':443 127.0.0.1:'+port]});
  try {
   const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,ignoreHTTPSErrors:true,serviceWorkers:'block',...(safari?{userAgent:devices['iPhone 13'].userAgent}:{permissions:['screen-wake-lock']})});
@@ -112,7 +112,7 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   async function fits(width,height,name){
    await page.setViewportSize({width,height});await page.waitForTimeout(150);
    const bounds=await page.locator('.cr-mobile-library .webrcade-outer').boundingBox();
-   assert(Math.abs(bounds.width-width)<2 && Math.abs(bounds.height-height)<2, 'mobile fills available viewport: '+JSON.stringify(bounds));
+   assert(Math.abs(bounds.width-width)<2 && Math.abs(bounds.height-height)<2, 'mobile fills available viewport: '+JSON.stringify({bounds,expected:{width,height},viewport:await page.evaluate(()=>({width:innerWidth,height:innerHeight,visual:{width:visualViewport?.width,height:visualViewport?.height,scale:visualViewport?.scale},measured:document.documentElement.style.cssText}))}));
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no horizontal page overflow');
    await capture(name);
   }
