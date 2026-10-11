@@ -61,4 +61,39 @@
   };
   coverViewport();
   new MutationObserver(coverViewport).observe(viewport, {attributes: true, attributeFilter: ['content']});
+  // Large viewport units can exceed the visible installed-app window. Size the
+  // library's native game frame from the actual phone viewport instead, so all
+  // cores receive the correct innerHeight and their own resize logic still owns
+  // the canvas. CSS viewport units remain the startup/non-touch fallback.
+  const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+  if (touch) {
+    const root = document.documentElement;
+    let pending = false;
+    const measureViewport = () => {
+      pending = false;
+      const visual = window.visualViewport;
+      // A pinch changes the visual size without changing the layout viewport.
+      // Feeding that size into the layout would fight the user's zoom gesture.
+      const unzoomed = !visual || !visual.scale || Math.abs(visual.scale - 1) < .01;
+      const left = unzoomed ? Math.max(0, visual?.offsetLeft || 0) : 0;
+      const top = unzoomed ? Math.max(0, visual?.offsetTop || 0) : 0;
+      const width = Math.max(0, Math.min(innerWidth - left, unzoomed ? visual?.width || innerWidth : innerWidth));
+      const height = Math.max(0, Math.min(innerHeight - top, unzoomed ? visual?.height || innerHeight : innerHeight));
+      if (!width || !height) return; // Hidden frames are measured when shown.
+      for (const [name, value] of Object.entries({left, top, width, height})) {
+        const pixels = `${Math.round(value * 1000) / 1000}px`;
+        if (root.style.getPropertyValue(`--cr-viewport-${name}`) !== pixels)
+          root.style.setProperty(`--cr-viewport-${name}`, pixels);
+      }
+    };
+    const scheduleViewport = () => {
+      // Measurement must also run while the library/game isn't animating.
+      if (!pending) { pending = true; setTimeout(measureViewport, 0); }
+    };
+    measureViewport();
+    for (const event of ['resize', 'pageshow', 'orientationchange']) window.addEventListener(event, scheduleViewport);
+    document.addEventListener('fullscreenchange', scheduleViewport);
+    window.visualViewport?.addEventListener('resize', scheduleViewport);
+    window.visualViewport?.addEventListener('scroll', scheduleViewport);
+  }
 })();

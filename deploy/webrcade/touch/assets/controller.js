@@ -334,11 +334,11 @@
   // Keep saved normalized coordinates in the existing game-frame dimensions.
   function visibleViewport() {
     let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
-    if (system !== 'psp') return {left, top, right, bottom, width: right, height: bottom};
     let view = window, offsetX = 0, offsetY = 0;
     try {
       while (view) {
-        const visual = view.visualViewport;
+        const candidate = view.visualViewport;
+        const visual = !candidate?.scale || Math.abs(candidate.scale - 1) < .01 ? candidate : null;
         const x = visual?.offsetLeft || 0, y = visual?.offsetTop || 0;
         left = Math.max(left, x - offsetX);
         top = Math.max(top, y - offsetY);
@@ -393,7 +393,6 @@
   let pspEmulator = null;
   function fitVisibleViewport() {
     controllerBounds = visibleViewport();
-    if (system !== 'psp') return;
     Object.assign(host.style, {left: `${controllerBounds.left}px`, top: `${controllerBounds.top}px`,
       width: `${controllerBounds.width}px`, height: `${controllerBounds.height}px`, right: 'auto', bottom: 'auto'});
   }
@@ -871,7 +870,7 @@
   function resizeLayout() { clear(); layoutStamp = ''; draw(); }
   window.addEventListener('resize', resizeLayout);
   window.visualViewport?.addEventListener('resize', resizeLayout);
-  if (system === 'psp') window.visualViewport?.addEventListener('scroll', resizeLayout);
+  window.visualViewport?.addEventListener('scroll', resizeLayout);
   document.addEventListener('visibilitychange', clear);
   function refreshPreferences() {
     if (editing) return; // Keep unsaved drags intact until Save or Cancel.

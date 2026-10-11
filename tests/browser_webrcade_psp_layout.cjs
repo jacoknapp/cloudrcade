@@ -200,8 +200,8 @@ const asset = name => fs.readFileSync(path.join(__dirname,
       await game.locator('.kt-close').click();
       await game.evaluate(() => {app.emulator.screenSize=0; app.emulator.updateScreenSize();});
       await checkPicture(390,744);
-      // Even in the same oversized frame, every other console keeps its legacy
-      // CSS viewport. The PSP repair must not reposition another platform.
+      // Shared visible bounds also keep other platforms' controls on screen;
+      // their platform-specific spacing and input remain independent of PSP.
       await page.setViewportSize({width:390,height:844});
       for (const core of ['nes','snes','gb','gbc','gba','n64','nds','3ds','genesis','psx']) {
         await game.goto(`http://controller.test/play/app/${core}/`);
@@ -210,12 +210,12 @@ const asset = name => fs.readFileSync(path.join(__dirname,
         const host = await game.locator('#wrcad-touch').evaluate(element => ({
           overrides: ['left','top','width','height','right','bottom'].map(key => element.style[key]),
           height: element.getBoundingClientRect().height, psp: element.classList.contains('kt-psp')}));
-        assert.deepEqual(host.overrides, ['','','','','',''], `${core}: no PSP viewport override`);
-        assert.equal(host.height, 904, `${core}: existing installed CSS viewport retained`);
+        assert.deepEqual(host.overrides, ['0px','0px','390px','744px','auto','auto'], `${core}: shared visible viewport`);
+        assert.equal(host.height, 744, `${core}: controls fit the parent visual viewport`);
         assert.equal(host.psp, false, `${core}: PSP spacing is not applied`);
       }
       console.log('PASS', engine.name(), 'PSP defaults, rotation, independent input, saved layout and fully visible Start/Select in oversized frames/browser chrome');
-      console.log('PASS', engine.name(), 'all 10 other console layouts retain their existing viewport behavior');
+      console.log('PASS', engine.name(), 'all 10 other consoles fit the visible viewport without PSP-specific spacing');
     } finally {await browser.close();}
   }
 })().catch(error => {console.error(error); process.exitCode = 1;});

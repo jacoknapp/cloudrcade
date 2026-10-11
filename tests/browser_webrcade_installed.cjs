@@ -19,7 +19,7 @@ const findBrowse = () => {
 (async () => {
   for (const engine of [chromium, webkit]) {
     const browser = await engine.launch({headless:true, ...(engine === chromium ?
-      {args:['--no-sandbox','--ignore-certificate-errors',
+      {executablePath:process.env.CHROME,args:['--no-sandbox','--ignore-certificate-errors',
         '--host-resolver-rules=MAP '+new URL(origin).hostname+':443 127.0.0.1:'+port]} :
       {executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
     try {
