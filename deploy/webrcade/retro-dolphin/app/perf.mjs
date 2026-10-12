@@ -4,10 +4,25 @@ export const PERF_KEY = 'wrcad.gamecube.perf.v1';
 export function perfEnabled(storage) {
   try { return (storage || globalThis.localStorage).getItem(PERF_KEY) !== '0'; } catch { return true; }
 }
+function heapDetails(heap) {
+  if (!heap) return [];
+  const mib = bytes => (bytes/1048576).toFixed(1);
+  return [
+    `Native malloc: ${mib(heap.inUseBytes)} MiB in use · ${mib(heap.reusableBytes)} MiB reusable (sampled while paused)`,
+    `Heap extent: ${mib(heap.extentBytes)}/${mib(heap.reservedBytes)} MiB (includes static/allocator space)`,
+    `Heap inspection: ${heap.queryMs.toFixed(1)} ms while paused; no allocator scan during gameplay`
+  ];
+}
 
 export class GameCubePerf {
   constructor(element) { this.element = element; this.previous = null; this.paused = false; this.details='Waiting for a performance sample.';this.lastFrame=null;this.targetFps=null; }
   setGameId(id) { this.targetFps = ({GMSE01:30,GMSJ01:30,GMSP01:25})[id] ?? null; }
+  setHeapSample(heap) {
+    const lines=this.details.split('\n').filter(line=>!/^Native malloc:|^Heap extent:|^Heap inspection:/.test(line));
+    const index=lines.findIndex(line=>line.startsWith('Core allocation:'));
+    lines.splice(index<0?lines.length:index,0,...heapDetails(heap));
+    this.details=lines.join('\n');
+  }
   reset(paused = false) {
     this.previous = null; this.paused = paused;
     this.element.textContent = paused ? 'GameCube paused' : 'GameCube measuring…';
@@ -54,8 +69,7 @@ export class GameCubePerf {
       d.stream ? `Disc cache: ${d.stream.cachedChunks}/8 chunks · ${(d.stream.cachedBytes/1048576).toFixed(1)}/16 MiB · ${d.stream.pending} fetching` : '',
       d.stream ? `Reads this sample: ${delta('hits')} ready / ${delta('misses')} waited · ${delta('prefetchHits')} read-ahead hits` : '',
       d.stream ? `Network: ${(delta('bytesFetched')/1048576/seconds).toFixed(2)} MiB/s · ${delta('requests')} requests · ${d.stream.prefetchErrors} speculative errors (lifetime)` : '',
-      d.heap ? `Native malloc: ${number(d.heap.inUseBytes/1048576)} MiB in use · ${number(d.heap.reusableBytes/1048576)} MiB reusable (sampled every 5s)` : '',
-      d.heap ? `Heap extent: ${number(d.heap.extentBytes/1048576)}/${number(d.heap.reservedBytes/1048576)} MiB (includes static/allocator space)` : '',
+      ...heapDetails(d.heap),
       `Core allocation: ${Math.round(frame.heapBytes/1048576)} MiB (browser/GPU memory excluded)`,
       `Window: ${seconds.toFixed(1)} seconds of active play. Captured before pause.`,
       'Disc wait and replay JS can overlap CPU work. They are not additive CPU/GPU percentages.'

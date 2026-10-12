@@ -111,7 +111,8 @@ async function pause(){
  pressed.clear();if(pausing)return pausing;if(!session?.booted||session.paused)return;
  stopFrames();const owned=session;
  pausing=(async()=>{
-  try{await owned.pause();perf?.reset(true);await audio?.setMuted(true);await audio?.context?.suspend();await saves?.cards(owned.adapter);}
+  try{await owned.pause();perf?.reset(true);await audio?.setMuted(true);await audio?.context?.suspend();await saves?.cards(owned.adapter);
+   if(session===owned&&!owned.closed){const {heap}=await owned.adapter.request('heapStats');if(session===owned&&!owned.closed)perf?.setHeapSample(heap);}}
   catch(error){status(error.message);throw error;}
   finally{pausing=null;controls();}
  })();return pausing;

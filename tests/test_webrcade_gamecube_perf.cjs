@@ -34,6 +34,12 @@ const path = require('node:path');
   const measured=frame(22000,70,972000100,1);measured.gamecubeDiagnostics={render:measured.gamecubeDiagnostics.render,stream:{waitMs:120,waitMaxMs:75,cachedChunks:8,cachedBytes:16*1024**2,pending:2,hits:4,misses:2,prefetchHits:3,bytesFetched:4*1024**2,requests:2,prefetchErrors:0},replay:{totalMs:80,maxMs:12},backlog:100,jit:'on',compiled:12};
   perf.sample(measured);assert.match(perf.details,/Disc cache: 8\/8 chunks/);assert.match(perf.details,/3 read-ahead hits/);
   const details=perf.details;perf.reset(true);assert.equal(perf.details,details,'menu retains last active sample');
+  perf.setHeapSample({inUseBytes:512*1048576,reusableBytes:128*1048576,extentBytes:660*1048576,reservedBytes:768*1048576,queryMs:12});
+  assert.match(perf.details,/512.0 MiB in use/);assert.match(perf.details,/sampled while paused/);
+  assert.match(perf.details,/Heap inspection: 12.0 ms while paused/);
+  const heapOnce=perf.details;perf.setHeapSample({inUseBytes:500*1048576,reusableBytes:140*1048576,extentBytes:660*1048576,reservedBytes:768*1048576,queryMs:10});
+  assert.equal((perf.details.match(/Native malloc:/g)||[]).length,1);assert.equal((perf.details.match(/Heap inspection:/g)||[]).length,1);
+  assert(perf.details.includes(details.split('\n')[0]),'fresh pause memory preserves the last active FPS window');
   // Sunshine can have 60 video callbacks and 30 actual rendered frames each
   // second. p95-derived presentationFps must not replace that average.
   const honest=new GameCubePerf({});honest.setGameId('GMSE01');
