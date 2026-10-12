@@ -40,7 +40,7 @@ cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
 thread. Native WebGPU uses packed geometry, mapped uploads and the replay pump;
 heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
 No server GPU dependency exists.
-The native binary reserves1.5GiB of initial WASM memory; small devices may lack
+The native binary reserves1GiB of initial WASM memory; small devices may lack
 sufficient memory. Performance depends on browser, device and game.
 
 The renderer translates generated GX shaders through GLSL, SPIR-V and Naga to
@@ -50,7 +50,10 @@ every GameCube effect translates correctly. The native texture destructor now
 releases its browser GPU texture, and replaced texture bind groups retire after
 the owning render pass publishes. Physical resource destruction follows GPU
 submission. Slow scenes keep guarded JIT acceleration while native frames advance;
-five seconds without progress still trips the JIT fuse. Only the unused legacy
+five seconds without progress still trips the JIT fuse. Byte-identical compiled
+functions with identical helper imports reuse their worker-local handles. The
+instance cache caps at32768; new blocks beyond that budget stay interpreted,
+without deleting or overwriting existing compiled handles. Only the unused legacy
 CPU notification image is reduced; the native GPU render resolution is unchanged.
 Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
 session and offer restart or return to the library.

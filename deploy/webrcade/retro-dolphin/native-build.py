@@ -110,7 +110,7 @@ The adapter host and save SDK source are shipped separately as adapter-source.
     archive = output / 'gamecube-source.tar.gz'
     subprocess.run(['tar', '--sort=name', '--mtime=@' + str(lock['sourceDateEpoch']),
                     '--owner=0', '--group=0', '--numeric-owner', '--exclude=.git',
-                    '--exclude=target', '-czf', str(archive), '-C', str(source),
+                    '--exclude=target', '--exclude=__pycache__', '-czf', str(archive), '-C', str(source),
                     'LICENSE', 'README.md', 'package.json', 'vendor/dolphin',
                     'core/upstream', 'patches/dolphin-wasm', 'provenance', 'tools',
                     'cloudrcade-native'], check=True)

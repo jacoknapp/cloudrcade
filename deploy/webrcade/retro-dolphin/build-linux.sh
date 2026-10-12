@@ -33,7 +33,7 @@ for opt in ENABLE_QT ENABLE_NOGUI ENABLE_CLI_TOOL ENABLE_HEADLESS ENABLE_ALSA EN
 emcmake cmake -S /work/vendor/dolphin -B /work/build/linux-native -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON -DDOLPHIN_WC_REVISION=e22551eae1c84a7e4d0b6a5c519ef4ed4ef69df1 -DDOLPHIN_WC_DESCRIBE=e22551eae1 -DDOLPHIN_WC_BRANCH=HEAD -DUSE_SYSTEM_LIBS=OFF -DENABLE_GENERIC=ON "${opts[@]}" \
  "-DCMAKE_C_FLAGS:STRING=$flags" "-DCMAKE_CXX_FLAGS:STRING=$flags" -DCMAKE_C_FLAGS_DEBUG:STRING='-O0 -fno-lto' -DCMAKE_CXX_FLAGS_DEBUG:STRING='-O0 -fno-lto' \
  -DDOLPHIN_WASM_NAGA_WGSL_LIB=/work/tools/naga-spirv-wgsl/target/wasm32-unknown-emscripten/release/libnaga_spirv_wgsl.a \
- -DDOLPHIN_WASM_JIT_CACHE_PRE_JS=/work/tools/jit-cache-prejs.js -DDOLPHIN_WASM_MEMORY_PAGES=24576 \
+ -DDOLPHIN_WASM_JIT_CACHE_PRE_JS=/work/tools/jit-cache-prejs.js -DDOLPHIN_WASM_MEMORY_PAGES=16384 \
  -DDOLPHIN_WASM_PROJECT_ROOT=/work -DDOLPHIN_WASM_BRIDGE_SOURCE=/work/core/upstream/dolphin_web_discio.cpp \
  -DDOLPHIN_WASM_CORE_SOURCE=/work/core/upstream/dolphin_web_core.cpp -DDOLPHIN_WASM_SHARED_SOURCE_DIR=/work/core/upstream \
  -DDOLPHIN_WASM_OUTPUT_DIR=/work/build/linux-artifacts
