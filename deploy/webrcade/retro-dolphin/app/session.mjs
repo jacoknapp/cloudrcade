@@ -53,6 +53,8 @@ export class GameCubeSession {
     this.booted = false;
     this.booting = false;
     this.paused = false;
+    this.pauseRequested = false;
+    this.transition = Promise.resolve();
     this.lastInput = null;
     this.pollPending = false;
     this.lastPollAt = -Infinity;
@@ -169,22 +171,37 @@ export class GameCubeSession {
     this.adapter.setInputState(state);
   }
   async pause() {
-    if (!this.booted || this.closed || this.paused) return;
+    if (!this.booted || this.closed) return;
+    if (this.pauseRequested) return this.transition;
+    this.pauseRequested = true;
     this.lastInput = null;
     this.adapter.setInputState({mask: 0, stickX: 128, stickY: 128,
       cStickX: 128, cStickY: 128, triggerLeft: 0, triggerRight: 0, analogA: 0, analogB: 0});
     this.paused = true;
-    try { return await this.bounded(this.adapter.request('pause')); }
-    catch (error) { this.dispose(); throw error; }
+    return this.changeState('pause');
   }
   async resume() {
     if (this.booted && !this.closed) {
-      const result = await this.bounded(this.adapter.request('start'));
-      this.paused = false;
-      this.lastPollAt = -Infinity;
-      this.progressAt = null;
-      return result;
+      this.pauseRequested = false;
+      return this.changeState('start');
     }
+  }
+  changeState(type) {
+    const adapter = this.adapter;
+    this.transition = this.transition.then(async () => {
+      if (this.closed || this.adapter !== adapter) return;
+      try {
+        const result = await this.bounded(adapter.request(type));
+        if (this.closed) return;
+        if (type === 'start') {
+          if (!this.pauseRequested) this.paused = false;
+          this.lastPollAt = -Infinity;
+          this.progressAt = null;
+        }
+        return result;
+      } catch (error) { this.dispose(); throw error; }
+    });
+    return this.transition;
   }
   poll() {
     if (!this.booted || this.closed || this.paused || this.pollPending) return;

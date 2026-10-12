@@ -5,6 +5,7 @@ import {GameCubeSaves} from './saves.mjs';
 import {AudioController} from './vendor/src/audio.js';
 import {perfEnabled, createPerfReadout} from './perf.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
+import {createBackgroundPause} from './lifecycle.mjs';
 
 const get=id=>document.getElementById(id);
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
@@ -34,6 +35,10 @@ function controls(){
 }
 function stopFrames(){if(animation!==null)cancelAnimationFrame(animation);animation=null;}
 function startFrames(){if(animation===null)animation=requestAnimationFrame(frame);}
+const backgroundPause=createBackgroundPause({getSession:()=>session,
+ canPause:owned=>!!owned?.booted&&!owned.closed&&!owned.paused&&!menuVisible&&!busy&&!exiting,
+ canResume:owned=>owned===session&&owned.booted&&!owned.closed&&!menuVisible&&!busy&&!exiting,
+ pause, resume, onError:error=>status(error.message)});
 function frame(){
  animation=null;if(!session?.booted||session.paused)return;
  if(menuVisible||controllerMenuVisible){session.poll();animation=requestAnimationFrame(frame);return;}
@@ -43,6 +48,7 @@ function frame(){
  session.setInput(input);session.poll();animation=requestAnimationFrame(frame);
 }
 function dispose(){
+ backgroundPause.reset();
  pauseMenu?.dispose();pauseMenu=null;menuVisible=false;controllerMenuVisible=false;escapeOpen=false;document.documentElement.classList.remove('gc-paused-menu');
  generation++;selectionAbort?.abort();selectionAbort=null;stopFrames();clearInterval(saveTimer);saveTimer=null;
  audio?.setSource(null);audio?.stopPump();audio?.workletNode?.disconnect();audio?.gain?.disconnect();audio?.context?.close().catch(()=>{});audio=null;sound=false;
@@ -71,7 +77,7 @@ async function perform(action){
  const owned=session,current=generation;controls();
  try{await action(owned);}
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}
- finally{if(current===generation){busy=false;controls();}}
+ finally{if(current===generation){busy=false;controls();backgroundPause.update();}}
 }
 async function select(load){
  if(busy||session?.booted)return;busy=true;selected=null;
@@ -112,7 +118,21 @@ async function pause(){
 async function togglePause(){
  await pausing;
  if(!session?.paused)return pause();
- if(sound)await audio?.ensureContext();await session.resume();perf?.reset();if(sound)await audio?.setMuted(false);canvas.focus();startFrames();controls();
+ await resume();
+}
+async function resume(){
+ const owned=session;await pausing;
+ if(!owned?.booted||owned.closed||session!==owned)return;
+ // Safari may suspend or interrupt AudioContext while the installed app is
+ // away. CPU resume does not depend on browser permission to restart audio.
+ await owned.resume();
+ if(session!==owned||owned.closed)return;
+ perf?.reset();startFrames();controls();
+ if(sound)try{await resumeAudio();await audio?.setMuted(false);}catch(error){status(error.message);}
+}
+async function resumeAudio(){
+ await audio?.ensureContext();
+ if(audio?.context?.state==='interrupted')await audio.context.resume();
 }
 async function showPauseMenu(){
  if(menuVisible||busy||exiting||!session?.booted)return;
@@ -126,7 +146,7 @@ async function showPauseMenu(){
 async function resumeFromMenu(){
  if(busy||exiting)return;
  pauseMenu.hide();document.documentElement.classList.remove('gc-paused-menu');menuVisible=false;
- try{await togglePause();}catch(error){status(error.message);menuVisible=true;document.documentElement.classList.add('gc-paused-menu');pauseMenu.show();}
+ try{await resume();canvas.focus();backgroundPause.update();}catch(error){status(error.message);menuVisible=true;document.documentElement.classList.add('gc-paused-menu');pauseMenu.show();}
 }
 async function toggleAudio(){
  if(!audio||!session?.booted)return;
@@ -143,16 +163,21 @@ async function stateAction(load,slot){
   await (load?saves.loadState(owned.adapter,slot):saves.saveState(owned.adapter,slot));
   status(load?'State loaded.':'State saved.');
  }catch(error){status(error.message);throw error;}
- finally{if(session===owned&&!owned.closed){if(!wasPaused){await owned.resume();perf?.reset();if(sound)await audio?.setMuted(false);startFrames();}busy=false;controls();}}
+ finally{if(session===owned&&!owned.closed){if(!wasPaused){await resume();}busy=false;controls();backgroundPause.update();}}
 }
 
 get('backLibrary').onclick=event=>{event.preventDefault();void close({leave:true}).catch(error=>status(error.message));};
 get('close').onclick=()=>{void close({leave:!!props?.rom}).catch(error=>status(error.message));};
 addEventListener('keydown',event=>{if(event.code==='Escape'){if(!event.repeat)escapeOpen=!menuVisible;event.preventDefault();return;}if(menuVisible||!session?.booted||session.paused||event.target?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName))return;if(KEYS[event.code]){pressed.add(KEYS[event.code]);event.preventDefault();}});
 addEventListener('keyup',event=>{if(event.code==='Escape'){if(escapeOpen){escapeOpen=false;void showPauseMenu();}return;}if(KEYS[event.code])pressed.delete(KEYS[event.code]);});
-addEventListener('blur',()=>{void showPauseMenu();});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)void showPauseMenu();});
-addEventListener('pagehide',()=>{dispose();});
+addEventListener('blur',()=>{backgroundPause.background();});
+addEventListener('focus',()=>{if(!document.hidden)backgroundPause.foreground();});
+document.addEventListener('visibilitychange',()=>{document.hidden?backgroundPause.background():backgroundPause.foreground();});
+addEventListener('pagehide',event=>{if(event.persisted)backgroundPause.background();else dispose();});
+addEventListener('pageshow',()=>{if(!document.hidden)backgroundPause.foreground();});
+// A return gesture retries interrupted browser audio without changing an
+// intentional menu pause or requiring a second trip through controller settings.
+addEventListener('pointerdown',()=>{if(sound&&session?.booted&&!session.paused&&!document.hidden)void resumeAudio().catch(error=>status(error.message));});
 addEventListener('message',async event=>{
  if(!embedded||event.source!==parent||event.origin!==location.origin||event.data!=='exit')return;
  try{await close();if(!session)event.source.postMessage('exitComplete',event.origin);}catch(error){status(error.message);}
@@ -186,4 +211,5 @@ window.WrcadGameCube={get ready(){return !!session?.booted&&!session.closed;},ge
 addEventListener('resize',fitCanvas);visualViewport?.addEventListener('resize',fitCanvas);
 fetch('core-info.json').then(r=>r.json()).then(info=>{get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
 controls();
+if(document.hidden)backgroundPause.background();
 if(props?.rom){await select(signal=>remoteDisc(props.rom,{signal}));if(selected)await boot();}

@@ -127,7 +127,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         GameCubeSession.prototype.boot=async function() {
           this.booted=true;window.uiSession=this;
           this.adapter={setInputState(state){uiCalls.inputs.push({...state});},
-            applyFrame(){},async request(type){if(type==='pause')uiCalls.pauses++;if(type==='runFrame')uiCalls.polls++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
+            applyFrame(){},async request(type){if(type==='pause'){uiCalls.pauses++;if(window.delayPause)await new Promise(resolve=>window.releasePause=resolve);}if(type==='runFrame')uiCalls.polls++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
           return {gameId:'TEST01'};
         };
       });
@@ -153,6 +153,36 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       assert.equal(await page.evaluate(()=>uiCalls.polls),pollCount,'pause stops the animation/poll loop');
       await page.evaluate(()=>WrcadGameCube.togglePause()); await page.waitForTimeout(100);
       assert(await page.evaluate(count=>uiCalls.polls>count,pollCount),'resume restarts polling');
+      // Exercise the shipped app's lifecycle handlers, including a return
+      // before the native worker acknowledges its background pause.
+      await page.evaluate(()=>{
+        window.testHidden=true;window.delayPause=true;
+        Object.defineProperty(document,'hidden',{configurable:true,get:()=>testHidden});
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await page.waitForFunction(()=>typeof releasePause==='function');
+      assert.equal(await page.evaluate(()=>app.isPauseScreen()),false,'backgrounding does not open the menu');
+      await page.evaluate(()=>{testHidden=false;document.dispatchEvent(new Event('visibilitychange'));delayPause=false;releasePause();});
+      await page.waitForFunction(()=>!uiSession.paused);
+      const returnedPolls=await page.evaluate(()=>uiCalls.polls);
+      await page.waitForFunction(count=>uiCalls.polls>count,returnedPolls);
+      await page.evaluate(()=>dispatchEvent(new Event('blur')));
+      await page.waitForFunction(()=>uiSession.paused);
+      await page.evaluate(()=>dispatchEvent(new Event('focus')));
+      await page.waitForFunction(()=>!uiSession.paused);
+      await page.evaluate(()=>dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true})));
+      await page.waitForFunction(()=>uiSession.paused);
+      assert.equal(await page.evaluate(()=>WrcadGameCube.ready),true,'persisted page retains the worker');
+      await page.evaluate(()=>dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+      await page.waitForFunction(()=>!uiSession.paused);
+      await page.evaluate(()=>WrcadGameCube.showPauseMenu());
+      await page.getByRole('button',{name:/^Resume/}).waitFor();
+      await page.evaluate(()=>{testHidden=true;document.dispatchEvent(new Event('visibilitychange'));testHidden=false;document.dispatchEvent(new Event('visibilitychange'));dispatchEvent(new Event('focus'));});
+      await page.waitForTimeout(150);
+      assert.equal(await page.evaluate(()=>uiSession.paused&&app.isPauseScreen()),true,'return preserves deliberate menu pause');
+      await page.getByRole('button',{name:/^Resume/}).click();
+      await page.waitForFunction(()=>!uiSession.paused&&!app.isPauseScreen());
+      await page.evaluate(()=>delete document.hidden);
       await page.evaluate(()=>uiSession.fail(new Error('Synthetic WebGPU device loss')));
       await page.getByRole('alert').filter({hasText:'Synthetic WebGPU device loss'}).waitFor();
       assert.equal(await page.evaluate(()=>WrcadGameCube.ready),false,'failed worker is stopped');

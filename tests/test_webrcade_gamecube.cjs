@@ -65,6 +65,16 @@ function fake() {
   await session.pause(); assert.equal(adapter.calls.input.mask,0,'pause releases stuck buttons');
   session.setInput(state); assert.equal(adapter.calls.input.mask,0,'paused input is ignored');
   await session.resume(); assert.equal(adapter.calls.started,2);
+  await session.pause();
+  let acknowledgeStart;
+  const requested=[];
+  adapter.request=async type=>{requested.push(type);if(type==='start')await new Promise(resolve=>acknowledgeStart=resolve);return {};};
+  const returning=session.resume();
+  await new Promise(resolve=>setImmediate(resolve));
+  const manualPause=session.pause();
+  acknowledgeStart();await returning;await manualPause;
+  assert.deepEqual(requested,['start','pause'],'manual pause is sent after an in-flight return');
+  assert.equal(session.paused,true,'late return acknowledgement cannot undo manual pause');
   session.dispose(); session.dispose();
   assert.equal(adapter.calls.terminated,1); assert.equal(adapter.calls.rejected,1);
   assert.equal(session.adapter,null); assert.equal(adapter.frameData,null);

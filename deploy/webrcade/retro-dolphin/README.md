@@ -40,6 +40,13 @@ cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
 thread. Native WebGPU uses packed geometry, mapped uploads and the replay pump;
 heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
 No server GPU dependency exists.
+Compiled PPC callbacks use the native direct dispatch and inline wrapper while
+retaining block accounting, timing, invalidation and halt checks.
+
+Backgrounding suspends GameCube without opening the pause menu. Returning resumes
+only a session paused by the background transition; intentional menu/layout pauses
+stay paused. Worker pause/start commands are serialized, and persisted page
+restores retain the session. CPU resume does not depend on restarting browser audio.
 The native binary reserves1GiB of initial WASM memory; small devices may lack
 sufficient memory. Performance depends on browser, device and game.
 
