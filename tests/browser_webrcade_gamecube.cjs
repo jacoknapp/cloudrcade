@@ -127,6 +127,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         GameCubeSession.prototype.boot=async function() {
           this.booted=true;window.uiSession=this;
           this.adapter={setInputState(state){uiCalls.inputs.push({...state});},
+            setAudioMuted(){},mixAudio(){return {available:false};},
             applyFrame(){},async request(type){if(type==='pause'){uiCalls.pauses++;if(window.delayPause)await new Promise(resolve=>window.releasePause=resolve);}if(type==='runFrame')uiCalls.polls++;return {};},pause(){uiCalls.pauses++;},start(){},rejectAll(){}};
           return {gameId:'TEST01'};
         };
@@ -182,15 +183,18 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       assert.equal(await page.evaluate(()=>uiSession.paused&&app.isPauseScreen()),true,'return preserves deliberate menu pause');
       await page.getByRole('button',{name:/^Resume/}).click();
       await page.waitForFunction(()=>!uiSession.paused&&!app.isPauseScreen());
+      assert.equal(await page.evaluate(()=>WrcadGameCube.sound),true,'audio return test must exercise enabled sound');
       await page.evaluate(async()=>{
         const {AudioController}=await import('./vendor/src/audio.js');
         window.originalEnsureContext=AudioController.prototype.ensureContext;
-        AudioController.prototype.ensureContext=()=>new Promise(()=>{});
+        window.blockedAudioCalls=0;
+        AudioController.prototype.ensureContext=()=>{blockedAudioCalls++;return new Promise(()=>{});};
         testHidden=true;document.dispatchEvent(new Event('visibilitychange'));
       });
       await page.waitForFunction(()=>uiSession.paused);
       await page.evaluate(()=>{testHidden=false;document.dispatchEvent(new Event('visibilitychange'));});
       await page.waitForFunction(()=>!uiSession.paused);
+      await page.waitForFunction(()=>blockedAudioCalls>0);
       await page.evaluate(()=>{testHidden=true;document.dispatchEvent(new Event('visibilitychange'));});
       await page.waitForFunction(()=>uiSession.paused,null,{timeout:3000});
       await page.evaluate(async()=>{
