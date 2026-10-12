@@ -75,6 +75,12 @@ source and rejects differences. The corresponding source includes both patch
 series and the Linux recipe; the modified host and save SDK source ship separately. The
 save SDK uses pinned webRcade common9a7cf19 and locked npm dependencies. Dolphin's
 Apache-licensed replacement GameCube fonts and license ship with the core.
+The shared native heap is fixed at768MiB, with matching generated PPC module
+imports and memory growth disabled. Performance details sample native allocator
+usage and heap extent every5seconds; browser and GPU allocations are separate.
+`stateFormatId` preserves the previous verified save-state namespace when a native
+rebuild leaves Dolphin serialization compatible. Change it when the serialized
+format changes; artifact integrity always uses the current JS/WASM hashes.
 No games, BIOS dumps, keys, accounts or operator settings are packaged.
 The binary is a CloudRcade Linux source build. Broader device/game qualification
 remains a promotion requirement.

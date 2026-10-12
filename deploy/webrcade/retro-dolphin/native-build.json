@@ -4,16 +4,18 @@
   "platform": "linux/amd64",
   "rustToolchain": "nightly-2026-05-10",
   "sourceDateEpoch": 1789334235,
-  "memoryPages": 16384,
+  "memoryPages": 12288,
   "patches": {
     "0001-release-webgpu-resources.patch": "abb08ed6fffb9c1a633dd3207e5f60bbdc3cf62546c22feab8032ce6285fba69",
     "0002-reuse-wasm-instances.patch": "d55859a987c5424bceaa4b1939cb08f7375c1cbec68f1cf938df7b5b3c744d9d",
-    "0003-direct-wasm-dispatch.patch": "61b2b702aeaa2010c754cc619363f2bb91cb0e6eabbd6c26894eebb9b3d66aa0"
+    "0003-direct-wasm-dispatch.patch": "61b2b702aeaa2010c754cc619363f2bb91cb0e6eabbd6c26894eebb9b3d66aa0",
+    "0004-heap-usage.patch": "44e580a5af74ad7ee1450c21b503c0b347188493f554f8df3f63582c0209923f"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0",
-    "dolphin-core-upstream.js": "8aac7ca2a6e9572e27ffba8ba4e9bde9fa94ba8e7cc97b2dbf688034e6183c05"
+    "dolphin-core-upstream.wasm": "807095b89edc0dc0aaf207abb7debe9dc98d327fe99521442898eb4ecb5f6ec0",
+    "dolphin-core-upstream.js": "e26c5119485fcb69d6414c2220fffa0e78f23fef75031b5c2dba3d3d0be1c0be"
   },
-  "recipeSha256": "3c7815ce0973aacaec1f6d78dfbb768284c1867e5adedf206519c59a1cecf3f4",
-  "sourceTreeSha256": "f0b0ea9ea921a7f8e1cc426f27ea0a982048df85bc5158ce9593adfc77dfff4e"
+  "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
+  "sourceTreeSha256": "0c886c97a3a37a43f0af72966eb84b7a0abc653795dc04cf3d4feb8aaf834970",
+  "stateFormatId": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0"
 }

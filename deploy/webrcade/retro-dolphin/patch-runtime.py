@@ -36,6 +36,17 @@ def patch_runtime(app, native_core_sha=None):
       shaders: webGpuObjects.shaders.size, shaderOk: webGpuObjects.shaderOk,
       shaderFail: webGpuObjects.shaderFail,
     },''')
+    replace('    getFrame: cwrap("GetFrame", "number", []),',
+            '    getFrame: cwrap("GetFrame", "number", []),\n'
+            '    getHeapStats: optionalCwrap("GetHeapStats", "number", []),')
+    replace('function framePayload({ forceCausalTelemetry = false } = {}) {',
+            'let gamecubeHeapSample=null;\n'
+            'function gamecubeHeapStats() {\n'
+            '  const now=performance.now();if (gamecubeHeapSample && now-gamecubeHeapSample.capturedAtMs<5000) return gamecubeHeapSample;\n'
+            '  const pointer=api?.getHeapStats?.();if (!pointer) return null;\n'
+            '  const values=new Uint32Array(moduleInstance.HEAPU8.buffer,pointer,4);\n'
+            '  return gamecubeHeapSample={inUseBytes:values[0],reusableBytes:values[1],extentBytes:values[2],reservedBytes:values[3],capturedAtMs:now,queryMs:performance.now()-now};\n'
+            '}\n\nfunction framePayload({ forceCausalTelemetry = false } = {}) {')
     # A complete submitted present is an ordering-safe yield boundary. Leave
     # unread commands in their authoritative ring; never drop GX operations.
     replace('  if (!ring || !renderGpu) return;',
@@ -104,7 +115,7 @@ def patch_runtime(app, native_core_sha=None):
     replace('    frame: api.getFrame(),\n    coreTicks: readCoreTicks(),',
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
-            '    gamecubeDiagnostics: {fpsLimit:60,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '    gamecubeDiagnostics: {fpsLimit:60,heap:gamecubeHeapStats(),replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
             '      resources:{textures:webGpuObjects.textures.size,bindGroups:webGpuObjects.bindGroups.size,shaderOk:webGpuObjects.shaderOk,shaderFail:webGpuObjects.shaderFail},\n'
             '      draws:webGpuExecStats.drawIdx,missingPipelines:webGpuExecStats.missPipe,missingBindings:webGpuExecStats.missBg,skippedDraws:webGpuExecStats.skipDraw},\n'

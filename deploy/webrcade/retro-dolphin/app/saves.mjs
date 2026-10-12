@@ -9,7 +9,7 @@ export class GameCubeSaves {
     this.manager = new sdk.SaveManager({getTitle:()=>this.title,getProps:()=>this.props},this.onError);
     this.gameId=disc.gameId;
     const info=await fetch('./core-info.json').then(r=>r.json());
-    this.statePrefix=`gamecube/${disc.gameId}/states/${info.artifacts['dolphin-core-upstream.wasm']}/`;
+    this.statePrefix=`gamecube/${disc.gameId}/states/${info.stateFormatId || info.artifacts['dolphin-core-upstream.wasm']}/`;
     this.cardPath=`gamecube/${disc.gameId}/cards`;
     const files=await this.manager.load(this.cardPath);
     const cards=(files || []).filter(f=>/\.gci$/i.test(f.name));

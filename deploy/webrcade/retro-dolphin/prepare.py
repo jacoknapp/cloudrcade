@@ -117,6 +117,7 @@ def prepare(work, out):
             **LOCK, 'experimental': True, 'binaryOrigin': 'cloudrcade-linux-source-build',
             'locallySourceBuilt': True, 'upstreamArtifacts': LOCK['artifacts'],
             'artifacts': native_lock['artifacts'], 'nativeBuild': native_lock,
+            'stateFormatId': native_lock.get('stateFormatId', native_lock['artifacts']['dolphin-core-upstream.wasm']),
             'saveSdkCommit': COMMON_COMMIT,
             'videoBackend': 'WebGPU-Real', 'streamThresholdBytes': 50_000_000,
             'rangeReaderSha256': hashlib.sha256((stage / 'app/lazyrom.mjs').read_bytes()).hexdigest(),
