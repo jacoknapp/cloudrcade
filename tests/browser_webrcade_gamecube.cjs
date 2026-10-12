@@ -182,6 +182,23 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
       assert.equal(await page.evaluate(()=>uiSession.paused&&app.isPauseScreen()),true,'return preserves deliberate menu pause');
       await page.getByRole('button',{name:/^Resume/}).click();
       await page.waitForFunction(()=>!uiSession.paused&&!app.isPauseScreen());
+      await page.evaluate(async()=>{
+        const {AudioController}=await import('./vendor/src/audio.js');
+        window.originalEnsureContext=AudioController.prototype.ensureContext;
+        AudioController.prototype.ensureContext=()=>new Promise(()=>{});
+        testHidden=true;document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await page.waitForFunction(()=>uiSession.paused);
+      await page.evaluate(()=>{testHidden=false;document.dispatchEvent(new Event('visibilitychange'));});
+      await page.waitForFunction(()=>!uiSession.paused);
+      await page.evaluate(()=>{testHidden=true;document.dispatchEvent(new Event('visibilitychange'));});
+      await page.waitForFunction(()=>uiSession.paused,null,{timeout:3000});
+      await page.evaluate(async()=>{
+        const {AudioController}=await import('./vendor/src/audio.js');
+        AudioController.prototype.ensureContext=originalEnsureContext;
+        testHidden=false;document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await page.waitForFunction(()=>!uiSession.paused);
       await page.evaluate(()=>delete document.hidden);
       await page.evaluate(()=>uiSession.fail(new Error('Synthetic WebGPU device loss')));
       await page.getByRole('alert').filter({hasText:'Synthetic WebGPU device loss'}).waitFor();

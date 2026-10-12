@@ -128,11 +128,13 @@ async function resume(){
  await owned.resume();
  if(session!==owned||owned.closed)return;
  perf?.reset();startFrames();controls();
- if(sound)try{await resumeAudio();await audio?.setMuted(false);}catch(error){status(error.message);}
+ if(sound)void resumeAudio().then(async()=>{
+  if(session===owned&&!owned.closed&&!owned.paused&&sound)await audio?.setMuted(false);
+ }).catch(error=>{if(session===owned)status(error.message);});
 }
-async function resumeAudio(){
- await audio?.ensureContext();
- if(audio?.context?.state==='interrupted')await audio.context.resume();
+async function resumeAudio(owned=audio){
+ await owned?.ensureContext();
+ if(owned?.context?.state==='interrupted')await owned.context.resume();
 }
 async function showPauseMenu(){
  if(menuVisible||busy||exiting||!session?.booted)return;
