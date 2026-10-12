@@ -42,7 +42,7 @@ const assert=require('node:assert/strict'),{pathToFileURL}=require('node:url'),p
  }});
  await retry.read(req(0));await tick();assert.equal(retry.counters.prefetchErrors,1);
  await retry.read(req(1));assert.equal(attempts,2,'failed speculative read is retried on demand');retry.close();
- const limit=new FrameLimit(60);let count=0;
+ const limit=new FrameLimit(60);limit.presented(0);assert.equal(limit.timerDelay(0),17);assert.equal(limit.timerDelay(16),1);assert.equal(limit.timerDelay(17),0);limit.reset();let count=0;
  for(let ms=0;ms<1000;ms+=.1)if(!limit.remaining(ms)){limit.presented(ms);count++;}
  assert.equal(count,60,'thousands of drain attempts cannot submit over60 frames/s');
  assert(limit.remaining(1000)>0);limit.reset();assert.equal(limit.remaining(1000),0);

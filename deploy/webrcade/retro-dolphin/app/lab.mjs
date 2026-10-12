@@ -96,6 +96,7 @@ async function boot(){
   const metadata=await owned.boot(selected,(adapter,disc)=>saves.initialize(adapter,disc));
   if(session!==owned)return;
   perf=perfEnabled()?createPerfReadout():new GameCubePerf({});
+  perf.setGameId(metadata.gameId);
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();

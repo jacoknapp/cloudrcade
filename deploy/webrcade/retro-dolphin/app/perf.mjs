@@ -6,7 +6,8 @@ export function perfEnabled(storage) {
 }
 
 export class GameCubePerf {
-  constructor(element) { this.element = element; this.previous = null; this.paused = false; this.details='Waiting for a performance sample.';this.lastFrame=null; }
+  constructor(element) { this.element = element; this.previous = null; this.paused = false; this.details='Waiting for a performance sample.';this.lastFrame=null;this.targetFps=null; }
+  setGameId(id) { this.targetFps = ({GMSE01:30,GMSJ01:30,GMSP01:25})[id] ?? null; }
   reset(paused = false) {
     this.previous = null; this.paused = paused;
     this.element.textContent = paused ? 'GameCube paused' : 'GameCube measuring…';
@@ -17,24 +18,31 @@ export class GameCubePerf {
     this.lastFrame=frame;
     const previous = this.previous;
     if (!previous || frame.loadedCheckpointGeneration !== previous.loadedCheckpointGeneration ||
-      frame.frame < previous.frame || frame.coreTicks < previous.coreTicks) {
+      frame.frame < previous.frame || frame.coreTicks < previous.coreTicks ||
+      frame.gamecubeDiagnostics?.render?.epoch !== previous.gamecubeDiagnostics?.render?.epoch ||
+      (frame.gamecubeDiagnostics?.render?.frames ?? 0) < (previous.gamecubeDiagnostics?.render?.frames ?? 0)) {
       this.previous = frame; this.element.textContent = 'GameCube measuring…'; return;
     }
     const seconds = (frame.capturedAtMs - previous.capturedAtMs) / 1000;
     if (seconds < .75) return;
     this.previous = frame;
-    const fps = (frame.frame - previous.frame) / seconds;
+    const callbacks = (frame.frame - previous.frame) / seconds;
     const speed = (frame.coreTicks - previous.coreTicks) / frame.coreTicksPerSecond / seconds * 100;
     const d=frame.gamecubeDiagnostics || {},old=previous.gamecubeDiagnostics || {};
+    const fps = Number.isFinite(d.render?.frames) && Number.isFinite(old.render?.frames)
+      ? (d.render.frames-old.render.frames)/seconds : null;
     const resources=d.resources || frame.gpuResources;
     const delta=(key)=>Math.max(0,(d.stream?.[key]||0)-(old.stream?.[key]||0));
     const number=value=>Number.isFinite(value)?value.toFixed(1):'unavailable';
     const replayMs=d.replay&&old.replay?Math.max(0,d.replay.totalMs-old.replay.totalMs)/seconds:null;
     this.details=[
-      `Core: ${fps.toFixed(1)} frames/s · ${Math.round(speed)}% normal speed`,
-      'Full speed: 100% normal speed. Gameplay FPS depends on the game.',
-      `Presentation: ${number(frame.presentationFps)} frames/s · limit 60`,
-      `Frame gaps: p95 ${number(frame.presentationP95IntervalMs)} ms · window max ${number(frame.presentationMaxIntervalMs)} ms`,
+      `Rendered: ${number(fps)} fps · ${Math.round(speed)}% normal speed`,
+      this.targetFps === null ? 'Target: game-native frame rate · 100% normal speed' : `Target: ${this.targetFps} rendered fps · 100% normal speed`,
+      `Video callbacks: ${callbacks.toFixed(1)}/s (console video timing)`,
+      `Presentation ceiling: ${d.fpsLimit ?? 60}/s`,
+      `Frame gaps: p95 ${number(d.render?.p95Ms)} ms · max ${number(d.render?.maxMs)} ms (last 1s, ${d.render?.samples ?? 0} intervals)`,
+      `Last rendered frame: ${number(d.render?.ageMs)} ms ago`,
+      'Rendered FPS counts successful GPU submissions; pixel uniqueness and GPU completion time are not sampled.',
       `Replay JS: ${number(replayMs)} ms/s · lifetime longest drain ${number(d.replay?.maxMs)} ms`,
       `GPU backlog: ${d.backlog ?? 'unavailable'} commands · status round trip ${number(frame.hostPollMs)} ms`,
       `GPU execution time: unavailable (no GPU timing/readback probes)`,
@@ -53,7 +61,8 @@ export class GameCubePerf {
       'Disc wait and replay JS can overlap CPU work. They are not additive CPU/GPU percentages.'
     ].filter(Boolean).join('\n');
     // Ticks measure emulated time, so 30 fps games need no guessed 60 fps target.
-    this.element.textContent = `GameCube ${fps.toFixed(1)} core fps  ${Math.round(speed)}% speed\n` +
+    this.element.textContent = `GameCube ${number(fps)} rendered fps  ${Math.round(speed)}% speed\n` +
+      (this.targetFps === null ? '' : `Target ${this.targetFps} fps · 100% speed\n`) +
       `WebGPU · ${frame.renderWidth || frame.width}×${frame.renderHeight || frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB`;
   }
 }

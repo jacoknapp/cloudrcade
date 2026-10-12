@@ -22,7 +22,7 @@ const rom=process.env.GAMECUBE_TEST_ROM;if(!rom)throw new Error('GAMECUBE_TEST_R
  await game.waitForFunction(()=>globalThis.__session?.booted,null,{timeout:120000});console.log('LIBRARY PLAY BOOT PASS');
  assert.equal(await game.locator('#launcher').isVisible(),false);assert.equal(await game.locator('#touch').count(),0);assert.equal(await game.locator('#pause').count(),0);
  await game.locator('.kt-pad').waitFor({state:'visible'});
- await game.locator('#gamecube-perf').filter({hasText:/core fps/}).waitFor({timeout:60000});
+ await game.locator('#gamecube-perf').filter({hasText:/rendered fps/}).waitFor({timeout:60000});
  await game.locator('.kt-tab').tap();assert.equal(await game.locator('#kt-drawer .kt-gc-save').count(),0,'controller settings contain no core actions');await game.locator('.kt-close').tap();
  async function menu(){await game.locator('.kt-menu').tap();await game.getByRole('button',{name:/^Resume/}).waitFor();await game.waitForFunction(()=>__session.paused);}
  await menu();await game.locator('#gamecube-perf').filter({hasText:'GameCube paused'}).waitFor();await game.waitForFunction(()=>document.getElementById('wrcad-touch').hidden);assert.equal(await game.locator('.kt-tab').isVisible(),false);
@@ -32,7 +32,7 @@ const rom=process.env.GAMECUBE_TEST_ROM;if(!rom)throw new Error('GAMECUBE_TEST_R
  console.log('STANDARD NATIVE PAUSE MENU AND STOPPED CORE PASS');
  await game.getByRole('button',{name:/^Resume/}).tap();await game.waitForFunction(()=>!__session.paused&&!app.isPauseScreen());
  await game.locator('.kt-pad').waitFor({state:'visible'});
- await game.waitForFunction(()=>Number(document.querySelector('#gamecube-perf')?.textContent.match(/GameCube ([\d.]+) core fps/)?.[1])>0,null,{timeout:60000});
+ await game.waitForFunction(()=>Number(document.querySelector('#gamecube-perf')?.textContent.match(/GameCube ([\d.]+) rendered fps/)?.[1])>0,null,{timeout:60000});
  await game.waitForFunction(()=>__audio.context?.state==='running'&&__audio.activeTransport==='worklet'&&__audio.workletRing?.samples.some(n=>n!==0),null,{timeout:60000});console.log('NONZERO AUDIOWORKLET PCM PASS');
  await menu();await game.getByRole('button',{name:/^Save States/i}).tap();await game.getByText('Save Slot 1',{exact:true}).waitFor();
  await game.getByRole('button').filter({has:game.getByText('Save',{exact:true})}).tap();await game.waitForFunction(()=>WrcadGameCube.status==='State saved.'&&!app.isPauseScreen(),null,{timeout:60000});

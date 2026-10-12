@@ -26,7 +26,9 @@ def patch_runtime(app, native_core_sha=None):
             'import {JitLivenessGuard} from "../../jit-guard.mjs";\n'
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
             'import {FrameLimit} from "../../frame-limit.mjs";\n'
+            'import {RenderStats} from "../../render-stats.mjs";\n'
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
+            'const gamecubeRenderStats = new RenderStats();\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
     replace('    ...rendererDiagnostics,', '''    ...rendererDiagnostics,
@@ -53,9 +55,12 @@ def patch_runtime(app, native_core_sha=None):
             '  if (!ring || !renderGpu) return;\n'
             '  if (gamecubeFrameLimit.remaining(performance.now()) > 0) { gamecubeFrameLimit.delayed++; return; }')
     replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
-            '      Math.max(gamecubeFrameLimit.remaining(performance.now()), write === read || wgpuMappedCapacityBlocked ? 4 : 0)')
+            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked ? 4 : 0)')
     replace('          webGpuExecStats.present++;',
-            '          webGpuExecStats.present++;\n          gamecubeFrameLimit.presented(performance.now());')
+            '          webGpuExecStats.present++;\n'
+            '          const gamecubePresentedAt=performance.now();\n'
+            '          gamecubeFrameLimit.presented(gamecubePresentedAt);\n'
+            '          gamecubeRenderStats.presented(gamecubePresentedAt);')
     replace('    read = (read + 1) >>> 0;\n    if (wgpuReplayBudgetMs > 0) {',
             '    read = (read + 1) >>> 0;\n'
             '    if (webGpuExecStats.present > initialPresentCount) break;\n'
@@ -111,11 +116,11 @@ def patch_runtime(app, native_core_sha=None):
 
 ''' + text[end:]
     replace('function resetPpcWasmJitTiming(invalidateBaseline = false) {',
-            'function resetPpcWasmJitTiming(invalidateBaseline = false) {\n  gamecubeJitGuard.reset();\n  gamecubeFrameLimit.reset();')
+            'function resetPpcWasmJitTiming(invalidateBaseline = false) {\n  gamecubeJitGuard.reset();\n  gamecubeFrameLimit.reset();\n  gamecubeRenderStats.reset();')
     replace('    frame: api.getFrame(),\n    coreTicks: readCoreTicks(),',
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
-            '    gamecubeDiagnostics: {fpsLimit:60,heap:gamecubeHeapStats(),replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '    gamecubeDiagnostics: {fpsLimit:60,render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapStats(),replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
             '      resources:{textures:webGpuObjects.textures.size,bindGroups:webGpuObjects.bindGroups.size,shaderOk:webGpuObjects.shaderOk,shaderFail:webGpuObjects.shaderFail},\n'
             '      draws:webGpuExecStats.drawIdx,missingPipelines:webGpuExecStats.missPipe,missingBindings:webGpuExecStats.missBg,skippedDraws:webGpuExecStats.skipDraw},\n'
