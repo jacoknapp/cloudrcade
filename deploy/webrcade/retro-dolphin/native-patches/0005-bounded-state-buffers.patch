@@ -1,0 +1,31 @@
+--- a/Source/Core/Core/State.cpp
++++ b/Source/Core/Core/State.cpp
+@@ -248,6 +248,11 @@
+   {
+     DEBUG_LOG_FMT(CORE, "SaveToBuffer: Growing buffer from size {} to measured size {}",
+                   buffer.size(), measured_size);
++#ifdef __EMSCRIPTEN__
++    // The measured retry rewrites everything; retain no undersized snapshot
++    // while allocating its replacement in the fixed browser heap.
++    buffer.reset();
++#endif
+     buffer.reset(measured_size);
+     return SaveToBuffer(system, buffer);
+   }
+@@ -330,8 +335,15 @@
+   {
+     const u64 bytes_left_to_compress = raw_buffer.size() - total_bytes_compressed;
+ 
++#ifdef __EMSCRIPTEN__
++    // The existing length-prefixed LZ4 reader accepts independent blocks.
++    // Bound temporary compression storage rather than duplicating the full state.
++    constexpr u64 max_compression_block = 4 * 1024 * 1024;
++#else
++    constexpr u64 max_compression_block = LZ4_MAX_INPUT_SIZE;
++#endif
+     const int bytes_to_compress =
+-        static_cast<int>(std::min(static_cast<u64>(LZ4_MAX_INPUT_SIZE), bytes_left_to_compress));
++        static_cast<int>(std::min(max_compression_block, bytes_left_to_compress));
+     Common::UniqueBuffer<char> compressed_buffer(LZ4_compressBound(bytes_to_compress));
+     const int compressed_len = LZ4_compress_default(
+         reinterpret_cast<const char*>(raw_buffer.data()) + total_bytes_compressed,

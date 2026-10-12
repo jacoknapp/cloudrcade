@@ -78,6 +78,10 @@ Apache-licensed replacement GameCube fonts and license ship with the core.
 The shared native heap is fixed at768MiB, with matching generated PPC module
 imports and memory growth disabled. Performance details sample native allocator
 usage and heap extent every5seconds; browser and GPU allocations are separate.
+WASM state-buffer growth releases the obsolete allocation before replacement;
+LZ4 save compression uses4MiB blocks to bound scratch memory. The existing
+length-prefixed decoder reads these and previous larger blocks, preserving state
+serialization and failed-load recovery.
 `stateFormatId` preserves the previous verified save-state namespace when a native
 rebuild leaves Dolphin serialization compatible. Change it when the serialized
 format changes; artifact integrity always uses the current JS/WASM hashes.
