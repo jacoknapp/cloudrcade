@@ -12,8 +12,12 @@
 <style>
  :root { color-scheme:dark; font:16px system-ui,sans-serif; background:#000; color:#eee; }
  body { max-width:960px; margin:32px auto; padding:0 20px; }
- button,input { font:inherit; margin:6px 8px 6px 0; } button { padding:8px 16px; cursor:pointer; }
+ button,input { font:inherit; } #launcher button,#launcher input { margin:6px 8px 6px 0; }
+ button { padding:8px 16px; cursor:pointer; }
  canvas { width:100%; aspect-ratio:4/3; object-fit:contain; background:#000; display:block; }
+ /* The canvas retains keyboard focus without a browser focus ring over video.
+  * Menu buttons retain their visible keyboard focus indicators. */
+ #screen:focus { outline:none; }
  a { color:#b5a4ff; } #status { min-height:1.5em; overflow-wrap:anywhere; }
  .library #launcher { display:none; }
  .library { max-width:none; margin:0; padding:0; }

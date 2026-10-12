@@ -32,6 +32,7 @@ export class GameCubePerf {
     const replayMs=d.replay&&old.replay?Math.max(0,d.replay.totalMs-old.replay.totalMs)/seconds:null;
     this.details=[
       `Core: ${fps.toFixed(1)} frames/s · ${Math.round(speed)}% normal speed`,
+      'Full speed: 100% normal speed. Gameplay FPS depends on the game.',
       `Presentation: ${number(frame.presentationFps)} frames/s · limit 60`,
       `Frame gaps: p95 ${number(frame.presentationP95IntervalMs)} ms · window max ${number(frame.presentationMaxIntervalMs)} ms`,
       `Replay JS: ${number(replayMs)} ms/s · lifetime longest drain ${number(d.replay?.maxMs)} ms`,

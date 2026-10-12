@@ -5,13 +5,19 @@ const {chromium,webkit}=require('playwright');const fs=require('fs'),path=requir
  try{
   const context=await browser.newContext({hasTouch:true,viewport:{width:390,height:844}});const page=await context.newPage();
   await page.route('http://controller.test/**',r=>r.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'}));await page.goto('http://controller.test/experimental/gamecube/');
+  const gameHtml=fs.readFileSync(path.join(__dirname,'../deploy/webrcade/retro-dolphin/app/index.html'),'utf8');
+  await page.addStyleTag({content:gameHtml.match(/<style>([\s\S]*?)<\/style>/)[1]});
   await page.addStyleTag({content:fs.readFileSync(path.join(__dirname,'../deploy/webrcade/touch/assets/controller.css'),'utf8')});
+  await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.id='screen';canvas.tabIndex=0;document.body.append(canvas);canvas.focus();});
+  assert.equal(await page.locator('#screen').evaluate(e=>getComputedStyle(e).outlineStyle),'none','focused video has no browser frame');
   await page.evaluate(()=>{const controller={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};window.app={pauseScreen:false,menus:0,isShowOverlay:()=>false,isPauseScreen(){return this.pauseScreen;},emulator:{started:true,paused:false,updateScreenSize(){},controllers:{getController:()=>controller},pause(value){this.paused=value;return true;},showPauseMenu(){app.pauseScreen=true;app.menus++;}}};window.WrcadGameCube={menuOpen(){}};});
   await page.addScriptTag({content:fs.readFileSync(path.join(__dirname,'../deploy/webrcade/touch/assets/controller.js'),'utf8')});
   await page.locator('.kt-pad').waitFor({state:'visible'});assert.equal(await page.locator('#wrcad-touch.kt-3ds').count(),0,'GameCube has independent geometry');
   assert.equal(await page.locator('.kt-shoulders [data-cid="12"]').textContent(),'Z');
   for(const viewport of[{width:320,height:568},{width:390,height:844},{width:430,height:932},{width:568,height:320},{width:844,height:390}]){
    await page.setViewportSize(viewport);await page.waitForTimeout(200);
+   const edge=await page.locator('.kt-tab').boundingBox();
+   assert(Math.abs(edge.x+edge.width-viewport.width)<1,'closed settings tab attaches to right viewport edge');
    const rectangles=await page.locator('.kt-pad button,.kt-stick').evaluateAll(elements=>elements.filter(e=>!e.hidden&&e.getBoundingClientRect().width).map(e=>{const r=e.getBoundingClientRect();return{id:e.dataset.layoutId,x:r.x,y:r.y,width:r.width,height:r.height};}));
    for(const rect of rectangles)assert(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=viewport.width+.1&&rect.y+rect.height<=viewport.height+.1,JSON.stringify({viewport,rect}));
    for(let i=0;i<rectangles.length;i++)for(let j=i+1;j<rectangles.length;j++){
@@ -26,6 +32,7 @@ const {chromium,webkit}=require('playwright');const fs=require('fs'),path=requir
   const restored=await page.locator('.kt-actions [data-cid="4"]').boundingBox();assert(Math.abs(restored.x+restored.width/2-390*.72)<1&&Math.abs(restored.y+restored.height/2-844*.45)<1,'saved per-system coordinates still apply');
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('webrcade.touch.layouts.v1'))),saved,'default redesign does not rewrite saved layouts');
   await page.locator('.kt-tab').tap();assert.equal(await page.locator('#kt-drawer .kt-gc-save').count(),0);await page.locator('.kt-close').tap();
+  const leftEdge=await page.locator('.kt-tab').boundingBox();assert(Math.abs(leftEdge.x)<1,'saved left dock stays attached to left edge');
   await page.locator('.kt-menu').tap();await page.waitForFunction(()=>app.menus===1&&app.emulator.paused);await page.waitForFunction(()=>document.querySelector('#wrcad-touch').hidden);assert.equal(await page.locator('.kt-tab').isVisible(),false,'standard pause hides controller settings');
   console.log('PASS',engine.name(),'GameCube own geometry, small/portrait/landscape bounds, separate Z, standard Menu contract');
  }finally{await browser.close();}
