@@ -100,3 +100,23 @@ existing outputs are rejected. The localhost lab's manual disc controls are at
 and boots a library disc. The lab server does not supply the CloudRcade save API;
 use a packaged image to test full saves. Synthetic browser checks validate DiscIO,
 streaming and lifecycle; actual GPU/game qualification requires a hardware browser.
+
+GameCube hardware presents are limited to60Hz at completed command-ring presents,
+with normal console timing. The diagnostic upstream `frameCap` option is not an
+FPS limit. Standard Menu → Performance shows the last active window's native
+speed, presentation gaps, JS replay cost, command backlog, disc waits/read-ahead,
+shader/resource counts and allocated core memory. GPU execution time and total
+browser/GPU memory are explicitly unavailable without intrusive probes.
+
+Remote discs retain the existing2MiB chunks/eight-entry16MiB budget. The fetch
+worker owns the cache (pending buffers included), reads ahead two chunks and
+coalesces demand with pending prefetch. Seeks cancel unrelated speculative work;
+failed speculative fetches retry on demand. Shared2MiB staging carries only the
+requested bytes on a cache hit, with no second full-chunk cache/copy in the core
+worker. This is GameCube-only; the shared disk reader is unchanged.
+
+Opening standard Menu flushes changed memory cards through the shared account-
+scoped cloud bridge. A slot state is created/uploaded only on Save State. The
+menu displays local/cloud upload status. Completed state scratch files are
+unlinked and output bytes transfer without an extra full-state copy; the native
+1GiB allocation remains unchanged.

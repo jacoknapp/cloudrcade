@@ -9,8 +9,13 @@ import {GamepadNotifier,GamepadEnum} from '@gamecube/common-input';
 // The same native pause screen, focus grid, gamepad navigation and slot editor
 // used by the other cores. The core adapter supplies its own async operations.
 class GameCubePause extends React.Component {
-  state = {states:false, error:''};
+  state = {states:false, performance:false, error:'',sync:''};
+  componentDidMount(){this.refreshSync();this.syncTimer=setInterval(this.refreshSync,500);}
+  componentWillUnmount(){clearInterval(this.syncTimer);}
+  handleDetailsKey=event=>{if(this.state.performance&&event.key==='Escape'){event.preventDefault();this.props.onResume();}};
+  refreshSync=()=>{const sync=this.props.emulator.getSaveStatus?.()||'';if(sync!==this.state.sync)this.setState({sync});};
   saveRef = React.createRef();
+  perfRef = React.createRef();
   operation = async (method, ...args) => {
     this.setState({error:''});
     try { return await this.props.emulator[method](...args); }
@@ -25,16 +30,23 @@ class GameCubePause extends React.Component {
       deleteStateForSlot:slot=>this.operation('deleteStateForSlot',slot),
     };
     return <>
-      {this.state.states ? <SaveStatesEditor emulator={wrapped} emptyImageSrc="./gamecube.svg" onClose={onResume} showStatusCallback={()=>{}}/> :
+      {this.state.performance ? <section id="gamecube-performance-details" aria-label="GameCube performance details" onKeyDown={this.handleDetailsKey}>
+        <h2>GameCube performance</h2><pre>{emulator.getPerformance?.() || 'Waiting for measurements.'}</pre>
+        <button autoFocus onClick={()=>this.setState({performance:false})}>Back to menu</button>
+      </section> : this.state.states ? <SaveStatesEditor emulator={wrapped} emptyImageSrc="./gamecube.svg" onClose={onResume} showStatusCallback={()=>{}}/> :
         <CustomPauseScreen appProps={appProps} isStandalone={false} isEditor={false}
           closeCallback={onResume} exitCallback={()=>this.operation('exit')}
-          additionalButtonRefs={[this.saveRef]} additionalButtons={[
+          additionalButtonRefs={[this.saveRef,this.perfRef]} additionalButtons={[
             <PauseScreenButton key="states" buttonRef={this.saveRef} imgSrc={SaveWhiteImage}
               label={Resources.getText(TEXT_IDS.SAVE_STATES)}
               onHandlePad={(grid,e)=>grid.moveFocus(e.type,this.saveRef)}
-              onClick={()=>this.setState({states:true,error:''})}/>
+              onClick={()=>this.setState({states:true,error:''})}/>,
+            <PauseScreenButton key="performance" buttonRef={this.perfRef} imgSrc="./gamecube.svg" label="Performance"
+              onHandlePad={(grid,e)=>grid.moveFocus(e.type,this.perfRef)}
+              onClick={()=>this.setState({performance:true,error:''})}/>
           ]}/>
       }
+      {this.state.sync && <p id="gamecube-menu-sync" role="status">{this.state.sync}</p>}
       {this.state.error && <p id="gamecube-menu-error" role="alert">{this.state.error}</p>}
     </>;
   }

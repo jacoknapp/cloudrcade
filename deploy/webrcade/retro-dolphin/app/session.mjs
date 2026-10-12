@@ -87,7 +87,7 @@ export class GameCubeSession {
         ppcWasmJitTier: 'guarded', ppcWasmJitForce: false, ppcWasmJitWarmupFrames: 120,
         // The hardware command ring presents at native resolution. Minimize
         // its unused legacy CPU XFB notification image, not the GPU render.
-        presentationScale: 0.25,
+        presentationScale: 0.25, emulationSpeed: 1,
         // GameCube-only native device-GPU path. Keep diagnostic GPU probes off.
         wgpuGeometryPack: true, wgpuUploadTransport: 'mapped',
         wgpuReplayPump: true, wgpuDiagnosticQuiet: true,
@@ -113,7 +113,7 @@ export class GameCubeSession {
           }
         }
         applyFrame(response);
-        if (!this.closed) this.onTelemetry(response);
+        if (!this.closed) this.onTelemetry({...response,hostPollMs:this.lastPollMs || 0});
       };
       // The GPU presents directly; status polling does not need a 4 Hz cadence.
       adapter.telemetryIntervalMs = 1000;
@@ -210,6 +210,7 @@ export class GameCubeSession {
     this.lastPollAt = now; this.pollPending = true;
     const adapter = this.adapter;
     void this.bounded(Promise.resolve().then(() => adapter.request('runFrame'))).then(frame => {
+      this.lastPollMs=performance.now()-now;
       if (!this.closed && !this.paused) adapter.applyFrame(frame);
     }).catch(error => this.fail(error)).finally(() => { this.pollPending = false; });
   }

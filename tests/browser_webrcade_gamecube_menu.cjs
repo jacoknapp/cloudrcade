@@ -22,11 +22,15 @@ const bundle=process.env.WEBRCADE_GAMECUBE_UI_ROOT||path.resolve(__dirname,'../r
    const {createPauseMenu}=await import('/pause-ui.mjs');window.calls={resume:0,exit:0,save:[],load:[],delete:[]};window.fail='';window.pad=[];
    Object.defineProperty(navigator,'getGamepads',{value:()=>pad});
    const slots=()=>JSON.parse(localStorage.getItem('test-slots')||'[]');
-   const emulator={async getStateSlots(){return slots();},async saveStateForSlot(slot){calls.save.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]={time:Date.now(),shot:'gamecube.svg'};localStorage.setItem('test-slots',JSON.stringify(states));},async loadStateForSlot(slot){calls.load.push(slot);if(fail)throw new Error(fail);},async deleteStateForSlot(slot){calls.delete.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]=null;localStorage.setItem('test-slots',JSON.stringify(states));},async exit(){calls.exit++;if(fail)throw new Error(fail);}};
+   const emulator={getSaveStatus:()=> 'Memory cards saved locally; cloud upload needs attention.',getPerformance:()=> 'Disc wait: 2.0 ms/s\nPresentation: 30 frames/s · limit 60',async getStateSlots(){return slots();},async saveStateForSlot(slot){calls.save.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]={time:Date.now(),shot:'gamecube.svg'};localStorage.setItem('test-slots',JSON.stringify(states));},async loadStateForSlot(slot){calls.load.push(slot);if(fail)throw new Error(fail);},async deleteStateForSlot(slot){calls.delete.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]=null;localStorage.setItem('test-slots',JSON.stringify(states));},async exit(){calls.exit++;if(fail)throw new Error(fail);}};
    window.menu=createPauseMenu({root:document.querySelector('#gamecube-menu'),appProps:{title:'Sunshine UI fixture',app:'GameCube'},emulator,onResume(){calls.resume++;menu.hide();},onPause(){menu.show();}});menu.show();
   });
   const action=name=>page.getByRole('button').filter({has:page.getByText(name,{exact:true})});
   const states=async()=>{await action('Save States').tap();await page.getByText('Save Slot 1',{exact:true}).waitFor();};
+  await page.getByText('Sunshine UI fixture',{exact:true}).waitFor();
+  await page.getByRole('status').filter({hasText:'cloud upload needs attention'}).waitFor();
+  await action('Performance').tap();await page.getByRole('region',{name:'GameCube performance details'}).waitFor();
+  await page.getByText(/Disc wait: 2.0/).waitFor();await page.getByRole('button',{name:'Back to menu'}).tap();
   await page.getByText('Sunshine UI fixture',{exact:true}).waitFor();
   await page.keyboard.press('Escape');await page.waitForFunction(()=>calls.resume===1&&!menu.open);
   // Same shared gamepad pause chord (left trigger + Start), on release.

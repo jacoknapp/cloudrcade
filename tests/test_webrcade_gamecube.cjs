@@ -281,14 +281,17 @@ function fake() {
   let writes=0,dirty=true,synced=false;
   saves.manager={async checkFilesChanged(){const changed=dirty;dirty=false;return changed;},async save(){writes++;return synced;}};
   const cards={async request(){return {files:[]};}};
-  await saves.cards(cards);assert.equal(writes,1);
+  await saves.cards(cards);assert.equal(writes,1);assert.match(saves.syncStatus,/cloud upload needs attention/);
   await saves.cards(cards);assert.equal(writes,2,'unchanged cards still retry a failed cloud sync');
   synced=true;await saves.cards(cards);await saves.cards(cards);
   assert.equal(writes,3,'unchanged, synced cards skip repeated storage writes');
+  assert.match(saves.syncStatus,/cloud sync is off/);
+  dirty=true;saves.manager.isCloudEnabled=async()=>true;await saves.cards(cards);assert.match(saves.syncStatus,/uploaded to cloud/);
+
   dirty=true;saves.manager.save=async()=>{writes++;throw new Error('Synthetic write failure');};
   await assert.rejects(saves.cards(cards),/Synthetic write failure/);
   saves.manager.save=async()=>{writes++;return true;};await saves.cards(cards);
-  assert.equal(writes,5,'a thrown write is retried even after its hashes were recorded');
+  assert.equal(writes,6,'a thrown write is retried even after its hashes were recorded');
   saves.statePrefix='gamecube/TEST01/states/fixture-binary/';
   const records=new Map();saves.manager={async save(name,files){records.set(name,files);return true;},async load(name){return records.get(name);}};
   await saves.saveState({async saveStateFile(){return {saved:true,bytes:new Uint8Array([1,2,3])};}},2);
