@@ -44,7 +44,7 @@ export class GameCubeSaves {
     } finally { this.report(this.syncStatus); }
   }
   cards(adapter, {refresh=false}={}) {
-    // Autosave ticks share the current upload. Menu/exit also request one
+    // Concurrent pause/exit requests share the current upload and request one
     // trailing export, so game progress made during an upload is included.
     if(this.cardsPending){if(refresh)this.cardsRefreshRequested=true;return this.cardsPending;}
     if(refresh)this.report('Checking memory cards…',true);

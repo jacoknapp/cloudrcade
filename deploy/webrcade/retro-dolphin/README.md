@@ -10,8 +10,9 @@ Return to Browse saves memory cards before leaving. The controller settings
 drawer handles only touch controls, mute and layout editing. GameCube has its
 own default button and stick geometry; saved per-system layouts remain usable.
 The first Menu or drawer gesture unlocks browser audio; master mute still applies.
-Memory cards autosave every15seconds, on pause and when returning to the library;
-unchanged cards skip storage writes, and failed cloud sync remains retryable.
+Memory cards sync on pause (Menu or app backgrounding) and when returning to the
+library. There is no periodic upload during gameplay. Unchanged cards skip
+storage writes, and failed cloud sync remains retryable on the next pause/exit.
 The built-in
 GameCube performance readout is enabled by default; switch it off or on in the
 library's Experimental Settings before launching. It samples native frame and

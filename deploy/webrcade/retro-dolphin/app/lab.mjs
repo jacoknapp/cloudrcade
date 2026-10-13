@@ -10,7 +10,7 @@ import {createBackgroundPause} from './lifecycle.mjs';
 
 const get=id=>document.getElementById(id);
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
-let selectionAbort=null, saves=null, saveTimer=null, exiting=false, sound=false, audio=null;
+let selectionAbort=null, saves=null, exiting=false, sound=false, audio=null;
 let perf=null, pauseMenu=null, pausing=null, escapeOpen=false,disposeSaveFeedback=null;
 const pressed=new Set(), input={};
 let props=null;
@@ -51,7 +51,7 @@ function frame(){
 function dispose(){
  backgroundPause.reset();disposeSaveFeedback?.();disposeSaveFeedback=null;
  pauseMenu?.dispose();pauseMenu=null;menuVisible=false;controllerMenuVisible=false;escapeOpen=false;document.documentElement.classList.remove('gc-paused-menu');
- generation++;selectionAbort?.abort();selectionAbort=null;stopFrames();clearInterval(saveTimer);saveTimer=null;
+ generation++;selectionAbort?.abort();selectionAbort=null;stopFrames();
  audio?.setSource(null);audio?.stopPump();audio?.workletNode?.disconnect();audio?.gain?.disconnect();audio?.context?.close().catch(()=>{});audio=null;sound=false;
  session?.dispose();session=null;saves=null;pressed.clear();busy=false;document.body.classList.remove('running');
  perf?.element.remove?.();perf=null;
@@ -103,7 +103,6 @@ async function boot(){
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
   pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||(pausing?'Pausing game…':'Memory cards checked when Menu opens.'),isSaveBusy:()=>!!saves?.syncing,subscribeSaves:listener=>saves.subscribe(listener),exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
-  saveTimer=setInterval(()=>{if(session===owned&&owned.booted&&!owned.closed&&!exiting&&!busy)saves.cards(owned.adapter).catch(error=>status(error.message));},15000);
  });
 }
 get('boot').onclick=boot;
