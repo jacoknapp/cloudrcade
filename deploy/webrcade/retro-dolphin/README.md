@@ -38,7 +38,7 @@ Browsers require HTTPS or localhost, shared-memory isolation, OffscreenCanvas
 and hardware WebGPU. Software adapters and CPU rasterizer fallback are rejected.
 Rendering runs entirely on the browser device. CPU emulation uses Dolphin's
 cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
-thread. Native WebGPU uses packed geometry, mapped uploads and the replay pump;
+thread. Native WebGPU uses packed geometry, queue uploads and the replay pump;
 heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
 No server GPU dependency exists.
 Compiled PPC callbacks use the native direct dispatch and inline wrapper while
@@ -48,11 +48,16 @@ Backgrounding suspends GameCube without opening the pause menu. Returning resume
 only a session paused by the background transition; intentional menu/layout pauses
 stay paused. Worker pause/start commands are serialized, and persisted page
 restores retain the session. CPU resume does not depend on restarting browser audio.
-The native binary reserves1GiB of initial WASM memory; small devices may lack
+The native binary reserves768MiB of initial WASM memory; small devices may lack
 sufficient memory. Performance depends on browser, device and game.
 
 The renderer translates generated GX shaders through GLSL, SPIR-V and Naga to
-WGSL. Texture decoding remains on the CPU. Integer texture bindings and generic
+WGSL. Fragment depth and fog use the same reversed-depth convention as vertex
+depth. Constant destination-alpha effects use separate GPU color/alpha draws so
+RGB blends with TEV source alpha while the framebuffer retains its requested
+alpha. This works without optional dual-source blending, framebuffer copies or
+CPU pixel readback. Overlapping primitives retain depth and alpha ordering.
+Texture decoding remains on the CPU. Integer texture bindings and generic
 GPU-to-CPU texture readback still have incomplete paths; this is not a claim that
 every GameCube effect translates correctly. The native texture destructor now
 releases its browser GPU texture, and replaced texture bind groups retire after

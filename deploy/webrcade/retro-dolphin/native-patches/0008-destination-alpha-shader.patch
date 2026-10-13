@@ -1,0 +1,105 @@
+--- a/Source/Core/VideoCommon/PixelShaderGen.cpp
++++ b/Source/Core/VideoCommon/PixelShaderGen.cpp
+@@ -1928,7 +1928,15 @@
+   if (uid_data->useDstAlpha)
+   {
+     out.SetConstantsUsed(C_ALPHA, C_ALPHA);
++    // WebGPU can replay color and destination alpha separately when optional
++    // dual-source blending is unavailable. Both shaders keep the same discard
++    // and depth logic; only the color pass exposes the unquantized TEV alpha.
++    if (!use_dual_source)
++      out.Write("#ifdef CLOUDRCADE_WEBGPU_BLEND_COLOR\n"
++                "\tocol0.a = float(prev.a) / 255.0;\n#else\n");
+     out.Write("\tocol0.a = float(" I_ALPHA ".a >> 2) / 63.0;\n");
++    if (!use_dual_source)
++      out.Write("#endif\n");
+ 
+     // Use dual-source color blending to perform dst alpha in a single pass
+     if (use_dual_source)
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
+@@ -733,19 +733,21 @@
+   // producer-assigned id the consumer keyed its module under; 0 means
+   // translation failed / no module (Software fallback). m_wgsl kept
+   // for the Day-29 pipeline opcode + debugging.
+-  WebGPUShader(ShaderStage stage, u32 bridge_id, std::string wgsl)
+-      : AbstractShader(stage), m_bridge_id(bridge_id), m_wgsl(std::move(wgsl))
++  WebGPUShader(ShaderStage stage, u32 bridge_id, std::string wgsl, u32 blend_color_id = 0)
++      : AbstractShader(stage), m_bridge_id(bridge_id), m_wgsl(std::move(wgsl)), m_blend_color_id(blend_color_id)
+   {
+   }
+   ~WebGPUShader() override = default;
+ 
+   u32 GetBridgeId() const { return m_bridge_id; }
++  u32 GetBlendColorId() const { return m_blend_color_id; }
+   const std::string& GetWgsl() const { return m_wgsl; }
+   BinaryData GetBinary() const override { return {}; }
+ 
+ private:
+   u32 m_bridge_id = 0;
+   std::string m_wgsl;
++  u32 m_blend_color_id = 0;
+ };
+ 
+ std::unique_ptr<AbstractShader>
+@@ -775,6 +777,22 @@
+                                               static_cast<u32>(stage));
+   }
+ 
++  u32 blend_color_id = 0;
++  constexpr std::string_view blend_marker = "#ifdef CLOUDRCADE_WEBGPU_BLEND_COLOR";
++  const auto marker_pos = source.find(blend_marker);
++  if (bridge_id != 0 && stage == ShaderStage::Pixel && marker_pos != std::string_view::npos)
++  {
++    std::string color_source(source);
++    color_source.replace(marker_pos, blend_marker.size(), "#if 1");
++    auto color_wgsl = GlslToWgsl(stage, color_source);
++    if (color_wgsl)
++      blend_color_id = m_cmd_stream.PushCreateShader(color_wgsl->data(), color_wgsl->size(),
++                                                     static_cast<u32>(stage));
++    // Do not silently draw with the destination-alpha value as a blend weight.
++    if (blend_color_id == 0)
++      bridge_id = 0;
++  }
++
+   if (bridge_id != 0)
+   {
+     ++m_shader_ok;
+@@ -806,7 +824,7 @@
+         LastShaderTranslateError().c_str());
+   }
+ 
+-  return std::make_unique<WebGPUShader>(stage, bridge_id, std::move(wgsl_text));
++  return std::make_unique<WebGPUShader>(stage, bridge_id, std::move(wgsl_text), blend_color_id);
+ }
+ 
+ std::unique_ptr<AbstractShader> WebGPUGfx::CreateShaderFromBinary(ShaderStage stage,
+@@ -965,7 +984,7 @@
+ // Serialize one AbstractPipelineConfig into the CreatePipelineCfg
+ // blob. Layout (all u32 LE): see DESIGN doc / consumer parser.
+ std::vector<u8> SerializePipelineConfig(const AbstractPipelineConfig& cfg, u32 vs_id,
+-                                        u32 fs_id)
++                                        u32 fs_id, u32 blend_color_id)
+ {
+   std::vector<u8> b;
+   b.reserve(160);
+@@ -1067,6 +1086,10 @@
+   PutU32(b, stride);
+   PutU32(b, attr_count);
+   b.insert(b.end(), attrs.begin(), attrs.end());
++  // Optional trailer after the variable-size attributes; old PCFG offsets stay
++  // unchanged. The consumer only selects it for RGB source-alpha blending.
++  PutU32(b, 0x44414C31);  // destination alpha, version 1
++  PutU32(b, blend_color_id);
+   return b;
+ }
+ }  // namespace
+@@ -1093,7 +1116,7 @@
+   const u32 fs_id = fs ? fs->GetBridgeId() : 0;
+   if (m_cmd_stream.ready() && vs_id != 0 && fs_id != 0)
+   {
+-    const std::vector<u8> blob = SerializePipelineConfig(config, vs_id, fs_id);
++    const std::vector<u8> blob = SerializePipelineConfig(config, vs_id, fs_id, fs->GetBlendColorId());
+     bridge_id = m_cmd_stream.PushCreatePipelineCfg(blob.data(), blob.size());
+ 
+     static u32 s_pcfg_ok = 0, s_pcfg_skip = 0;

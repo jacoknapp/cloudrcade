@@ -25,6 +25,7 @@ def patch_runtime(app, native_core_sha=None):
     text = ('import {RemoteDisc} from "../../remote-disc.mjs";\n'
             'import {JitLivenessGuard} from "../../jit-guard.mjs";\n'
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
+            'import {destinationAlphaConfig, createDestinationAlphaPipeline, drawDestinationAlpha} from "../../destination-alpha.mjs";\n'
             'import {FrameLimit} from "../../frame-limit.mjs";\n'
             'import {RenderStats} from "../../render-stats.mjs";\n'
             'import {waitForStateLoad} from "../../state-load.mjs";\n'
@@ -32,6 +33,17 @@ def patch_runtime(app, native_core_sha=None):
             'const gamecubeRenderStats = new RenderStats();\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
+    replace('  const attrCount = u[25];',
+            '  const attrCount = u[25];\n  const destinationAlpha = destinationAlphaConfig(u, webGpuObjects.shaders);')
+    replace('desc, target, depthBase, s28dbg, fsId, vsId });',
+            'desc, target, depthBase, s28dbg, fsId, vsId, destinationAlpha });')
+    replace('    pipe = renderGpu.device.createRenderPipeline(d);',
+            '    pipe = createDestinationAlphaPipeline(renderGpu.device, d, tpl.destinationAlpha);')
+    replace('            pass.draw(u32[recWord + 1], u32[recWord + 2], u32[recWord + 3], 0);',
+            '            drawDestinationAlpha(pass, dtLastPipe, false, u32[recWord + 1], u32[recWord + 2], u32[recWord + 3]);')
+    replace('            pass.drawIndexed(u32[recWord + 1], u32[recWord + 2],\n'
+            '                             u32[recWord + 3], u32[recWord + 4], 0);',
+            '            drawDestinationAlpha(pass, dtLastPipe, true, u32[recWord + 1], u32[recWord + 2], u32[recWord + 3], u32[recWord + 4]);')
     replace('    ...rendererDiagnostics,', '''    ...rendererDiagnostics,
     gpuResources: {
       textures: webGpuObjects.textures.size, buffers: webGpuObjects.buffers.size,
