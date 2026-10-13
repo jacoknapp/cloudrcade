@@ -49,5 +49,7 @@ EXPOSE 80 443
 
 # Beta-only prototype. The standard `web` target remains the stable release.
 FROM web AS web-gamecube
+# Native browser gameplay is qualified before the explicit app-only cutover.
+LABEL com.centurylinklabs.watchtower.enable="false"
 COPY release/gamecube/app/ /var/www/html/experimental/gamecube/
 COPY deploy/webrcade/retro-dolphin/apache.conf /etc/apache2/conf-enabled/gamecube.conf

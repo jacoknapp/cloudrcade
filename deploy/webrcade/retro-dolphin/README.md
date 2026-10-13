@@ -152,3 +152,13 @@ there is no browser Undo Load action. The fixed native allocation remains768MiB.
 Run `tests/browser_webrcade_gamecube_saves.cjs` against the prepared SDK for
 both-engine ZIP/IndexedDB/cloud-recovery checks with isolated persistent profiles
 and synthetic accounts. Native gameplay/state qualification is separate.
+
+
+The adapter restores Dolphin's normal `SyncOnSkipIdle` setting through an
+in-memory game configuration before boot. With it disabled in the upstream
+wasm host, Double Dash could stop submitting draws at the track preview while
+its native VI counter continued. This setting applies within the GameCube
+worker; the compiled core, state format, disc cache and other systems stay the
+same. Qualification checks both rendered and native progress and reviews the
+race image. The beta image disables automatic Watchtower updates so native
+browser verification can complete before an explicit app-only deployment.

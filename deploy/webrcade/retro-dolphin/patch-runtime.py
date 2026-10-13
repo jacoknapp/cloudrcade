@@ -23,6 +23,7 @@ def patch_runtime(app, native_core_sha=None):
         text = text.replace(old,new)
 
     text = ('import {RemoteDisc} from "../../remote-disc.mjs";\n'
+            'import {configureGameCube} from "../../core-config.mjs";\n'
             'import {JitLivenessGuard} from "../../jit-guard.mjs";\n'
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
             'import {destinationAlphaConfig, createDestinationAlphaPipeline, drawDestinationAlpha} from "../../destination-alpha.mjs";\n'
@@ -150,6 +151,9 @@ def patch_runtime(app, native_core_sha=None):
     replace('      postStatus,\n    });\n  });\n\n  return state;',
             '      postStatus: message => { postStatus(message); self.postMessage({type:"gamecube-fatal",message}); },\n'
             '    });\n  });\n\n  return state;')
+    replace('    coreBoot.accepted = Boolean(api.bootDisc(path));',
+            '    configureGameCube(moduleInstance.FS, api.getGameId());\n'
+            '    coreBoot.accepted = Boolean(api.bootDisc(path));')
     replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
   for (const name of ["font_western.bin", "font_japanese.bin"]) {
     const response = await fetch(new URL("../../sys/GC/" + name, import.meta.url));
