@@ -23,6 +23,7 @@ def patch_runtime(app, native_core_sha=None):
         text = text.replace(old,new)
 
     text = ('import {RemoteDisc} from "../../remote-disc.mjs";\n'
+            'import {borrowTextureUpload} from "../../upload-scratch.mjs";\n'
             'import {configureGameCube} from "../../core-config.mjs";\n'
             'import {JitLivenessGuard} from "../../jit-guard.mjs";\n'
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
@@ -34,6 +35,11 @@ def patch_runtime(app, native_core_sha=None):
             'const gamecubeRenderStats = new RenderStats();\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
+    # Queue writes consume a snapshot before returning. Reuse the already
+    # bounded immediate-buffer scratch for ordinary texture writes too; held
+    # uploads and mapped staging keep their independent lifetime/ownership.
+    replace('uploadPayload = heapCopy(src, uploadBytes);',
+            'uploadPayload = borrowTextureUpload(heap, src, uploadBytes, copyImmediateWgpuBufferUpload);')
     replace('  const attrCount = u[25];',
             '  const attrCount = u[25];\n  const destinationAlpha = destinationAlphaConfig(u, webGpuObjects.shaders);')
     replace('desc, target, depthBase, s28dbg, fsId, vsId });',

@@ -16,12 +16,14 @@ storage writes, and failed cloud sync remains retryable on the next pause/exit.
 The built-in
 GameCube performance readout is enabled by default; switch it off or on in the
 library's Experimental Settings before launching. It samples native frame and
-emulated-time counters once per second, reports core fps and speed independently
-of a game's frame-rate target, and shows device WebGPU resolution and WASM memory.
+emulated-time counters once per second. It reports rendered FPS, native game target
+and emulation speed, plus device WebGPU resolution and WASM memory. Sunshine NTSC
+targets30 rendered FPS at100% speed; presentation is capped at60 FPS for games
+that normally render at60. The cap does not alter the emulated game clock.
 It resets after pause/resume or loading states and adds no GPU timing probes.
 Local and connected Nextcloud saves use the existing CloudRcade account isolation,
-conflict handling and offline recovery bridge. States are scoped to the exact
-core binary version. Game compatibility and mobile memory support are experimental.
+conflict handling and offline recovery bridge. States use the verified serialization-format namespace, allowing compatible
+native performance rebuilds to retain existing slots. Game compatibility and mobile memory support are experimental.
 
 PSP remains available without a beta flag. The beta publishes AMD64 images only.
 The standard `web` Docker target excludes GameCube; beta uses `web-gamecube`.
@@ -39,7 +41,13 @@ and hardware WebGPU. Software adapters and CPU rasterizer fallback are rejected.
 Rendering runs entirely on the browser device. CPU emulation uses Dolphin's
 cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
 thread. Native WebGPU uses packed geometry, queue uploads and the replay pump;
-heavy diagnostic GPU probes remain off. These choices apply only to GameCube.
+Exact pass-state and bounded uniform-slice reuse avoid redundant commands/uploads.
+Mandatory uniform uploads skip a redundant comparison; clean retained slices still
+receive an exact comparison, and pass/load boundaries invalidate cached state.
+Immediate texture and buffer uploads share the same bounded4MiB host scratch,
+avoiding a new texture payload allocation on each write. Held uploads retain their
+own bytes; oversized writes use a temporary copy. Heavy diagnostic GPU probes
+remain off. These choices apply only to GameCube.
 No server GPU dependency exists.
 Compiled PPC callbacks use the native direct dispatch and inline wrapper while
 retaining block accounting, timing, invalidation and halt checks.
@@ -83,7 +91,7 @@ save SDK uses pinned webRcade common9a7cf19 and locked npm dependencies. Dolphin
 Apache-licensed replacement GameCube fonts and license ship with the core.
 The shared native heap is fixed at768MiB, with matching generated PPC module
 imports and memory growth disabled. Performance details sample native allocator
-usage and heap extent every5seconds; browser and GPU allocations are separate.
+usage and heap extent only while paused; browser and GPU allocations are separate.
 WASM state-buffer growth releases the obsolete allocation before replacement;
 LZ4 save compression uses4MiB blocks to bound scratch memory. The existing
 length-prefixed decoder reads these and previous larger blocks, preserving state
@@ -107,8 +115,8 @@ The native builder uses a disposable SDK container, pinned Ninja/pkg-config and
 Rust with `cargo --locked`, a fixed source-date epoch, fixed shared-memory pages,
 and explicit Dolphin revision metadata. `GAMECUBE_BUILD_JOBS` defaults to8.
 `GAMECUBE_NATIVE_CACHE` can point to artifacts from a previous qualified Linux
-build; source/recipe and both artifact hashes are still verified. CI leaves this
-unset and rebuilds independently.
+build; source/recipe and both artifact hashes are still verified. CI can reuse only an exact-input, hash-verified native cache. Changed native inputs
+or the workflow's explicit full-rebuild option compile the core independently.
 `WORK` is a dedicated upstream checkout; `OUT` is a new output directory (default
 `release/gamecube`). Unexpected remotes, tracked edits, mismatching artifacts and
 existing outputs are rejected. The localhost lab's manual disc controls are at

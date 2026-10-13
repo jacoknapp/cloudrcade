@@ -92,6 +92,9 @@ export class GameCubeSession {
         // Direct queue uploads reuse bounded host scratch and avoid the three
         // 16 MiB GPU staging buffers and asynchronous remap dependency.
         wgpuGeometryPack: true, wgpuUploadTransport: 'queue',
+        // Suppress identical pass state, reuse exact live uniform slices, and
+        // skip comparisons only when a fresh upload is already mandatory.
+        wgpuStateCache: true, wgpuUboCache: true, wgpuUniformFast: true,
         wgpuReplayPump: true, wgpuDiagnosticQuiet: true,
         noJitCache: true, collectMetrics: false})).then(adapter => {
         if (this.closed) {
