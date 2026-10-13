@@ -25,7 +25,8 @@ export function createDestinationAlphaPipeline(device, descriptor, config) {
     // The alpha pass commits depth with the original comparison. Writing it
     // here then using equal would wrongly accept originally rejected pixels.
     ...(descriptor.depthStencil ? {depthStencil: {
-      ...descriptor.depthStencil, depthWriteEnabled: false,
+      ...descriptor.depthStencil,
+      depthWriteEnabled: (target.writeMask & 8) ? false : descriptor.depthStencil.depthWriteEnabled,
     }} : {}),
   };
   const color = device.createRenderPipeline(colorDescriptor);

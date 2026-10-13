@@ -18,7 +18,7 @@ const {chromium} = require('playwright');
       device.pushErrorScope('validation');
       const layout = device.createPipelineLayout({bindGroupLayouts:[]});
       const results = [];
-      async function run(name, {depth=false, equal=false, destination=false, discard=false, indexed=false, repeat=false, strip=false, instances=1}={}) {
+      async function run(name, {depth=false, equal=false, destination=false, discard=false, indexed=false, repeat=false, strip=false, instances=1, writeAlpha=true}={}) {
         const texture=device.createTexture({size:[4,4],format:'rgba8unorm',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
         const depthTexture=depth?device.createTexture({size:[4,4],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT}):null;
         const vertex=device.createShaderModule({code:`@vertex fn main(@builtin(vertex_index) i:u32) -> @builtin(position) vec4f {
@@ -28,7 +28,7 @@ const {chromium} = require('playwright');
         const fs=alpha=>device.createShaderModule({code:`@fragment fn main(@builtin(position) p:vec4f)->@location(0) vec4f {
           ${discard?'if(p.x<2){discard;}':''} return vec4f(1,0,0,${alpha});
         }`});
-        const target={format:'rgba8unorm',writeMask:15,blend:{color:{operation:'add',srcFactor:'src-alpha',dstFactor:destination?'dst-alpha':'one-minus-src-alpha'},alpha:{operation:'add',srcFactor:'one',dstFactor:'zero'}}};
+        const target={format:'rgba8unorm',writeMask:writeAlpha?15:7,blend:{color:{operation:'add',srcFactor:'src-alpha',dstFactor:destination?'dst-alpha':'one-minus-src-alpha'},alpha:{operation:'add',srcFactor:'one',dstFactor:'zero'}}};
         const descriptor={label:name,layout,vertex:{module:vertex},fragment:{module:fs('0.5'),targets:[target]},primitive:{topology:strip?'triangle-strip':'triangle-list',cullMode:strip?'back':'none',frontFace:'ccw',...(strip&&indexed?{stripIndexFormat:'uint16'}:{})},...(depth?{depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'}}:{})};
         const pipeline=createDestinationAlphaPipeline(device,descriptor,{module:fs('0.25')});
         const encoder=device.createCommandEncoder();
@@ -48,6 +48,7 @@ const {chromium} = require('playwright');
       }
       await run('batch');
       await run('depth-order',{depth:true});
+      await run('color-only-depth',{depth:true,writeAlpha:false});
       await run('equal-rejected',{depth:true,equal:true});
       await run('destination-order',{destination:true,indexed:true});
       await run('discard',{depth:true,discard:true});
@@ -57,7 +58,7 @@ const {chromium} = require('playwright');
       const error=await device.popErrorScope();device.destroy();return {results,error:error?.message||null};
     });
     assert.equal(results.error,null);
-    const expected={batch:[112,0,143,128],'depth-order':[64,0,191,128],'equal-rejected':[0,0,255,191],
+    const expected={batch:[112,0,143,128],'depth-order':[64,0,191,128],'color-only-depth':[64,0,191,191],'equal-rejected':[0,0,255,191],
       'destination-order':[96,0,96,128],discard:[64,0,191,128],'retained-pipeline':[148,0,107,128],
       'strip-winding':[64,0,191,128],instances:[120,0,24,128]};
     for(const result of results.results)for(let i=0;i<result.pixels.length;i++) {

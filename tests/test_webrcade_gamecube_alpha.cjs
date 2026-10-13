@@ -19,5 +19,11 @@ const assert = require('node:assert/strict');
   const pass={drawIndexed:(...args)=>calls.push(args),setPipeline:()=>assert.fail('ordinary draw changed pipeline')};
   drawDestinationAlpha(pass,ordinary,true,9,2,3,-4);
   assert.deepEqual(calls,[[9,2,3,-4,0]],'indexed offsets/instances unchanged');
+  const colorOnly={...descriptor,fragment:{module:{},targets:[{writeMask:7,
+    blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha',operation:'add'}}}]},
+    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less'}};
+  const colorPipeline=createDestinationAlphaPipeline(device,colorOnly,{module});
+  assert.equal(colorPipeline.d.depthStencil.depthWriteEnabled,true,'color-only fallback commits depth itself');
+  assert.equal(colorPipeline.d.fragment.module,module);
   console.log('PASS GameCube destination-alpha protocol selects only affected draws; legacy and ordinary draws unchanged');
 })().catch(error=>{console.error(error);process.exitCode=1;});
