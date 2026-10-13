@@ -19,7 +19,7 @@ lock = json.loads((ROOT / 'core-release.json').read_text())
 if OUT.exists():
     shutil.rmtree(OUT)
 OUT.mkdir(parents=True)
-if stamp == lock['sourceHash']:
+if stamp == lock['sourceHash'] and os.environ.get('FORCE_CORE_REBUILD') != 'true':
     package = ROOT / 'release/core-package.tar.gz'
     with urllib.request.urlopen(lock['url'], timeout=120) as response, package.open('wb') as target:
         shutil.copyfileobj(response, target)

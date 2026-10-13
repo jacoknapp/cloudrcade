@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import runpy
 import subprocess
 import tempfile
 import unittest
@@ -150,6 +151,30 @@ class CoreCacheTest(unittest.TestCase):
                 cache.prepare('gamecube', self.root)
             self.assertIsNone(builds[-1])
             self.assertEqual(len(builds), 4)
+
+
+    def test_force_3ds_also_bypasses_legacy_pinned_release_download(self):
+        deploy = runpy.run_path(str(self.root / cache.BASE / 'retro-azahar/deploy.py'))
+        stamp, _ = deploy['inputs'](self.root / cache.BASE / 'retro-azahar')
+        lockpath = self.root / 'core-release.json'
+        lock = json.loads(lockpath.read_text())
+        lock['sourceHash'] = stamp
+        lockpath.write_text(json.dumps(lock))
+        commands = []
+        def fake_build(command, **kwargs):
+            commands.append(command)
+            out = self.root / 'release/3ds'
+            (out / 'app').mkdir(exist_ok=True)
+            (out / 'app/index.html').write_text('fixture')
+            (out / 'sources').mkdir(exist_ok=True)
+            (out / 'sources/3ds-source.tar.gz').write_bytes(b'source fixture')
+            return subprocess.CompletedProcess(command, 0)
+        with patch.dict(os.environ, {'FORCE_CORE_REBUILD': 'true'}), \
+                patch('urllib.request.urlopen', side_effect=AssertionError('Must compile, not download')), \
+                patch('subprocess.run', side_effect=fake_build):
+            runpy.run_path(str(self.root / 'scripts/prepare-core.py'))
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:2], ['bash', str(self.root / cache.BASE / 'retro-azahar/build.sh')])
 
 
     def test_native_artifact_lock_rejects_wrong_bytes(self):
