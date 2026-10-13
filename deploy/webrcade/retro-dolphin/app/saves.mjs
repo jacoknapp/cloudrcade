@@ -2,7 +2,7 @@
 export class GameCubeSaves {
   constructor(title, props, onError = () => {}) { this.title=title;this.props=props;this.onError=onError;this.manager=null;this.gameId=null;this.syncStatus='';this.syncing=false;this.listeners=new Set();this.cardsPending=null;this.queue=Promise.resolve(); }
   subscribe(listener) { this.listeners.add(listener); return ()=>this.listeners.delete(listener); }
-  report(text, busy=false) { this.syncStatus=text;this.syncing=busy;for(const listener of this.listeners)listener(); }
+  report(text, busy=false) { if(text===this.syncStatus&&busy===this.syncing)return;this.syncStatus=text;this.syncing=busy;for(const listener of this.listeners)listener(); }
   async initialize(adapter, disc) {
     const sdk = await import('./save-sdk.mjs');
     if (!globalThis.WrcadCloud) throw new Error('CloudRcade save bridge did not load.');

@@ -280,6 +280,10 @@ function fake() {
   assert.deepEqual(recycled,neutral,'every reused field resets after release or gamepad disconnect');
   const {GameCubeSaves} = await import(pathToFileURL(path.join(root,'saves.mjs')));
   const saves=new GameCubeSaves('fixture',{}), persisted=[];
+  let notifications=0;const unsubscribe=saves.subscribe(()=>notifications++);
+  saves.report('Memory cards uploaded.',false);saves.report('Memory cards uploaded.',false);
+  assert.equal(notifications,1,'unchanged autosave checks do not repeat the completion toast');
+  saves.report('Uploading memory cards…',true);assert.equal(notifications,2);unsubscribe();
   saves.cardPath='gamecube/TEST01/cards';
   saves.manager={async save(name,files){persisted.push({name,files});return true;}};
   await saves.cards({async request(type){assert.equal(type,'exportCards');return {files:[]};}});
