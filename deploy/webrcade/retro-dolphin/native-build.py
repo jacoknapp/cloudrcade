@@ -58,8 +58,8 @@ def build(work, output):
         subprocess.run(['git', 'apply', str(path)], cwd=source / 'vendor/dolphin', check=True)
     if source_digest(source) != lock['sourceTreeSha256']:
         raise RuntimeError('Native source tree does not match its lock')
-    # Optional byte-verified reuse of a previously qualified Linux build. CI
-    # leaves this unset and independently rebuilds from source.
+    # Optional byte-verified reuse of a previously qualified Linux build.
+    # The CI cache wrapper clears this for an explicit fresh-source rebuild.
     cached = os.environ.get('GAMECUBE_NATIVE_CACHE')
     if cached:
         artifacts = Path(cached).resolve()
