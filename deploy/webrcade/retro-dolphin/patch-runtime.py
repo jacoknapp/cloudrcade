@@ -27,6 +27,7 @@ def patch_runtime(app, native_core_sha=None):
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
             'import {FrameLimit} from "../../frame-limit.mjs";\n'
             'import {RenderStats} from "../../render-stats.mjs";\n'
+            'import {waitForStateLoad} from "../../state-load.mjs";\n'
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
             'const gamecubeRenderStats = new RenderStats();\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
@@ -234,6 +235,14 @@ def patch_runtime(app, native_core_sha=None):
     replace('      const ab = bytes ? bytes.buffer.slice(bytes.byteOffset,\n                                            bytes.byteOffset + bytes.byteLength)\n                       : null;',
             '      const ab = bytes ? bytes.buffer : null;\n'
             '      if (bytes) { try { moduleInstance.FS.unlink(path); } catch {} }')
+    replace('        rc = api.loadStateFile(path) | 0;',
+            '        const beforeGeneration = api.getLastLoadedCheckpointGeneration() >>> 0;\n'
+            '        rc = api.loadStateFile(path) | 0;')
+    replace('        await new Promise((r) => setTimeout(r, 1200));',
+            '        if (rc === 1) {\n'
+            '          try { await waitForStateLoad(() => api.getLastLoadedCheckpointGeneration() >>> 0, beforeGeneration); }\n'
+            '          catch (error) { self.postMessage({type:"gamecube-fatal",message:error.message}); throw error; }\n'
+            '        }')
     replace('      return { loaded: rc === 1, rc, beforeState, afterState,',
             '      if (!payload.fsPath) { try { moduleInstance.FS.unlink(path); } catch {} }\n'
             '      return { loaded: rc === 1, rc, beforeState, afterState,')
