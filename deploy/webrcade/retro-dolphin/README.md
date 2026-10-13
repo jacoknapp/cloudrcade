@@ -40,10 +40,9 @@ Browsers require HTTPS or localhost, shared-memory isolation, OffscreenCanvas
 and hardware WebGPU. Software adapters and CPU rasterizer fallback are rejected.
 Rendering runs entirely on the browser device. CPU emulation uses Dolphin's
 cached interpreter with its guarded PPC-to-WASM acceleration and separate CPU
-thread. Native WebGPU uses packed geometry, queue uploads and the replay pump;
-Exact pass-state and bounded uniform-slice reuse avoid redundant commands/uploads.
+thread. Native WebGPU uses packed geometry, queue uploads and the replay pump.
 Mandatory uniform uploads skip a redundant comparison; clean retained slices still
-receive an exact comparison, and pass/load boundaries invalidate cached state.
+receive an exact comparison.
 Immediate texture and buffer uploads share the same bounded4MiB host scratch,
 avoiding a new texture payload allocation on each write. Held uploads retain their
 own bytes; oversized writes use a temporary copy. Heavy diagnostic GPU probes
