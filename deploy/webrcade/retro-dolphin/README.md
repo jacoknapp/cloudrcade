@@ -127,6 +127,22 @@ worker. This is GameCube-only; the shared disk reader is unchanged.
 
 Opening standard Menu flushes changed memory cards through the shared account-
 scoped cloud bridge. A slot state is created/uploaded only on Save State. The
-menu displays local/cloud upload status. Completed state scratch files are
-unlinked and output bytes transfer without an extra full-state copy; the native
-1GiB allocation remains unchanged.
+menu displays local/cloud upload status above its screen, with immediate save
+notifications and an animated upload indicator. A background indicator remains
+visible when Menu closes during a memory-card upload. Unchanged cards report
+that no upload was needed.
+
+GameCube keeps snapshot ZIP entries uncompressed because the native snapshot is
+already LZ4-compressed. ZIP contents stay Blob-backed until native input is
+needed; input then transfers to the worker. Slot inspection reads entry names
+and metadata without inflating snapshots, never writes its incomplete records,
+and prefers pending local progress. Existing compressed ZIPs remain readable.
+The shared bridge's metadata reader is opt-in; other cores keep their existing
+serialization. Actual reads check ZIP CRCs before passing snapshots to the core.
+
+Completed state scratch files are unlinked. The native undo snapshot remains
+available during a failed-load rollback, then is released after the transaction;
+there is no browser Undo Load action. The fixed native allocation remains768MiB.
+Run `tests/browser_webrcade_gamecube_saves.cjs` against the prepared SDK for
+both-engine ZIP/IndexedDB/cloud-recovery checks with isolated persistent profiles
+and synthetic accounts. Native gameplay/state qualification is separate.

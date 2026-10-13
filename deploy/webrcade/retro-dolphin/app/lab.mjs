@@ -2,6 +2,7 @@ import {GameCubeSession, inspectDisc} from './session.mjs';
 import {KEYS, padState, BUTTONS} from './input.mjs';
 import {remoteDisc} from './transport.mjs';
 import {GameCubeSaves} from './saves.mjs';
+import {saveFeedback} from './save-feedback.mjs';
 import {AudioController} from './vendor/src/audio.js';
 import {GameCubePerf, perfEnabled, createPerfReadout} from './perf.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
@@ -10,7 +11,7 @@ import {createBackgroundPause} from './lifecycle.mjs';
 const get=id=>document.getElementById(id);
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
 let selectionAbort=null, saves=null, saveTimer=null, exiting=false, sound=false, audio=null;
-let perf=null, pauseMenu=null, pausing=null, escapeOpen=false;
+let perf=null, pauseMenu=null, pausing=null, escapeOpen=false,disposeSaveFeedback=null;
 const pressed=new Set(), input={};
 let props=null;
 try {
@@ -48,7 +49,7 @@ function frame(){
  session.setInput(input);session.poll();animation=requestAnimationFrame(frame);
 }
 function dispose(){
- backgroundPause.reset();
+ backgroundPause.reset();disposeSaveFeedback?.();disposeSaveFeedback=null;
  pauseMenu?.dispose();pauseMenu=null;menuVisible=false;controllerMenuVisible=false;escapeOpen=false;document.documentElement.classList.remove('gc-paused-menu');
  generation++;selectionAbort?.abort();selectionAbort=null;stopFrames();clearInterval(saveTimer);saveTimer=null;
  audio?.setSource(null);audio?.stopPump();audio?.workletNode?.disconnect();audio?.gain?.disconnect();audio?.context?.close().catch(()=>{});audio=null;sound=false;
@@ -93,6 +94,7 @@ async function boot(){
  await perform(async owned=>{
   status('Booting experimental GameCube core…');
   saves=new GameCubeSaves(props?.title||selected.name,props||{},text=>status(text));
+  disposeSaveFeedback=saveFeedback(get('gamecube-save-toast'),saves);
   const metadata=await owned.boot(selected,(adapter,disc)=>saves.initialize(adapter,disc));
   if(session!==owned)return;
   perf=perfEnabled()?createPerfReadout():new GameCubePerf({});
@@ -100,7 +102,7 @@ async function boot(){
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
-  pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||(pausing?'Pausing game…':'Memory cards checked when Menu opens.'),isSaveBusy:()=>!!saves?.syncing,exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
+  pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||(pausing?'Pausing game…':'Memory cards checked when Menu opens.'),isSaveBusy:()=>!!saves?.syncing,subscribeSaves:listener=>saves.subscribe(listener),exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
   saveTimer=setInterval(()=>{if(session===owned&&owned.booted&&!owned.closed&&!exiting&&!busy)saves.cards(owned.adapter).catch(error=>status(error.message));},15000);
  });
 }

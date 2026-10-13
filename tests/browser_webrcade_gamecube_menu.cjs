@@ -13,25 +13,31 @@ const bundle=process.env.WEBRCADE_GAMECUBE_UI_ROOT||path.resolve(__dirname,'../r
   await page.route('http://menu.test/**',route=>{
    const name=new URL(route.request().url()).pathname.slice(1);
    if(['pause-ui.mjs','pause-ui.css'].includes(name))return route.fulfill({contentType:name.endsWith('.mjs')?'text/javascript':'text/css',body:fs.readFileSync(path.join(bundle,name))});
+   if(['saves.mjs','save-feedback.mjs'].includes(name))return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(root,'retro-dolphin/app',name))});
    if(name==='menus.css')return route.fulfill({contentType:'text/css',body:fs.readFileSync(path.join(root,'touch/assets/menus.css'))});
    if(name==='gamecube.svg')return route.fulfill({contentType:'image/svg+xml',body:fs.readFileSync(path.join(root,'retro-dolphin/app/gamecube.svg'))});
    return route.fulfill({contentType:'text/html',body:`<html class="gc-paused-menu"><head><link rel="stylesheet" href="pause-ui.css"><link rel="stylesheet" href="menus.css"><style>${style}</style></head><body><div id="gamecube-menu" hidden></div></body></html>`});
   });
   await page.goto('http://menu.test/');
   await page.evaluate(async()=>{
-   const {createPauseMenu}=await import('/pause-ui.mjs');window.calls={resume:0,exit:0,save:[],load:[],delete:[]};window.fail='';window.pad=[];window.uploading=false;
+   const {createPauseMenu}=await import('/pause-ui.mjs');window.calls={resume:0,exit:0,save:[],load:[],delete:[]};window.fail='';window.pad=[];window.uploading=false;window.saveListeners=new Set();
    Object.defineProperty(navigator,'getGamepads',{value:()=>pad});
    const slots=()=>JSON.parse(localStorage.getItem('test-slots')||'[]');
-   const emulator={isSaveBusy:()=>uploading,getSaveStatus:()=>uploading?'Uploading memory cards…':'Memory cards saved locally; cloud upload needs attention.',getPerformance:()=> 'Disc wait: 2.0 ms/s\nPresentation: 30 frames/s · limit 60',async getStateSlots(){return slots();},async saveStateForSlot(slot){calls.save.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]={time:Date.now(),shot:'gamecube.svg'};localStorage.setItem('test-slots',JSON.stringify(states));},async loadStateForSlot(slot){calls.load.push(slot);if(fail)throw new Error(fail);},async deleteStateForSlot(slot){calls.delete.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]=null;localStorage.setItem('test-slots',JSON.stringify(states));},async exit(){calls.exit++;if(fail)throw new Error(fail);}};
+   const emulator={subscribeSaves:fn=>{saveListeners.add(fn);return()=>saveListeners.delete(fn);},isSaveBusy:()=>uploading,getSaveStatus:()=>uploading?'Uploading memory cards…':'Memory cards saved locally; cloud upload needs attention.',getPerformance:()=> 'Disc wait: 2.0 ms/s\nPresentation: 30 frames/s · limit 60',async getStateSlots(){return slots();},async saveStateForSlot(slot){calls.save.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]={time:Date.now(),shot:'gamecube.svg'};localStorage.setItem('test-slots',JSON.stringify(states));},async loadStateForSlot(slot){calls.load.push(slot);if(fail)throw new Error(fail);},async deleteStateForSlot(slot){calls.delete.push(slot);if(fail)throw new Error(fail);const states=slots();states[slot]=null;localStorage.setItem('test-slots',JSON.stringify(states));},async exit(){calls.exit++;if(fail)throw new Error(fail);}};
    window.menu=createPauseMenu({root:document.querySelector('#gamecube-menu'),appProps:{title:'Sunshine UI fixture',app:'GameCube'},emulator,onResume(){calls.resume++;menu.hide();},onPause(){menu.show();}});menu.show();
   });
   const action=name=>page.getByRole('button').filter({has:page.getByText(name,{exact:true})});
   const states=async()=>{await action('Save States').tap();await page.getByText('Save Slot 1',{exact:true}).waitFor();};
   await page.getByText('Sunshine UI fixture',{exact:true}).waitFor();
   await page.getByRole('status').filter({hasText:'cloud upload needs attention'}).waitFor();
-  await page.evaluate(()=>uploading=true);
+  await page.evaluate(()=>{uploading=true;for(const fn of saveListeners)fn();if(!document.querySelector('#gamecube-menu-sync[aria-busy="true"]'))throw new Error('Save event did not update immediately');});
   await page.locator('#gamecube-menu-sync[aria-busy="true"] .gc-save-spinner').waitFor();
   assert.equal(await page.locator('.gc-save-spinner').evaluate(e=>getComputedStyle(e).animationName),'gc-save-spin');
+  assert.equal(await page.locator('#gamecube-menu-sync').evaluate(e=>{
+    const previous=e.style.pointerEvents;e.style.pointerEvents='auto';
+    const r=e.getBoundingClientRect(),top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    e.style.pointerEvents=previous;return e===top||e.contains(top);
+  }),true,'upload feedback is painted above the opaque native pause screen');
   await page.getByRole('status').filter({hasText:'Uploading memory cards'}).waitFor();
   await page.evaluate(()=>uploading=false);await page.locator('.gc-save-spinner').waitFor({state:'hidden'});
   await action('Performance').tap();await page.getByRole('region',{name:'GameCube performance details'}).waitFor();
@@ -54,6 +60,21 @@ const bundle=process.env.WEBRCADE_GAMECUBE_UI_ROOT||path.resolve(__dirname,'../r
   await page.keyboard.press('Escape');await page.waitForFunction(()=>calls.resume===4&&!menu.open);
   await page.evaluate(()=>menu.show());await page.evaluate(()=>fail='Synthetic exit failure');await action('Return to Browse').tap();
   await page.getByRole('alert').filter({hasText:'Synthetic exit failure'}).waitFor();assert.equal(await page.evaluate(()=>menu.open),true);
+  await page.evaluate(async()=>{
+    menu.hide();document.documentElement.classList.remove('gc-paused-menu');
+    const {GameCubeSaves}=await import('/saves.mjs'),{saveFeedback}=await import('/save-feedback.mjs');
+    const node=document.createElement('p');node.id='gamecube-save-toast';node.innerHTML='<span class="gc-save-spinner"></span><span data-save-message></span>';document.body.append(node);
+    window.autoSaves=new GameCubeSaves('test',{});autoSaves.cardPath='fixture';
+    autoSaves.manager={isCloudEnabled:async()=>true,save:()=>new Promise(resolve=>window.finishUpload=resolve)};
+    window.disposeFeedback=saveFeedback(node,autoSaves);
+    window.upload=autoSaves.cards({request:async()=>({files:[]})});
+  });
+  await page.locator('#gamecube-save-toast[aria-busy="true"] .gc-save-spinner').waitFor();
+  await page.getByText('Uploading memory cards…',{exact:true}).waitFor();
+  await page.evaluate(async()=>{finishUpload(true);await upload;});
+  await page.getByText('Memory cards uploaded to cloud.',{exact:true}).waitFor();
+  await page.locator('#gamecube-save-toast .gc-save-spinner').waitFor({state:'hidden'});
+  await page.evaluate(()=>disposeFeedback());await page.locator('#gamecube-save-toast').waitFor({state:'hidden'});
   assert.deepEqual(errors,[]);await page.evaluate(()=>menu.dispose());await context.close();
   console.log('PASS',engine.name(),'shared pause, keyboard/gamepad chord, slot save/load/delete and recoverable errors');
  }finally{await browser.close();}

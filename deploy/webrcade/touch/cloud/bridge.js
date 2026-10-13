@@ -366,6 +366,32 @@
       });
     };
     const changed = proto.checkFilesChanged;
+    // Opt-in metadata reader for large GameCube snapshots. Never migrate,
+    // upload, or replace a save with these intentionally incomplete records.
+    proto.inspectSave = function(path) {
+      if (!this.getSaveMetadata) throw new Error('Save metadata reader unavailable.');
+      return locked(localPath(owner(this), path), async () => {
+        requireAccountIfConnected(this);
+        const uid=owner(this), reader=Object.create(this);
+        owners.set(reader,uid); reader.getFiles=blob=>this.getSaveMetadata(blob);
+        const paths=[localPath(uid,path)];
+        if(config.server===config.legacyServer||uid===null){
+          paths.push('/'+prefix+'-local-v2/'+encodeURIComponent(JSON.stringify(uid))+'/'+path.replace(/^\/+/,''));
+          if(localStorage.getItem(LEGACY_OWNER)===JSON.stringify(uid))paths.push(path);
+        }
+        let files=null;
+        for(const candidate of paths){files=await rawLoad.call(reader,candidate);if(files)break;}
+        const meta=files?.find(file=>file.name===LOCAL_META);
+        const sync=meta?JSON.parse(meta.content instanceof Blob?await meta.content.text():new TextDecoder().decode(meta.content)):null;
+        if(sync&&(sync.version!==1||typeof sync.dirty!=='boolean'))throw new Error('Local save recovery metadata is unreadable. The saved copy has been kept.');
+        if(enabled()&&!sync?.dirty){
+          try{files=await reader.loadCloud(path);}
+          catch(error){requireAccountIfConnected(this);if(error.status!==404)warn(this,error);}
+        }
+        requireAccountIfConnected(this);
+        return files?.filter(file=>file.name!==LOCAL_META)||null;
+      });
+    };
     proto.checkFilesChanged = async function(files) {
       window.WrcadClock?.capture(this, files);
       return changed.call(this, files);

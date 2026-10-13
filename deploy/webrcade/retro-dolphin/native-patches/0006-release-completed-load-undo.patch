@@ -1,0 +1,16 @@
+--- a/Source/Core/Core/State.cpp
++++ b/Source/Core/Core/State.cpp
+@@ -895,6 +895,13 @@
+     }
+   }
+ 
++#ifdef __EMSCRIPTEN__
++  // Keep rollback through LoadFromBuffer and UndoLoadState above, then release
++  // the completed transaction's snapshot. The browser exposes no Undo Load
++  // action; retaining this full state needlessly competes with the next save.
++  s_undo_load_buffer.reset();
++#endif
++
+   if (s_on_after_load_callback)
+     s_on_after_load_callback();
+ }

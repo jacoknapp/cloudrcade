@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/cloud/bridge.js'), 'utf8');
 const storage = new Map(), backups = new Map(), remote = new Map();
-const copy = files => files && files.map(f => ({name:f.name,content:new Uint8Array(f.content)}));
+const copy = files => files && files.map(f => ({name:f.name,content:f.content instanceof Blob?f.content:new Uint8Array(f.content)}));
 let offline = false, beforeFetch = null, revision = 0, loseAck = false, afterGet = null, hangPut = false;
 const errors = [], writes = [];
 function connect(uid) { storage.set('wrcad.nextcloud.connection.v1', JSON.stringify({uid,login:uid,password:'fake'})); }
@@ -33,7 +33,7 @@ function fixture(server='https://nextcloud.test') {
   getZipFileName(p) { return p.endsWith('.zip') ? p : p+'.zip'; }
   async loadLocal(p) {return copy(backups.get(this.getZipFileName(p)));}
   async saveLocal(p,files) {backups.set(this.getZipFileName(p),copy(files));}
-  async createZip(files) {return new Blob([JSON.stringify(files.map(f=>({name:f.name,content:Array.from(f.content)})))]);}
+  async createZip(files) {return new Blob([JSON.stringify(await Promise.all(files.map(async f=>({name:f.name,content:Array.from(f.content instanceof Blob?new Uint8Array(await f.content.arrayBuffer()):f.content)}))))]);}
   async getFiles(blob) {return JSON.parse(await blob.text()).map(f=>({...f,content:new Uint8Array(f.content)}));}
   async checkFilesChanged() {return true;}
   async getStateSlots() {return [];}

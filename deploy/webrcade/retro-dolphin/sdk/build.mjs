@@ -5,8 +5,8 @@ import sass from 'sass';
 const common=resolve(process.argv[2]), output=resolve(process.argv[3]);
 const options={bundle:true,format:'esm',platform:'browser',minify:true,define:{'process.env.NODE_ENV':'"production"'},
  loader:{'.js':'jsx','.scss':'empty','.css':'empty','.svg':'dataurl','.png':'dataurl','.jpg':'dataurl','.gif':'dataurl','.woff':'dataurl','.woff2':'dataurl','.ttf':'dataurl'},
- external:['crypto','util','node-fetch'],alias:{dropbox:resolve(import.meta.dirname,'node_modules/dropbox')},nodePaths:[resolve(import.meta.dirname,'node_modules')]};
-await build({...options,stdin:{contents:`export {SaveManager} from ${JSON.stringify(common+'/src/app/saves.js')};export {settings} from ${JSON.stringify(common+'/src/settings/settings.js')};export {storage} from ${JSON.stringify(common+'/src/storage/storage.js')};export {Resources} from ${JSON.stringify(common+'/src/resources/index.js')};`,resolveDir:common},outfile:output});
+ external:['crypto','util','node-fetch'],alias:{dropbox:resolve(import.meta.dirname,'node_modules/dropbox'),'@gamecube/common-zip':join(common,'src/zip/3rdparty/zip.js')},nodePaths:[resolve(import.meta.dirname,'node_modules')]};
+await build({...options,stdin:{contents:`export {createSaveZip,readSaveZip} from ${JSON.stringify(join(import.meta.dirname,'archive.js'))};export {SaveManager} from ${JSON.stringify(common+'/src/app/saves.js')};export {settings} from ${JSON.stringify(common+'/src/settings/settings.js')};export {storage} from ${JSON.stringify(common+'/src/storage/storage.js')};export {Resources} from ${JSON.stringify(common+'/src/resources/index.js')};`,resolveDir:common},outfile:output});
 // Preserve the pinned native CSS-module names so the existing shared mobile
 // menu stylesheet applies to GameCube exactly as it does to the other cores.
 const classes=JSON.parse(await readFile(join(import.meta.dirname,'ui-classes.json'),'utf8')),styles=new Map();

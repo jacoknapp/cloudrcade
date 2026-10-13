@@ -10,8 +10,8 @@ import {GamepadNotifier,GamepadEnum} from '@gamecube/common-input';
 // used by the other cores. The core adapter supplies its own async operations.
 class GameCubePause extends React.Component {
   state = {states:false, performance:false, error:'',sync:'',syncing:false,details:''};
-  componentDidMount(){this.refreshSync();this.syncTimer=setInterval(this.refreshSync,500);}
-  componentWillUnmount(){clearInterval(this.syncTimer);}
+  componentDidMount(){this.unsubscribe=this.props.emulator.subscribeSaves?.(this.refreshSync);this.refreshSync();this.syncTimer=setInterval(this.refreshSync,500);}
+  componentWillUnmount(){this.unsubscribe?.();clearInterval(this.syncTimer);}
   handleDetailsKey=event=>{if(this.state.performance&&event.key==='Escape'){event.preventDefault();this.props.onResume();}};
   refreshSync=()=>{const sync=this.props.emulator.getSaveStatus?.()||'',syncing=!!this.props.emulator.isSaveBusy?.(),details=this.props.emulator.getPerformance?.()||'';if(sync!==this.state.sync||syncing!==this.state.syncing||details!==this.state.details)this.setState({sync,syncing,details});};
   saveRef = React.createRef();

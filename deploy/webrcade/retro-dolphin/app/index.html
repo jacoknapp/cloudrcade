@@ -29,10 +29,11 @@
  #gamecube-failure { position:fixed; inset:0; z-index:101; background:#000; display:grid; place-content:center; padding:24px; text-align:center; }
  #gamecube-failure[hidden] { display:none; }
  #gamecube-failure-detail { max-width:560px; overflow-wrap:anywhere; }
- #gamecube-menu-error { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); z-index:100; padding:12px; background:#161616; color:#eee; border:1px solid #e50914; font-size:14px; }
+ #gamecube-menu-error { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); z-index:102; padding:12px; background:#161616; color:#eee; border:1px solid #e50914; font-size:14px; }
  #gamecube-performance-details { box-sizing:border-box; position:fixed; inset:0; padding:max(20px,env(safe-area-inset-top)) 20px max(90px,env(safe-area-inset-bottom)); background:#111; overflow:auto; font:14px/1.5 system-ui,sans-serif; }
  #gamecube-performance-details pre { white-space:pre-wrap; font:12px/1.6 ui-monospace,Menlo,monospace; }
- #gamecube-menu-sync { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); margin:0; padding:10px; background:#161616; color:#eee; font:13px/1.4 system-ui,sans-serif; }
+ #gamecube-menu-sync, #gamecube-save-toast { position:fixed; z-index:101; pointer-events:none; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); margin:0; padding:10px; background:#161616; color:#eee; font:13px/1.4 system-ui,sans-serif; }
+ #gamecube-save-toast[hidden], .gc-paused-menu #gamecube-save-toast, .gc-save-spinner[hidden] { display:none; }
  .gc-save-spinner { display:inline-block; width:14px; height:14px; margin-right:9px; vertical-align:-3px; border:2px solid #ffffff40; border-top-color:#69dec8; border-radius:50%; animation:gc-save-spin .8s linear infinite; }
  @keyframes gc-save-spin { to { transform:rotate(360deg); } }
  html.gc-paused-menu { font-size:1vw; }
@@ -71,6 +72,7 @@
 <p id="status" role="status">Core is stopped.</p>
 <canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
 <div id="gamecube-menu" hidden></div>
+<p id="gamecube-save-toast" role="status" aria-busy="false" hidden><span class="gc-save-spinner" aria-hidden="true" hidden></span><span data-save-message></span></p>
 <div id="gamecube-failure" hidden role="alert">
 <p>GameCube stopped.</p>
 <p id="gamecube-failure-detail"></p>
