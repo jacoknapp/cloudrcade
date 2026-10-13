@@ -1,12 +1,13 @@
 // Reuse the same account-scoped, conflict-aware save bridge as the other cores.
 export class GameCubeSaves {
-  constructor(title, props, onError = () => {}) { this.title=title;this.props=props;this.onError=onError;this.manager=null;this.gameId=null;this.syncStatus='';this.queue=Promise.resolve(); }
+  constructor(title, props, onError = () => {}) { this.title=title;this.props=props;this.onError=onError;this.manager=null;this.gameId=null;this.syncStatus='';this.syncing=false;this.cardsPending=null;this.queue=Promise.resolve(); }
   async initialize(adapter, disc) {
     const sdk = await import('./save-sdk.mjs');
     if (!globalThis.WrcadCloud) throw new Error('CloudRcade save bridge did not load.');
     WrcadCloud.install(sdk);
     await sdk.settings.load();
     this.manager = new sdk.SaveManager({getTitle:()=>this.title,getProps:()=>this.props},this.onError);
+    this.manager.cloudRequestTimeoutMs=60000;
     this.gameId=disc.gameId;
     const info=await fetch('./core-info.json').then(r=>r.json());
     this.statePrefix=`gamecube/${disc.gameId}/states/${info.stateFormatId || info.artifacts['dolphin-core-upstream.wasm']}/`;
@@ -22,27 +23,48 @@ export class GameCubeSaves {
     this.queue=next.catch(()=>{});
     return next;
   }
-  cards(adapter) { return this.serialize(async()=>{
+  async store(path, files, label) {
+    this.syncing=true;
+    try {
+      this.syncStatus=await this.manager.isCloudEnabled?.()?`Uploading ${label.toLowerCase()}…`:`Saving ${label.toLowerCase()}…`;
+      const pending=await this.manager.save(path,files) === false;
+      this.syncStatus=pending?`${label} saved locally; cloud upload needs attention.`:
+        await this.manager.isCloudEnabled?.()?`${label} uploaded to cloud.`:`${label} saved locally; cloud sync is off.`;
+      if(pending)this.onError(this.syncStatus);
+      return !pending;
+    } catch(error) {
+      this.syncStatus=`${label} could not be saved: ${error.message}`;
+      throw error;
+    } finally { this.syncing=false; }
+  }
+  cards(adapter, {refresh=false}={}) {
+    // Autosave ticks share the current upload. Menu/exit also request one
+    // trailing export, so game progress made during an upload is included.
+    if(this.cardsPending){if(refresh)this.cardsRefreshRequested=true;return this.cardsPending;}
+    this.cardsPending=this.serialize(async()=>{
+      do {
+        this.cardsRefreshRequested=false;
+        await this.flushCards(adapter);
+      } while(this.cardsRefreshRequested);
+    }).finally(()=>{this.cardsPending=null;});
+    return this.cardsPending;
+  }
+  async flushCards(adapter) {
     if (!this.manager) return;
     if(this.manager.gameSavesDisabled){this.syncStatus='Game saves are disabled in settings.';return;}
     const {files}=await adapter.request('exportCards');
     if (this.manager.checkFilesChanged && !await this.manager.checkFilesChanged(files) && !this.cardsNeedSync) return;
     // Hashes change before storage is attempted. Keep a thrown write retryable.
     this.cardsNeedSync=true;
-    this.cardsNeedSync = await this.manager.save(this.cardPath,files) === false;
-    this.syncStatus=this.cardsNeedSync?'Memory cards saved locally; cloud upload needs attention.':
-      await this.manager.isCloudEnabled?.()?'Memory cards uploaded to cloud.':'Memory cards saved locally; cloud sync is off.';
-    if (this.cardsNeedSync) this.onError('Memory cards saved locally; cloud sync needs attention.');
-  }); }
+    this.cardsNeedSync = !await this.store(this.cardPath,files,'Memory cards');
+  }
   saveState(adapter, slot) { return this.serialize(async()=>{
     this.checkSlot(slot);
+    if(this.manager.gameSavesDisabled)throw new Error('Game saves are disabled in settings.');
     const result=await adapter.saveStateFile();
     if (!result.saved || !result.bytes) throw new Error(result.error || 'Dolphin could not save the state.');
-    const pending=await this.manager.save(this.statePrefix+slot,[{name:'state',content:new Uint8Array(result.bytes)},
-      {name:'meta.json',content:new TextEncoder().encode(JSON.stringify({time:Date.now()}))}]) === false;
-    this.syncStatus=pending?'State saved locally; cloud upload needs attention.':
-      await this.manager.isCloudEnabled?.()?'State uploaded to cloud.':'State saved locally; cloud sync is off.';
-    if(pending)this.onError('State saved locally; cloud sync needs attention.');
+    await this.store(this.statePrefix+slot,[{name:'state',content:new Uint8Array(result.bytes)},
+      {name:'meta.json',content:new TextEncoder().encode(JSON.stringify({time:Date.now()}))}],'State');
   }); }
   loadState(adapter, slot) { return this.serialize(async()=>{
     this.checkSlot(slot);

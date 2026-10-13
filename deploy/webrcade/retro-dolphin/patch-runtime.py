@@ -122,6 +122,8 @@ def patch_runtime(app, native_core_sha=None):
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
             '    gamecubeDiagnostics: {fpsLimit:60,render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapSample,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '      uploads:{transport:wgpuUploadTransport,stagingBytes:wgpuMappedStagingPool ? wgpuMappedStagingSlotCount*WGPU_MAPPED_STAGING_SLOT_BYTES : 0,scratchBytes:wgpuImmediateBufferScratch.byteLength,pendingRemaps:wgpuMappedRemapPromises.size},\n'
+            '      rendererError:rendererDiagnostics.errors.at(-1) || null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
             '      resources:{textures:webGpuObjects.textures.size,bindGroups:webGpuObjects.bindGroups.size,shaderOk:webGpuObjects.shaderOk,shaderFail:webGpuObjects.shaderFail},\n'
             '      draws:webGpuExecStats.drawIdx,missingPipelines:webGpuExecStats.missPipe,missingBindings:webGpuExecStats.missBg,skippedDraws:webGpuExecStats.skipDraw},\n'

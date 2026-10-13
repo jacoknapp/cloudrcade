@@ -139,6 +139,13 @@ function fake() {
   assert.deepEqual(faults,['GameCube core timed out.']);
   stalledSession.fail(new Error('late error'));assert.equal(faults.length,1,'a failure reports once');
 
+  const stuckPause=fake(),pauseFaults=[];
+  const pauseSession=new GameCubeSession({...options,timeoutMs:10,createAdapter:async()=>stuckPause,onFatal:e=>pauseFaults.push(e.message)});
+  await pauseSession.boot(disc());stuckPause.request=()=>new Promise(()=>{});
+  await assert.rejects(pauseSession.pause(),/timed out/);
+  assert.equal(pauseSession.closed,true);assert.equal(stuckPause.calls.terminated,1);
+  assert.deepEqual(pauseFaults,['GameCube core timed out.'],'stalled pause opens recovery instead of silently leaving a dead canvas');
+
   const gpuAdapter=fake(),gpuFaults=[];
   const gpuSession=new GameCubeSession({...options,createAdapter:async()=>gpuAdapter,
     onFatal:error=>gpuFaults.push(error.message)});

@@ -89,7 +89,9 @@ export class GameCubeSession {
         // its unused legacy CPU XFB notification image, not the GPU render.
         presentationScale: 0.25, emulationSpeed: 1,
         // GameCube-only native device-GPU path. Keep diagnostic GPU probes off.
-        wgpuGeometryPack: true, wgpuUploadTransport: 'mapped',
+        // Direct queue uploads reuse bounded host scratch and avoid the three
+        // 16 MiB GPU staging buffers and asynchronous remap dependency.
+        wgpuGeometryPack: true, wgpuUploadTransport: 'queue',
         wgpuReplayPump: true, wgpuDiagnosticQuiet: true,
         noJitCache: true, collectMetrics: false})).then(adapter => {
         if (this.closed) {
@@ -199,7 +201,7 @@ export class GameCubeSession {
           this.progressAt = null;
         }
         return result;
-      } catch (error) { this.dispose(); throw error; }
+      } catch (error) { this.fail(error); throw error; }
     });
     return this.transition;
   }

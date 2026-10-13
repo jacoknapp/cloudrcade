@@ -64,7 +64,7 @@ async function close({leave=false}={}){
   if(session?.booted&&!session.closed){
    status('Saving memory cards…');await session.pause();stopFrames();
    await audio?.setMuted(true);await new Promise(resolve=>setTimeout(resolve,1200));
-   await saves?.cards(session.adapter);
+   await saves?.cards(session.adapter,{refresh:true});
   }
  }catch(error){status(error.message);if(!session?.closed){exiting=false;controls();throw error;}}
  dispose();exiting=false;status('Core is stopped.');
@@ -100,7 +100,7 @@ async function boot(){
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
-  pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||'Memory cards checked when Menu opens.',exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
+  pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||(pausing?'Pausing game…':'Memory cards checked when Menu opens.'),isSaveBusy:()=>!!saves?.syncing,exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
   saveTimer=setInterval(()=>{if(session===owned&&owned.booted&&!owned.closed&&!exiting&&!busy)saves.cards(owned.adapter).catch(error=>status(error.message));},15000);
  });
 }
@@ -111,8 +111,18 @@ async function pause(){
  pressed.clear();if(pausing)return pausing;if(!session?.booted||session.paused)return;
  stopFrames();const owned=session;
  pausing=(async()=>{
-  try{await owned.pause();perf?.reset(true);await audio?.setMuted(true);await audio?.context?.suspend();await saves?.cards(owned.adapter);
-   if(session===owned&&!owned.closed){const {heap}=await owned.adapter.request('heapStats');if(session===owned&&!owned.closed)perf?.setHeapSample(heap);}}
+  try{await owned.pause();if(session!==owned||owned.closed)return;perf?.reset(true);
+   const ownedAudio=audio;
+   // Browser audio and cloud networking may remain pending while an installed
+   // app is suspended. Neither may own the CPU pause/resume transition.
+   void ownedAudio?.setMuted(true).then(async()=>{
+    if(session===owned&&owned.paused&&!owned.closed)await ownedAudio?.context?.suspend();
+    if(session===owned&&!owned.paused&&!owned.closed&&sound)await resumeAudio(ownedAudio);
+   }).catch(error=>{if(session===owned)status(error.message);});
+   void saves?.cards(owned.adapter,{refresh:true}).catch(error=>{if(session===owned)status(error.message);});
+   if(session===owned&&!owned.closed)void owned.bounded(owned.adapter.request('heapStats')).then(({heap})=>{
+    if(session===owned&&!owned.closed&&owned.paused)perf?.setHeapSample(heap);
+   }).catch(error=>{if(session===owned&&!owned.closed)status(error.message);});}
   catch(error){status(error.message);throw error;}
   finally{pausing=null;controls();}
  })();return pausing;
@@ -144,8 +154,9 @@ async function showPauseMenu(){
  // Unlock browser audio on the Menu gesture; the existing master mute gain
  // still controls whether it is audible, as it does for every other core.
  if(!sound)void toggleAudio();
- try{await pause();if(!session?.booted||exiting)return;document.documentElement.classList.add('gc-paused-menu');pauseMenu.show();}
- catch(error){menuVisible=false;status(error.message);}
+ document.documentElement.classList.add('gc-paused-menu');pauseMenu.show();
+ try{await pause();}
+ catch(error){if(session?.booted)status(error.message);}
 }
 async function resumeFromMenu(){
  if(busy||exiting)return;

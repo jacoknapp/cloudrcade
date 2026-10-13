@@ -60,6 +60,8 @@ export class GameCubePerf {
       'Rendered FPS counts successful GPU submissions; pixel uniqueness and GPU completion time are not sampled.',
       `Replay JS: ${number(replayMs)} ms/s · lifetime longest drain ${number(d.replay?.maxMs)} ms`,
       `GPU backlog: ${d.backlog ?? 'unavailable'} commands · status round trip ${number(frame.hostPollMs)} ms`,
+      d.uploads ? `GPU uploads: ${d.uploads.transport} · ${(d.uploads.stagingBytes/1048576).toFixed(1)} MiB staging · ${(d.uploads.scratchBytes/1048576).toFixed(1)} MiB host scratch · ${d.uploads.pendingRemaps} remaps pending` : '',
+      d.rendererError ? `Last renderer error: ${d.rendererError.kind}: ${d.rendererError.message}` : '',
       `GPU execution time: unavailable (no GPU timing/readback probes)`,
       `CPU/JIT: ${d.jit || 'unavailable'} · ${d.compiled ?? 'unavailable'} compiled blocks`,
       `Shaders: ${resources?.shaderOk ?? 'unavailable'} ready / ${resources?.shaderFail ?? 'unavailable'} failed`,

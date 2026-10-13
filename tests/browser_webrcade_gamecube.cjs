@@ -203,6 +203,29 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         testHidden=false;document.dispatchEvent(new Event('visibilitychange'));
       });
       await page.waitForFunction(()=>!uiSession.paused);
+      // A suspended cloud upload must not own the CPU/menu lifecycle.
+      await page.evaluate(async()=>{
+        const {GameCubeSaves}=await import('./saves.mjs');
+        window.originalCards=GameCubeSaves.prototype.cards;window.pendingCardCalls=0;
+        GameCubeSaves.prototype.cards=function(){pendingCardCalls++;return new Promise(()=>{});};
+        testHidden=true;document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await page.waitForFunction(()=>uiSession.paused&&pendingCardCalls>0);
+      await page.evaluate(()=>{testHidden=false;document.dispatchEvent(new Event('visibilitychange'));});
+      await page.waitForFunction(()=>!uiSession.paused,null,{timeout:3000});
+      await page.evaluate(()=>{void WrcadGameCube.showPauseMenu();});
+      await page.getByRole('button',{name:/^Resume/}).waitFor({timeout:3000});
+      await page.getByRole('button',{name:/^Resume/}).click();
+      await page.waitForFunction(()=>!uiSession.paused&&!app.isPauseScreen(),null,{timeout:3000});
+      await page.evaluate(async()=>{
+        const {GameCubeSaves}=await import('./saves.mjs');GameCubeSaves.prototype.cards=originalCards;
+        window.delayPause=true;void WrcadGameCube.showPauseMenu();
+      });
+      await page.waitForFunction(()=>typeof releasePause==='function');
+      await page.getByRole('button',{name:/^Resume/}).waitFor({timeout:3000});
+      await page.evaluate(()=>{delayPause=false;releasePause();});
+      await page.getByRole('button',{name:/^Resume/}).click();
+      await page.waitForFunction(()=>!uiSession.paused&&!app.isPauseScreen());
       await page.evaluate(()=>delete document.hidden);
       await page.evaluate(()=>uiSession.fail(new Error('Synthetic WebGPU device loss')));
       await page.getByRole('alert').filter({hasText:'Synthetic WebGPU device loss'}).waitFor();

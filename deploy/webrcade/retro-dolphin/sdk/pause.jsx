@@ -9,11 +9,11 @@ import {GamepadNotifier,GamepadEnum} from '@gamecube/common-input';
 // The same native pause screen, focus grid, gamepad navigation and slot editor
 // used by the other cores. The core adapter supplies its own async operations.
 class GameCubePause extends React.Component {
-  state = {states:false, performance:false, error:'',sync:''};
+  state = {states:false, performance:false, error:'',sync:'',syncing:false,details:''};
   componentDidMount(){this.refreshSync();this.syncTimer=setInterval(this.refreshSync,500);}
   componentWillUnmount(){clearInterval(this.syncTimer);}
   handleDetailsKey=event=>{if(this.state.performance&&event.key==='Escape'){event.preventDefault();this.props.onResume();}};
-  refreshSync=()=>{const sync=this.props.emulator.getSaveStatus?.()||'';if(sync!==this.state.sync)this.setState({sync});};
+  refreshSync=()=>{const sync=this.props.emulator.getSaveStatus?.()||'',syncing=!!this.props.emulator.isSaveBusy?.(),details=this.props.emulator.getPerformance?.()||'';if(sync!==this.state.sync||syncing!==this.state.syncing||details!==this.state.details)this.setState({sync,syncing,details});};
   saveRef = React.createRef();
   perfRef = React.createRef();
   operation = async (method, ...args) => {
@@ -46,7 +46,7 @@ class GameCubePause extends React.Component {
               onClick={()=>this.setState({performance:true,error:''})}/>
           ]}/>
       }
-      {this.state.sync && <p id="gamecube-menu-sync" role="status">{this.state.sync}</p>}
+      {this.state.sync && <p id="gamecube-menu-sync" role="status" aria-busy={this.state.syncing}>{this.state.syncing&&<span className="gc-save-spinner" aria-hidden="true"/>}{this.state.sync}</p>}
       {this.state.error && <p id="gamecube-menu-error" role="alert">{this.state.error}</p>}
     </>;
   }

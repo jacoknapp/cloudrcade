@@ -3,7 +3,7 @@ const vm = require('node:vm'), fs = require('node:fs'), path = require('node:pat
 const source = fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/cloud/bridge.js'), 'utf8');
 const storage = new Map(), backups = new Map(), remote = new Map();
 const copy = files => files && files.map(f => ({name:f.name,content:new Uint8Array(f.content)}));
-let offline = false, beforeFetch = null, revision = 0, loseAck = false, afterGet = null;
+let offline = false, beforeFetch = null, revision = 0, loseAck = false, afterGet = null, hangPut = false;
 const errors = [], writes = [];
 function connect(uid) { storage.set('wrcad.nextcloud.connection.v1', JSON.stringify({uid,login:uid,password:'fake'})); }
 connect('alice');
@@ -16,6 +16,7 @@ function fixture(server='https://nextcloud.test') {
   if (offline) return Response.json({error:'offline'},{status:502});
   const uid = decodeURIComponent(options.headers['X-Nextcloud-User']), file = query.get('path');
   const key = JSON.stringify([uid,file]), old = remote.get(key), method = options.method;
+  if (method === 'PUT' && hangPut) return new Promise((_,reject)=>{options.signal?.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});
   if (method === 'PUT') {
    if ((options.headers['If-None-Match'] === '*' && old) || (options.headers['If-Match'] && options.headers['If-Match'] !== old?.etag)) return Response.json({error:'conflict'},{status:409});
    const next = {body:new Blob([options.body]),etag:`"${++revision}"`};remote.set(key,next);writes.push({uid,file});
@@ -26,7 +27,7 @@ function fixture(server='https://nextcloud.test') {
   if (method === 'GET' && afterGet) { const fn=afterGet;afterGet=null;fn(); }
   return new Response(method === 'HEAD' ? null : old.body,{headers:{ETag:old.etag}});
  };
- vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,btoa,unescape,encodeURIComponent,console});
+ vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,AbortSignal,btoa,unescape,encodeURIComponent,console});
  class Saves {
   constructor() {this.errorCallback = e=>errors.push(e);}
   getZipFileName(p) { return p.endsWith('.zip') ? p : p+'.zip'; }
@@ -157,6 +158,56 @@ const savePath = '/wrc/test/sav';
  storage.set('wrcad.nextcloud.connection.v1',JSON.stringify({uid:'alice',login:'alice',password:'other-fake',server:'https://another.test'}));
  const otherServer=fixture('https://another.test');assert.equal(await otherServer.manager.loadLocal('/server-private'),null);assert.equal(await otherServer.manager.loadLocal('/old-private'),null);
  const countBefore=writes.length;assert.equal(await originalServer.manager.save('/server-private',files(55)),false);assert.equal(writes.length,countBefore);
+ // Actual GameCube wrapper + the shipped shared bridge, isolated fake account.
+ connect('gamecube-fixture');const gcClient=fixture();
+ const {GameCubeSaves}=await import('../deploy/webrcade/retro-dolphin/app/saves.mjs');
+ const gc=new GameCubeSaves('Sunshine save test',{});
+ gc.manager=gcClient.manager;gc.manager.cloudRequestTimeoutMs=30;
+ gc.cardPath='gamecube/GMSE01/cards';gc.statePrefix='gamecube/GMSE01/states/test/';
+ let cardVersion=1,exports=0,seen='';
+ gc.manager.checkFilesChanged=async files=>{const next=files[0].content[0];const dirty=next!==seen;seen=next;return dirty;};
+ const cardAdapter={async request(type){assert.equal(type,'exportCards');exports++;return {files:[{name:'USA/Card A/test.gci',content:new Uint8Array([cardVersion])}]};}};
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ let releaseUpload;beforeFetch=()=>new Promise(resolve=>releaseUpload=resolve);
+ const pendingCards=gc.cards(cardAdapter);
+ while(!releaseUpload)await tick();
+ assert.equal(gc.syncing,true);assert.match(gc.syncStatus,/Uploading memory cards/);
+ assert.equal(gc.cards(cardAdapter),pendingCards,'autosaves coalesce while one upload is outstanding');
+ releaseUpload();await pendingCards;
+ assert.equal(exports,1);assert.equal(gc.syncing,false);assert.match(gc.syncStatus,/uploaded to cloud/);
+ assert.equal((await gcClient.manager.loadCloud(gc.cardPath))[0].content[0],1);
+ assert.equal(remote.has(JSON.stringify(['gamecube-fixture',gc.statePrefix+'1.zip'])),false,'Menu card flush never creates a state');
+ await gc.cards(cardAdapter);assert.equal(exports,2,'Menu rechecks native cards for new in-game progress');
+ assert.equal(writes.filter(w=>w.uid==='gamecube-fixture').length,1,'unchanged successful cards do not reupload');
+ const stateAdapter={async saveStateFile(){return {saved:true,bytes:new Uint8Array([7,8,9])};}};
+ await gc.saveState(stateAdapter,2);
+ const remoteState=await gcClient.manager.loadCloud(gc.statePrefix+2);
+ assert.deepEqual(Array.from(remoteState.find(f=>f.name==='state').content),[7,8,9]);
+ assert(remoteState.some(f=>f.name==='meta.json'));assert.match(gc.syncStatus,/State uploaded/);
+ offline=true;cardVersion=2;await gc.cards(cardAdapter);
+ assert.equal(gc.syncing,false);assert.equal(gc.cardsNeedSync,true);assert.match(gc.syncStatus,/cloud upload needs attention/);
+ assert.equal((await gcClient.manager.loadLocal(gc.cardPath))[0].content[0],2);
+ offline=false;await gc.cards(cardAdapter);
+ assert.equal((await gcClient.manager.loadCloud(gc.cardPath))[0].content[0],2);
+ // A hung upload has an opt-in deadline, keeps local recovery, and releases
+ // the GameCube save queue; unchanged pending progress is retryable.
+ hangPut=true;cardVersion=3;
+ const keepNodeAlive=setTimeout(()=>{},1000);
+ try { await gc.cards(cardAdapter); } finally { clearTimeout(keepNodeAlive);hangPut=false; }
+ assert.equal(gc.syncing,false);assert.equal(gc.cardsNeedSync,true);
+ assert.equal((await gcClient.manager.loadLocal(gc.cardPath))[0].content[0],3);
+ await gc.cards(cardAdapter);assert.equal(gc.cardsNeedSync,false);
+ assert.equal((await gcClient.manager.loadCloud(gc.cardPath))[0].content[0],3);
+ // Opening Menu during an older upload includes subsequent in-game changes.
+ cardVersion=4;releaseUpload=null;beforeFetch=()=>new Promise(resolve=>releaseUpload=resolve);
+ const older=gc.cards(cardAdapter);while(!releaseUpload)await tick();
+ cardVersion=5;const menuFlush=gc.cards(cardAdapter,{refresh:true});assert.equal(menuFlush,older);
+ releaseUpload();await menuFlush;
+ assert.equal((await gcClient.manager.loadCloud(gc.cardPath))[0].content[0],5);
+ gc.manager.gameSavesDisabled=true;
+ await assert.rejects(gc.saveState(stateAdapter,1),/disabled/);
+ assert.equal(remote.has(JSON.stringify(['gamecube-fixture',gc.statePrefix+'1.zip'])),false);
+ console.log('PASS GameCube Menu card upload, explicit state bytes, uploading status/coalescing, offline/timeout recovery and disabled-save guard through the shared bridge');
  console.log('PASS same-UID server isolation, safe legacy migration and in-flight server changes');
  console.log('PASS lost acknowledgements, newer offline progress, restart recovery, legacy pending records and competing-write protection');
  console.log('PASS dirty recovery across restart, conflicts preserve both copies, account switching, fresh-account isolation, in-flight guards and legacy-owner migration');

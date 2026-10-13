@@ -54,11 +54,13 @@
     return {'X-Nextcloud-Authorization': `Basic ${basic}`, 'X-Nextcloud-User': encodeURIComponent(auth.uid),
       'X-Nextcloud-Server':config.server};
   }
-  async function request(action, {method = 'GET', path, body, extra = {}, retried = false, uid = account()} = {}) {
+  async function request(action, {method = 'GET', path, body, extra = {}, retried = false, uid = account(), timeoutMs = 0} = {}) {
     if (action !== 'status') requireAccount(uid);
     const auth = connection;
+    // Opt-in per save manager; existing cores retain their request policy.
+    const signal = Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
     if (!csrf) {
-      bootstrap ||= fetch(API + '?action=status', {cache: 'no-store'}).then(async response => {
+      bootstrap ||= fetch(API + '?action=status', {cache: 'no-store', signal}).then(async response => {
         if (!response.ok) throw new Error('Cloud connection unavailable. Please try again.');
         csrf = (await response.json()).csrf;
       }).finally(() => { bootstrap = null; });
@@ -66,11 +68,11 @@
     }
     requireAccount(uid);
     const url = API + '?action=' + action + (path ? '&path=' + encodeURIComponent(path) : '');
-    const response = await fetch(url, {method, body, cache: 'no-store', headers: {...headers(auth), 'X-CSRF-Token': csrf, ...extra}});
+    const response = await fetch(url, {method, body, cache: 'no-store', signal, headers: {...headers(auth), 'X-CSRF-Token': csrf, ...extra}});
     requireAccount(uid);
     if (response.status === 403 && !retried) {
       csrf = null;
-      return request(action, {method, path, body, extra, retried:true, uid});
+      return request(action, {method, path, body, extra, retried:true, uid, timeoutMs});
     }
     if (!response.ok) {
       let message = 'Nextcloud could not complete the save operation.';
@@ -152,10 +154,10 @@
     } catch (_) { /* Offline or unavailable login must not prevent local play. */ }
   }
   const startup = autoConnect();
-  async function download(path, uid = account()) {
+  async function download(path, uid = account(), timeoutMs = 0) {
     const key = versionKey(uid, path);
     try {
-      const response = await request('file', {path, uid});
+      const response = await request('file', {path, uid, timeoutMs});
       const blob = await response.blob(); requireAccount(uid);
       versions.set(key, response.headers.get('ETag'));
       blocked.delete(key);
@@ -166,20 +168,20 @@
       throw e;
     }
   }
-  async function upload(blob, path, uid = account(), condition) {
+  async function upload(blob, path, uid = account(), condition, timeoutMs = 0) {
     requireAccount(uid);
     const key = versionKey(uid, path);
     if (condition === undefined) {
       if (blocked.has(key)) throw new Error('This save could not be loaded from Nextcloud. Reopen the game after reconnecting. Your local copy has been kept.');
       if (!versions.has(key)) {
         try {
-          const response = await request('file', {method:'HEAD', path, uid});
+          const response = await request('file', {method:'HEAD', path, uid, timeoutMs});
           versions.set(key, response.headers.get('ETag'));
         } catch (e) { if (e.status === 404) versions.set(key, null); else throw e; }
       }
       condition = versions.get(key);
     }
-    const response = await request('file', {method:'PUT', path, body:blob, uid,
+    const response = await request('file', {method:'PUT', path, body:blob, uid, timeoutMs,
       extra: condition ? {'If-Match':condition} : {'If-None-Match':'*'}});
     if (response.headers.get('ETag')) versions.set(key, response.headers.get('ETag'));
     else versions.delete(key);
@@ -248,7 +250,7 @@
       const key = versionKey(uid, zipPath), digest = await fingerprint(record.files);
       const conflict = () => Object.assign(new Error('This save changed on another device. Cloud upload was stopped and your local copy has been kept.'), {status:409});
       const remoteRecord = async () => {
-        const files = await manager.getFiles(await download(zipPath, uid));
+        const files = await manager.getFiles(await download(zipPath, uid, manager.cloudRequestTimeoutMs));
         requireAccount(uid);
         return {digest:await fingerprint(files), base:versions.get(key)};
       };
@@ -269,7 +271,7 @@
       record.sync = {dirty:true, base:record.sync.base ?? null, attempt:digest};
       await write(manager, path, record.files, record.sync);
       const zip = await manager.createZip(record.files);
-      try { await upload(zip, zipPath, uid, record.sync.base); }
+      try { await upload(zip, zipPath, uid, record.sync.base, manager.cloudRequestTimeoutMs); }
       catch (e) {
         if (e.status !== 409) throw e;
         // Also recover pre-upgrade pending records without an attempt marker.
@@ -289,12 +291,12 @@
     proto.isCloudEnabled = async function() { return enabled() && owner(this) === account(); };
     proto.loadCloud = async function(path) {
       const uid = owner(this); requireAccount(uid);
-      const files = await this.getFiles(await download(this.getZipFileName(path), uid));
+      const files = await this.getFiles(await download(this.getZipFileName(path), uid, this.cloudRequestTimeoutMs));
       requireAccount(uid); return files;
     };
     proto.saveCloud = async function(path, files) {
       const uid = owner(this); requireAccount(uid);
-      return upload(await this.createZip(files), this.getZipFileName(path), uid);
+      return upload(await this.createZip(files), this.getZipFileName(path), uid, undefined, this.cloudRequestTimeoutMs);
     };
     proto.loadCloudSingleFile = function(path) { return download(path, owner(this)); };
     proto.saveCloudSingleFile = function(path, content) { return upload(content, path, owner(this)); };
