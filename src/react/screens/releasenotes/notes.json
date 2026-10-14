@@ -1,5 +1,13 @@
 [
   {
+    "version": "2.0.3",
+    "date": "October 14, 2026",
+    "title": "PlayStation portrait layout",
+    "changes": [
+      "The PlayStation game view sits near the top in portrait, keeping its native size and controller layout."
+    ]
+  },
+  {
     "version": "2.0.2",
     "date": "October 14, 2026",
     "title": "Simpler server storage",

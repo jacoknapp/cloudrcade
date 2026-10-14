@@ -10,7 +10,7 @@ const css = name => asset(name).replaceAll('100lvh', 'calc(100vh + 60px)')
   .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px');
 const fixture = `
   const handheld = ['gb','gbc'].includes(location.pathname.split('/')[3]);
-  const dimensions = handheld ? [160,144] : [480,272], ratio = dimensions[0]/dimensions[1];
+  const dimensions = handheld ? [160,144] : location.pathname.includes('/psx/') ? [320,240] : [480,272], ratio = dimensions[0]/dimensions[1];
   const canvas = document.createElement('canvas'); [canvas.width,canvas.height]=dimensions;
   document.body.append(canvas);
   const controller={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,
@@ -92,15 +92,28 @@ const fixture = `
             const picture=await game.locator('canvas').boundingBox();
             assert(picture.x>=-.5 && picture.y>=-.5 && picture.x+picture.width<=viewport.width+.5 && picture.y+picture.height<=height+.5,
               core+' picture fits visible phone');
+            if(core==='psx' && viewport.width<height) {
+              assert(Math.abs(picture.y-16)<.5,'PSX portrait aligns near safe top');
+              assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
+            }
             if(core==='psp' && viewport.width<height) {
               const pad=await game.locator('.kt-pad').boundingBox();
               assert(picture.y+picture.height<=pad.y-19.5,'PSP game clears default portrait controls');
               assert(Math.abs(picture.y+picture.height/2-(pad.y-20)/2)<.5,'PSP centered above controls');
             }
-            assert.deepEqual(await game.locator('canvas').evaluate(el=>[el.width,el.height]),['gb','gbc'].includes(core)?[160,144]:[480,272],'native drawing buffer preserved');
+            assert.deepEqual(await game.locator('canvas').evaluate(el=>[el.width,el.height]),['gb','gbc'].includes(core)?[160,144]:core==='psx'?[320,240]:[480,272],'native drawing buffer preserved');
           }
         }
-        if(!['nds','3ds','psp'].includes(core)) {
+        if(core==='psx') {
+          await page.setViewportSize({width:390,height:784});await page.waitForTimeout(180);
+          const initial=await game.locator('canvas').boundingBox();
+          await page.evaluate(()=>window.opaqueInset=60);
+          await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();
+          await page.waitForTimeout(180);const off=await game.locator('canvas').boundingBox();
+          assert.deepEqual(off,initial,'PSX top placement and native size remain with controls off/drawer open');
+          await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
+          await page.evaluate(()=>window.opaqueInset=0);
+        } else if(!['nds','3ds','psp'].includes(core)) {
           await page.setViewportSize({width:390,height:784});
           const expectedCenter=async (center) => {
             await page.waitForTimeout(180);
@@ -143,7 +156,7 @@ const fixture = `
       }));
       assert.equal(stable,0,'no repeated viewport writes while dimensions are stable');
       assert.deepEqual(errors,[]);
-      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering and PSP above controls; native buffers intact');
+      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX safe-top portrait and PSP above controls; native buffers intact');
       await context.close();
       const desktop=await browser.newPage({viewport:{width:1440,height:900}});
       await desktop.goto('data:text/html,<html><head></head><body></body></html>');

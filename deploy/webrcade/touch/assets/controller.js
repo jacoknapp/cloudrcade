@@ -364,6 +364,7 @@
     return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
   }
   const pspOrigin = system === 'psp' ? safeArea('kt-psp-origin') : null;
+  const psxOrigin = system === 'psx' ? safeArea('kt-psx-origin') : null;
   let controllerBounds = visibleViewport();
   function alignPSPScreen(emulator) {
     if (system !== 'psp' || !emulator?.started || !emulator.canvas) return;
@@ -418,7 +419,11 @@
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
     const height = canvas.getBoundingClientRect().height;
-    const middle = bounds.top + (bounds.height - excludedTop) / 2;
+    // PlayStation portrait keeps its native picture size near the safe top,
+    // including while the controller drawer or pause menu is open.
+    const portraitPSX = system === 'psx' && bounds.width < bounds.height;
+    const middle = portraitPSX ? Math.max(bounds.top, psxOrigin.getBoundingClientRect().top) + 16 + height / 2 :
+      bounds.top + (bounds.height - excludedTop) / 2;
     // Fill/zoom can leave no room to move: keep the native picture visible.
     const center = height <= bounds.height ?
       Math.max(bounds.top + height / 2, Math.min(bounds.bottom - height / 2, middle)) :
