@@ -407,8 +407,10 @@
   // without enlarging the iframe or shifting any touch controls.
   const centeredScreen = ['nes', 'snes', 'gb', 'gbc', 'gba', 'n64', 'genesis', 'psx'].includes(system);
   function alignCenteredScreen(emulator) {
-    if (!centeredScreen || !emulator?.started || !emulator.canvas) return;
-    const bounds = visibleViewport(), canvas = emulator.canvas;
+    // PSX loading starts before an emulator/canvas exists. Publish its default
+    // picture coordinates immediately so every startup phase uses the same area.
+    if (!centeredScreen || (system !== 'psx' && (!emulator?.started || !emulator.canvas))) return;
+    const bounds = visibleViewport(), canvas = emulator?.started ? emulator.canvas : null;
     if (!bounds.width || !bounds.height) return;
     let excludedTop = 0;
     try {
@@ -420,7 +422,7 @@
           Math.abs(outer.screen.width - outer.innerWidth) < 1 && difference > 0 && difference <= 100)
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
-    const height = canvas.getBoundingClientRect().height;
+    const height = canvas?.getBoundingClientRect().height || 0;
     // PSX has its own default portrait picture area, independent of live
     // controller positions, visibility and sizing.
     const portraitPSX = system === 'psx' && bounds.width < bounds.height;
@@ -443,6 +445,7 @@
           document.documentElement.style.setProperty(name, value);
       }
     }
+    if (!canvas) return; // Loading coordinates never alter an unstarted canvas.
     for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
       left: pixels(bounds.left + bounds.width / 2), top: pixels(center)})) {
       if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')

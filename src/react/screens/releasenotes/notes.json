@@ -1,5 +1,13 @@
 [
   {
+    "version": "2.0.6",
+    "date": "October 14, 2026",
+    "title": "PlayStation loading placement",
+    "changes": [
+      "PlayStation loading, progress and starting messages appear in the game picture area, including before the core starts."
+    ]
+  },
+  {
     "version": "2.0.5",
     "date": "October 14, 2026",
     "title": "PlayStation touch controls",

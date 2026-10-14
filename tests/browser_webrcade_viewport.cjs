@@ -22,13 +22,18 @@ const fixture = `
       canvas.style.width=Math.min(innerWidth*.96,innerHeight*.96*ratio)+'px';
       canvas.style.height=parseFloat(canvas.style.width)/ratio+'px';
     },pause(value){this.paused=value;return true}}};
-  app.emulator.updateScreenSize(); addEventListener('resize',()=>app.emulator.updateScreenSize());
+  const fixtureApp=app;
+  fixtureApp.emulator.updateScreenSize(); addEventListener('resize',()=>fixtureApp.emulator.updateScreenSize());
   if(location.pathname.includes('/psx/')) {
     // Pinned native audio-screen markup/styles; the adapter must relocate this
     // visual hint without replacing the real core's audio activation handler.
     const audio=document.createElement('div');audio.className='_1EdfC';
     audio.innerHTML='<div class="_2fzXq"><div class="_3kAeI"><button class="_3_mWk"><span class="_1s7E8">Tap Screen to Unmute</span></button></div></div>';
     document.body.append(audio);
+    const loading=document.createElement('div');loading.id='fixture-loading';
+    loading.innerHTML='<div class="_3o3pD">Loading...</div><div class="_1sp2T">37%</div>';
+    document.body.append(loading);
+    window.fixtureApp=fixtureApp;window.app=null;
   }
 `;
 (async () => {
@@ -62,6 +67,8 @@ const fixture = `
             canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
             ._1EdfC{position:absolute;display:flex;z-index:49;inset:0;align-items:center;pointer-events:none}
             ._2fzXq{height:100vh;width:100vw;position:relative;overflow:hidden}
+            ._3o3pD,._1sp2T{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+            ._3o3pD{font-size:2.5rem;z-index:5}._1sp2T{font-size:10rem}
             ._3kAeI{padding:1rem}._3_mWk{margin:0;padding:.6rem 1rem;display:flex;align-items:center;font-size:1.8rem;line-height:2rem;white-space:nowrap}
 
             #webrcade-app{position:fixed;inset:0}#webrcade-app-iframe{width:100%;height:100%;border:0}
@@ -85,6 +92,28 @@ const fixture = `
         await page.locator('iframe').evaluate((element,core)=>element.src='/play/app/'+core+'/',core);
         const game=await (await page.locator('iframe').elementHandle()).contentFrame();
         await game.waitForURL('http://viewport.test/play/app/'+core+'/');
+        if(core==='psx') {
+          for(const viewport of [{width:390,height:784},{width:844,height:390},{width:320,height:568}]) {
+            await page.setViewportSize(viewport);await page.waitForTimeout(180);
+            const readyCanvasStyle=await game.locator('canvas').getAttribute('style');
+            for(const phase of ['no-app','no-emulator','unstarted']) {
+              await game.evaluate(phase=>{
+                window.app=phase==='no-app'?null:phase==='no-emulator'?{emulator:null}:fixtureApp;
+                fixtureApp.emulator.started=false;
+                document.querySelector('._3o3pD').textContent=phase==='unstarted'?'Starting...':'Loading...';
+              },phase);
+              await page.waitForTimeout(180);
+              const safe=await game.locator('.kt-psx-origin').boundingBox(),center=viewport.width<viewport.height?safe.y+safe.height/2:viewport.height/2;
+              for(const selector of ['._3o3pD','._1sp2T']) {
+                const r=await game.locator(selector).boundingBox();
+                assert(Math.abs(r.x+r.width/2-viewport.width/2)<.5 && Math.abs(r.y+r.height/2-center)<.5,'PSX '+phase+' loading/progress center in default game area through rotation');
+              }
+              assert.equal(await game.locator('.kt-pad').isVisible(),false,'PSX loading hides touch controls');
+              assert.equal(await game.locator('canvas').getAttribute('style'),readyCanvasStyle,'PSX loading never rewrites unstarted canvas style');
+            }
+          }
+          await game.evaluate(()=>{window.app=fixtureApp;fixtureApp.emulator.started=true;fixtureApp.emulator.updateScreenSize();});
+        }
         await game.locator('.kt-pad').waitFor({state:'visible'});
         for(const viewport of [{width:390,height:784},{width:844,height:390},{width:320,height:568}]) {
           await page.setViewportSize(viewport);
@@ -110,6 +139,10 @@ const fixture = `
             }
             if(core==='psx') {
               assert.equal(await game.locator('.kt-analog-left:visible,.kt-analog-right:visible').count(),2,'PSX shows both sticks before analog-mode activation');
+              for(const selector of ['._3o3pD','._1sp2T']) {
+                const loading=await game.locator(selector).boundingBox();
+                assert(Math.abs(loading.x+loading.width/2-picture.x-picture.width/2)<.5 && Math.abs(loading.y+loading.height/2-picture.y-picture.height/2)<.5,'PSX active Starting/progress follows actual picture');
+              }
               const prompt=await game.locator('._3kAeI').boundingBox();
               assert(Math.abs(prompt.x+prompt.width/2-picture.x-picture.width/2)<.5 && Math.abs(prompt.y+prompt.height/2-picture.y-picture.height/2)<.5,'PSX native unmute prompt centers over the picture');
               const label=await game.locator('._3_mWk').boundingBox();
@@ -217,6 +250,7 @@ const fixture = `
       assert.equal(await desktop.evaluate(()=>document.documentElement.style.getPropertyValue('--cr-viewport-height')),'','desktop keeps native sizing');
       await desktop.route('http://viewport.test/play/app/psx/',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><body style="margin:0"><style>canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}</style><script>${fixture}</script></body></html>`}));
       await desktop.goto('http://viewport.test/play/app/psx/');
+      await desktop.evaluate(()=>{app=fixtureApp;app.emulator.started=true;});
       const nativeStyle=await desktop.locator('canvas').getAttribute('style');
       await desktop.addScriptTag({content:asset('controller.js')});
       assert.equal(await desktop.locator('canvas').getAttribute('style'),nativeStyle,'desktop PSX retains native canvas styling');

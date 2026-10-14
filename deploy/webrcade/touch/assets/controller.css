@@ -41,6 +41,9 @@ html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh);
   .kt-psx-origin { --kt-psx-reserved-height: 264px; bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + var(--kt-psx-reserved-height)); }
   html[data-cr-installed] .kt-psx-origin { bottom: calc(max(12px, calc(env(safe-area-inset-bottom, 0px) - 12px)) + var(--kt-psx-reserved-height)); }
 }
+/* Native pinned PSX startup text/progress share the picture's location, even
+ * before the core starts. Pause/settings dialogs keep their full-screen layout. */
+html.kt-psx-active ._3o3pD, html.kt-psx-active ._1sp2T { position: fixed; left: var(--kt-psx-picture-left, 50vw); top: var(--kt-psx-picture-top, 50vh); }
 /* Native pinned PSX audio prompt: place it over the relocated game picture. */
 html.kt-psx-active ._3kAeI { position: fixed; left: var(--kt-psx-picture-left, 50vw); top: var(--kt-psx-picture-top, 50vh); transform: translate(-50%, -50%); padding: 0; width: max-content; max-width: calc(100vw - 32px); }
 html.kt-psx-active ._3_mWk { max-width: 100%; white-space: normal; font-size: clamp(1rem, 4vw, 1.25rem); line-height: 1.4; }
