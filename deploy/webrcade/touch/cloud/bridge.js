@@ -60,7 +60,7 @@
     return {'X-Nextcloud-Authorization': `Basic ${basic}`, 'X-Nextcloud-User': encodeURIComponent(auth.uid),
       'X-Nextcloud-Server':config.server};
   }
-  async function request(action, {method = 'GET', path, body, extra = {}, retried = false, uid = account()} = {}) {
+  async function request(action, {method = 'GET', path, body, extra = {}, retried = false, uid = account(), timeoutMs = 0} = {}) {
     if (action !== 'status') requireAccount(uid);
     if (provider === 'dropbox') {
       const response = await dropbox.request(action, {method, path, body, extra, uid, timeoutMs});
