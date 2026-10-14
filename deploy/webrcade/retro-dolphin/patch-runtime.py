@@ -29,9 +29,12 @@ def patch_runtime(app, native_core_sha=None):
             'import {releaseGpuResource} from "../../gpu-resources.mjs";\n'
             'import {destinationAlphaConfig, createDestinationAlphaPipeline, drawDestinationAlpha} from "../../destination-alpha.mjs";\n'
             'import {FrameLimit} from "../../frame-limit.mjs";\n'
+            'import {GpuFrameQueue} from "../../gpu-frame-queue.mjs";\n'
+            'import {invariantVertexPosition} from "../../shader-position.mjs";\n'
             'import {RenderStats} from "../../render-stats.mjs";\n'
             'import {waitForStateLoad} from "../../state-load.mjs";\n'
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
+            'const gamecubeGpuFrames = new GpuFrameQueue({onError:error => markWgpuReplayFatal("gpu-completion", error?.message || error)});\n'
             'const gamecubeRenderStats = new RenderStats();\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
@@ -40,6 +43,8 @@ def patch_runtime(app, native_core_sha=None):
     # uploads and mapped staging keep their independent lifetime/ownership.
     replace('uploadPayload = heapCopy(src, uploadBytes);',
             'uploadPayload = borrowTextureUpload(heap, src, uploadBytes, copyImmediateWgpuBufferUpload);')
+    replace('    wgsl = webGpuTextDecoder.decode(local);',
+            '    wgsl = invariantVertexPosition(webGpuTextDecoder.decode(local), stage);')
     replace('  const flushPassDiag = () => {\n    if (passFbId < 0) return;',
             '  const flushPassDiag = () => {\n    if (passFbId < 0) return;\n'
             '    if (wgpuDiagnosticQuiet) {\n'
@@ -81,11 +86,13 @@ def patch_runtime(app, native_core_sha=None):
     # unread commands in their authoritative ring; never drop GX operations.
     replace('  if (!ring || !renderGpu) return;',
             '  if (!ring || !renderGpu) return;\n'
+            '  if (gamecubeGpuFrames.blocked()) return;\n'
             '  if (gamecubeFrameLimit.remaining(performance.now()) > 0) { gamecubeFrameLimit.delayed++; return; }')
     replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
-            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked ? 4 : 0)')
+            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked || gamecubeGpuFrames.blocked() ? 4 : 0)')
     replace('          webGpuExecStats.present++;',
             '          webGpuExecStats.present++;\n'
+            '          gamecubeGpuFrames.submitted(q);\n'
             '          const gamecubePresentedAt=performance.now();\n'
             '          gamecubeFrameLimit.presented(gamecubePresentedAt);\n'
             '          gamecubeRenderStats.presented(gamecubePresentedAt);')
@@ -149,7 +156,7 @@ def patch_runtime(app, native_core_sha=None):
     replace('    frame: api.getFrame(),\n    coreTicks: readCoreTicks(),',
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
-            '    gamecubeDiagnostics: {fpsLimit:60,render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapSample,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '    gamecubeDiagnostics: {fpsLimit:60,gpuQueue:gamecubeGpuFrames.snapshot(),render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapSample,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
             '      uploads:{transport:wgpuUploadTransport,stagingBytes:wgpuMappedStagingPool ? wgpuMappedStagingSlotCount*WGPU_MAPPED_STAGING_SLOT_BYTES : 0,scratchBytes:wgpuImmediateBufferScratch.byteLength,pendingRemaps:wgpuMappedRemapPromises.size},\n'
             '      rendererError:rendererDiagnostics.errors.at(-1) || null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'

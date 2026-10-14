@@ -10,7 +10,7 @@ import {createBackgroundPause} from './lifecycle.mjs';
 
 const get=id=>document.getElementById(id);
 const recovery=window.WrcadGameCubeRecovery;
-let coreIdentity=null;
+let coreIdentity=null,runtimeIdentity=null;
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
 let selectionAbort=null, saves=null, exiting=false, sound=false, audio=null;
 let perf=null, pauseMenu=null, pausing=null, escapeOpen=false,disposeSaveFeedback=null;
@@ -26,7 +26,7 @@ if(props?.rom) { document.body.classList.add('library');get('title').textContent
 let statusText='',menuVisible=false,controllerMenuVisible=false;
 function status(text){statusText=text;get('status').textContent=text;}
 function runtimeFailure(error){
- recovery?.phase('failed');
+ recovery?.fail(error);
  dispose();exiting=false;pausing=null;status(error.message);get('gamecube-failure-detail').textContent=error.message;
  get('restartGame').hidden=!selected;get('gamecube-failure').hidden=false;
 }
@@ -102,7 +102,7 @@ async function boot(){
   if(session!==owned)return;
   perf=perfEnabled()?createPerfReadout():new GameCubePerf({});
   perf.setGameId(metadata.gameId);
-  recovery?.identify(metadata.gameId,coreIdentity);recovery?.phase('playing');
+  recovery?.identify(metadata.gameId,coreIdentity,runtimeIdentity);recovery?.phase('playing');
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
@@ -230,7 +230,7 @@ window.WrcadGameCube={get ready(){return !!session?.booted&&!session.closed;},ge
  togglePause,toggleAudio,fitCanvas,showPauseMenu,saveState:slot=>stateAction(false,slot),loadState:slot=>stateAction(true,slot),exit:()=>close({leave:true}),menuOpen(open){controllerMenuVisible=!!open;pressed.clear();fitCanvas();if(open&&!sound)void toggleAudio().catch(error=>status(error.message));if(open)session?.setInput({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:0,triggerRight:0,analogA:0,analogB:0});},
 };
 addEventListener('resize',fitCanvas);visualViewport?.addEventListener('resize',fitCanvas);
-fetch('core-info.json').then(r=>r.json()).then(info=>{coreIdentity=info.artifacts?.['dolphin-core-upstream.wasm'];recovery?.identify(null,coreIdentity);get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
+fetch('core-info.json').then(r=>r.json()).then(info=>{coreIdentity=info.artifacts?.['dolphin-core-upstream.wasm'];runtimeIdentity=info.hostPatchSha256;recovery?.identify(null,coreIdentity,runtimeIdentity);get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
 controls();
 if(document.hidden)backgroundPause.background();
 if(props?.rom){await select(signal=>remoteDisc(props.rom,{signal}));if(selected)await boot();}

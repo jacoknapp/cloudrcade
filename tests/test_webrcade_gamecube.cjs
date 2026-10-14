@@ -142,6 +142,27 @@ function fake() {
   for(const value of Object.values(metadata))assert.equal(value instanceof Set?value.size:Object.keys(value).length,0);
   assert.equal(maps.textures.size+maps.bindGroups.size+maps.bindGroupSamplingMasks.size,0);
 
+  const {GpuFrameQueue}=await import(pathToFileURL(path.join(root,'gpu-frame-queue.mjs')));
+  let now=100;const pending=[],queueErrors=[];
+  const gpuQueue=new GpuFrameQueue({now:()=>now,onError:e=>queueErrors.push(e.message)});
+  const gpu={onSubmittedWorkDone:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))};
+  gpuQueue.submitted(gpu);gpuQueue.submitted(gpu);assert(gpuQueue.blocked());
+  assert.equal(gpuQueue.snapshot().pending,2);
+  now=125;pending.shift().resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert(!gpuQueue.blocked());assert.equal(gpuQueue.snapshot().completed,1);assert.equal(gpuQueue.snapshot().lastCompletionMs,25);
+  gpuQueue.submitted(gpu);assert.equal(gpuQueue.snapshot().maximum,2);
+  pending.shift().reject(Error('lost'));await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(queueErrors,['lost']);assert.equal(gpuQueue.snapshot().pending,1);
+  pending.shift().resolve();await new Promise(resolve=>setImmediate(resolve));assert.equal(gpuQueue.snapshot().pending,0);
+  gpuQueue.submitted({onSubmittedWorkDone(){throw Error('submission failure');}});
+  assert.deepEqual(queueErrors,['lost','submission failure']);assert.equal(gpuQueue.snapshot().pending,0);
+  const {invariantVertexPosition}=await import(pathToFileURL(path.join(root,'shader-position.mjs')));
+  const vertex='struct Output { @builtin(position) pos:vec4<f32>, };';
+  const invariant=invariantVertexPosition(vertex,0);assert.match(invariant,/@invariant @builtin\(position\)/);
+  assert.equal(invariantVertexPosition(invariant,0),invariant,'invariance is idempotent');
+  assert.equal(invariantVertexPosition(vertex,2),vertex,'fragment position inputs cannot be invariant');
+  assert.equal(invariantVertexPosition('@builtin(position) @invariant p:vec4<f32>',0),'@builtin(position) @invariant p:vec4<f32>');
+
   const stalledAdapter=fake(),faults=[];
   const stalledSession=new GameCubeSession({...options,timeoutMs:10,createAdapter:async()=>stalledAdapter,
     onFatal:error=>faults.push(error.message)});

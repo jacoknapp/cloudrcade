@@ -65,7 +65,10 @@ exit_code = 0
 worker = None
 try:
     subprocess.run(['/usr/local/bin/generate-certificate.sh'], check=True)
-    subprocess.run(['/usr/local/bin/setup-https.sh'], check=True)
+    # HTTPS setup precedes Apache's environment bootstrap. Without this value,
+    # its error log becomes /error.log instead of the container's stderr stream.
+    subprocess.run(['/usr/local/bin/setup-https.sh'], check=True,
+                   env={**os.environ, 'APACHE_LOG_DIR': os.getenv('APACHE_LOG_DIR') or '/var/log/apache2'})
     cors = spawn(['miniflare', '/var/www/cors.js'])
     apache = spawn(['apache2-foreground'])
     if enabled:
