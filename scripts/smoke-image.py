@@ -115,7 +115,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         if gamecube:
             base = '/experimental/gamecube/'
             with get(base) as response:
-                assert b'Experimental GameCube' in response.read()
+                html=response.read()
+                assert b'>GameCube</h1>' in html and b'Experimental GameCube' not in html
                 assert response.headers['Cross-Origin-Opener-Policy'] == 'same-origin'
                 assert response.headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
             with get(base + 'core-info.json') as response:

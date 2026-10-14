@@ -121,3 +121,11 @@ FORCE_CORE_REBUILD=true python3 scripts/core-cache.py prepare gamecube
 Cache keys are immutable. If a stored cache is damaged, the wrapper rebuilds for
 that run; delete that core's cache in Actions to allow a replacement on the next
 successful run. Cache eviction never prevents a release build.
+
+When a branch transition loses Actions caches, the workflow can bootstrap
+unchanged core packages from a pinned, previously qualified release image.
+It compares every actual core build input against that release source commit,
+and rejects changes to build tools, environment or prepare/validation logic.
+GameCube native bytes must also match the current committed artifact hashes.
+Changed inputs compile normally; forced source rebuilds bypass bootstrapping.
+Exact inventories and all current source/image checks still run before publishing.

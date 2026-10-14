@@ -10,7 +10,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'deploy/webrcade/'
-SHARED = ['scripts/core-cache.py', '.github/workflows/docker.yml']
+SHARED = ['scripts/core-cache.py', 'scripts/restore-qualified-cores.py', '.github/workflows/docker.yml']
 READER = BASE + 'retro-azahar/app/src/emulator/lazyrom.js'
 INPUTS = {
     '3ds': [BASE + 'retro-azahar', 'scripts/prepare-core.py',

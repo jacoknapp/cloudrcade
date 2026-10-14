@@ -70,6 +70,9 @@ jobs:
         with:
           path: release/psp
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['psp'] }}
+      - name: Bootstrap unchanged cores from a qualified release
+        if: env.FORCE_CORE_REBUILD != 'true'
+        run: python3 scripts/restore-qualified-cores.py
       - name: Prepare GameCube and corresponding source
         run: python3 scripts/core-cache.py prepare gamecube
       - name: Prepare key-free 3DS app and corresponding source
