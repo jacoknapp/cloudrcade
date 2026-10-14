@@ -5,10 +5,18 @@ const path = require('node:path');
 (async () => {
   const {GameCubePerf, perfEnabled, PERF_KEY} = await import(pathToFileURL(path.resolve(__dirname,
     '../deploy/webrcade/retro-dolphin/app/perf.mjs')));
+  assert.equal(PERF_KEY,'webrcade.gamecube.perf.v1','matches the settings fallback namespace');
   assert.equal(perfEnabled({getItem:key=>{assert.equal(key,PERF_KEY);return null;}}),false);
   assert(perfEnabled({getItem:()=> '1'}));
   assert.equal(perfEnabled({getItem:()=> '0'}),false);
   assert.equal(perfEnabled({getItem:()=>{throw new Error('storage blocked');}}),false);
+  globalThis.WrcadCloudConfig={storagePrefix:'monitor-fixture'};
+  const configured=await import(pathToFileURL(path.resolve(__dirname,
+    '../deploy/webrcade/retro-dolphin/app/perf.mjs'))+'?namespace');
+  assert.equal(configured.PERF_KEY,'monitor-fixture.gamecube.perf.v1');
+  assert(configured.perfEnabled({getItem:key=>key==='monitor-fixture.gamecube.perf.v1'?'1':null}),
+    'the game honors the checkbox preference in the configured namespace');
+  delete globalThis.WrcadCloudConfig;
   const element = {}, perf = new GameCubePerf(element);
   const frame = (ms,count,ticks,generation=0)=>({capturedAtMs:ms,frame:count,coreTicks:ticks,
     coreTicksPerSecond:486000000,loadedCheckpointGeneration:generation,width:640,height:528,heapBytes:1.5*1024**3,gamecubeDiagnostics:{render:{frames:count,epoch:generation,samples:30,p95Ms:33.4,maxMs:34,ageMs:4}}});

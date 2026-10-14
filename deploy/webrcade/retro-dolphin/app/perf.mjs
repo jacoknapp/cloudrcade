@@ -1,6 +1,6 @@
 // GameCube-only readout. Reuses the existing worker poll; no GPU probes or
 // browser animation counters. The Core Settings switch controls it.
-export const PERF_KEY = 'wrcad.gamecube.perf.v1';
+export const PERF_KEY = (globalThis.WrcadCloudConfig?.storagePrefix || 'webrcade') + '.gamecube.perf.v1';
 export function perfEnabled(storage) {
   try { return (storage || globalThis.localStorage).getItem(PERF_KEY) === '1'; } catch { return false; }
 }
