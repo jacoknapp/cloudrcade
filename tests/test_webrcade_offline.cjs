@@ -46,6 +46,14 @@ async function main() {
   assert(entries.has(origin+'/play/') && entries.has(origin+'/content/feeds/combined.json'),'loaded app still warms its shell and feed');
   entries.clear();calls=0;
   console.log('PASS app-driven warming preserves first-visit offline shell/feed caching');
+  // A cold offline page must still load the selected provider's transport.
+  fetcher=async()=>good('dropbox adapter','application/javascript');
+  assert.equal(await (await request('/cloud-saves/dropbox.js?v=fixture')).text(),'dropbox adapter');
+  sandbox.self.navigator.onLine=false;fetcher=async()=>{throw new Error('offline')};
+  assert.equal(await (await request('/cloud-saves/dropbox.js?v=fixture')).text(),'dropbox adapter');
+  assert(entries.has(origin+'/cloud-saves/dropbox.js?v=fixture'));
+  sandbox.self.navigator.onLine=true;entries.clear();calls=0;
+  console.log('PASS Dropbox transport survives cold offline launch without caching login or tokens');
   for (const feed of ['/content/feeds/combined.json', 'https://catalog.example.com/feed.json']) {
     const listeners = {};
     const fixture = {...sandbox, self:{...sandbox.self,

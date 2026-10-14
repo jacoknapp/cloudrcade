@@ -14,7 +14,7 @@ function kind(url) {
   if (url.href === new URL(FEED, ORIGIN).href || /^\/content\/feeds\/[^/]+\.json$/.test(path)) return 'feed';
   if (/^\/content\/(?:[^/]+\/(?:roms|bios)\/|derived\/|managed\/)/.test(path) &&
       /\.(?:zip|chd|pbp|bin|nes|sfc|smc|gba|gb|gbc|nds|n64|z64|v64|smd|gen|sbi)$/i.test(path)) return 'game';
-  if (/^\/cloud-saves\/(?:bridge|clock|controller-sync|runtime)\.js$/.test(path)) return 'script';
+  if (/^\/cloud-saves\/(?:bridge|clock|controller-sync|runtime|dropbox)\.js$/.test(path)) return 'script';
   if (/^\/(?:touch-controls|arcade-bundles)\//.test(path) ||
       /^\/play\/(?:app\/|static\/|images\/|[^/]+\.(?:png|ico|json|zip)$)/.test(path)) {
     if (/\.js$/.test(path)) return 'script';
