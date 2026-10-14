@@ -89,6 +89,32 @@ class RefreshTests(unittest.TestCase):
   self.put('snes/roms/A-new-copy.sfc',b'same-game')
   m.main();after=json.loads((self.state/'feeds/combined.json').read_text())['categories'][0]['items'][0]['props']
   self.assertEqual(after,before)
+ def pbp(self,psar,category=None):
+  import struct
+  sfo=b''
+  if category:
+   key=b'CATEGORY\x00';value=category.encode()+b'\x00'
+   sfo=struct.pack('<4s4I',b'\x00PSF',0x101,36,36+len(key),1)+struct.pack('<HHIII',0,0x204,len(value),len(value),0)+key+value
+  executable=40+len(sfo);payload=executable+4
+  return struct.pack('<4s9I',b'\x00PBP',0x10000,40,*([executable]*6),payload)+sfo+b'~PSP'+psar
+ def test_managed_pbp_routes_psp_without_requiring_psx_bios(self):
+  self.put('managed/Portable.pbp',self.pbp(b'NPUMDIMG',category='EG'))
+  with patch.object(m,'MANAGED',self.root/'managed'):
+   m.main();before=json.loads((self.state/'feeds/combined.json').read_text())
+   items=[i for c in before['categories'] for i in c['items']]
+   self.assertEqual([(i['type'],i['props']) for i in items],[('psp',{'rom':'/content/managed/Portable.pbp'})])
+   m.main();self.assertEqual(json.loads((self.state/'feeds/combined.json').read_text()),before)
+ def test_managed_pbp_detects_psx_single_multi_and_category(self):
+  for name,payload,category in [('single',b'PSISOIMG0000',None),('multi',b'PSTITLEIMG000000',None),('category',b'other','ME')]:
+   with self.subTest(name=name):
+    self.put('managed/'+name+'.pbp',self.pbp(payload,category))
+    path=self.root/'managed'/str(name+'.pbp')
+    self.assertTrue(m.managed_matches(path,'psx',{'.pbp'}))
+    self.assertFalse(m.managed_matches(path,'psp',{'.pbp'}))
+  self.put('managed/broken.pbp',b'\x00PBP'+bytes(36))
+  self.assertIsNone(m.pbp_platform(self.root/'managed/broken.pbp'))
+  self.put('managed/truncated.pbp',b'\x00PBP')
+  self.assertIsNone(m.pbp_platform(self.root/'managed/truncated.pbp'))
  def test_bad_cue_preserves_previous_feed(self):
   self.put('snes/roms/game.sfc',b'game');m.main()
   before=(self.state/'feeds/combined.json').read_bytes()

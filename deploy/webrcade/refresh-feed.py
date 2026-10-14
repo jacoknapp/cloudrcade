@@ -11,7 +11,7 @@ cached_item=runpy.run_path(str(Path(__file__).with_name('metadata_lookup.py')))[
 
 ROOT = Path(os.environ.get('WEBRCADE_ROM_ROOT', '/var/www/html/content'))
 STATE = Path(os.environ.get('WEBRCADE_STATE_PATH', '/data'))
-MANAGED = Path(os.environ.get('WEBRCADE_MANAGED_ROOT', '/managed'))
+MANAGED = Path(os.environ.get('WEBRCADE_MANAGED_ROOT', '/var/www/html/managed'))
 MANAGED_PREFIX = os.environ.get('WEBRCADE_METADATA_PATH_PREFIX', '')
 BASE = os.environ.get('WEBRCADE_CONTENT_URL', '/content/').rstrip('/') + '/'
 NAMESPACE = os.environ.get('WEBRCADE_STORAGE_PREFIX', 'cloudrcade')
@@ -34,6 +34,7 @@ SYSTEMS = {
 
 def managed_matches(path,folder,extensions):
  if path.suffix.lower() not in extensions:return False
+ if path.suffix.lower()=='.pbp':return pbp_platform(path)==folder
  if path.suffix.lower()=='.iso':
   if folder=='GameCube':return gamecube_game(path) is not None
   if folder!='psp':return False
@@ -42,6 +43,30 @@ def managed_matches(path,folder,extensions):
   if folder!='segaMD':return False
   with path.open('rb') as f:f.seek(0x100);return f.read(4)==b'SEGA'
  return True
+
+def pbp_platform(path):
+ # Both consoles use PBP. Inspect bounded container metadata instead of letting
+ # the PSX-first scan claim PSP games (or require a PSX BIOS for those games).
+ with path.open('rb') as stream:
+  header=stream.read(40);size=path.stat().st_size
+  if len(header)!=40 or header[:4]!=b'\x00PBP':return None
+  offsets=struct.unpack_from('<8I',header,8)
+  if offsets[0]<40 or list(offsets)!=sorted(offsets) or offsets[-1]>size:return None
+  stream.seek(offsets[-1]);psar=stream.read(16)
+  if psar.startswith((b'PSISOIMG',b'PSTITLEIMG')):return 'psx'
+  # PARAM.SFO CATEGORY=ME also identifies PS1 EBOOTs whose PSAR marker is absent.
+  length=offsets[1]-offsets[0]
+  if 20<=length<=65536:
+   stream.seek(offsets[0]);sfo=stream.read(length)
+   if len(sfo)==length and sfo[:4]==b'\x00PSF':
+    keys,data,count=struct.unpack_from('<III',sfo,8)
+    if 20+count*16<=keys<=data<=length:
+     for index in range(count):
+      key,kind,used,maximum,value=struct.unpack_from('<HHIII',sfo,20+index*16)
+      key_at=keys+key;value_at=data+value
+      if keys<=key_at<data and sfo[key_at:data].split(b'\x00',1)[0]==b'CATEGORY' and kind==0x204 and used<=maximum and data<=value_at<=value_at+used<=length:
+       if sfo[value_at:value_at+used].rstrip(b'\x00')==b'ME':return 'psx'
+  return 'psp'
 
 def gamecube_game(path):
  # Disc identity and format validation need only the header, never a GB hash.

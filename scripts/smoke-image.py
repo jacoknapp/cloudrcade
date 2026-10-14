@@ -58,11 +58,16 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     root = Path(temp)
     config_root, roms = root / 'config', root / 'roms'
     state, bios = config_root / 'data', roms / '3DS/bios'
-    for folder in [roms / 'nes/roms', roms / 'psp/roms', roms / 'fixtures', roms / '3DS/bios',
+    for folder in [roms / 'nes/roms', roms / 'psp/roms', roms / 'managed', roms / 'fixtures', roms / '3DS/bios',
                    state / 'feeds', state / 'derived', bios]:
         folder.mkdir(parents=True, exist_ok=True)
     (roms / 'nes/roms/first.nes').write_bytes(b'NES\x1a' + bytes(12) + b'first-fixture')
     (roms / 'psp/roms/psp-fixture.elf').write_bytes(b'\x7fELF' + bytes(16))
+    # A PSP PBP in the shared folder must not be claimed by the PSX scanner or
+    # require a PlayStation BIOS. No managed-root override: exercise image defaults.
+    import struct
+    (roms / 'managed/portable-fixture.pbp').write_bytes(
+        struct.pack('<4s9I', b'\x00PBP', 0x10000, *([40] * 7), 44) + b'~PSP' + b'NPUMDIMG')
     (roms / 'GameCube').mkdir()
     gc_header=bytearray(32); gc_header[:6]=b'TEST01'; gc_header[28:32]=bytes.fromhex('c2339f3d')
     (roms / 'GameCube/gamecube-fixture.iso').write_bytes(gc_header)
@@ -102,6 +107,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
 
         until(lambda: any(item['title'] == 'first' for item in items()))
         assert any(item['title'] == 'psp-fixture' and item['type'] == 'psp' for item in items())
+        assert any(item['title'] == 'portable-fixture' and item['type'] == 'psp' for item in items())
         assert any(item['title']=='gamecube-fixture' and item['type']=='gamecube' for item in items()) == gamecube
         assert not any(item['title']=='invalid' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.

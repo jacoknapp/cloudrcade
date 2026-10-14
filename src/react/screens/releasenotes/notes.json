@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.0.7",
+    "date": "October 14, 2026",
+    "title": "Shared library scanning",
+    "changes": [
+      "Shared-folder PBP games are identified as PlayStation or PSP from their format, so PSP games no longer require a PlayStation BIOS.",
+      "The shared managed folder is scanned by default with the config and ROM mounts."
+    ]
+  },
+  {
     "version": "2.0.6",
     "date": "October 14, 2026",
     "title": "PlayStation loading placement",
