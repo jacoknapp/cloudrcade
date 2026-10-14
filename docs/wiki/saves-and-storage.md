@@ -24,10 +24,10 @@ If you only want to play, start with browser-local storage or ask the operator t
 The operator registers one Dropbox application for the deployment; players only link their accounts.
 
 1. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), create a scoped **App folder** application. Enable `account_info.read`, `files.metadata.read`, `files.content.read` and `files.content.write` on its Permissions tab and apply the changes.
-2. Register this exact OAuth redirect URI, replacing the origin with your arcade's HTTPS origin: `https://arcade.example.com/cloud-saves/?provider=dropbox`. Keep the trailing slash and query parameter. Disable the legacy implicit grant if available.
-3. Set `WEBRCADE_PUBLIC_URL` to that origin, `DROPBOX_ENABLED=true`, `DROPBOX_APP_KEY` to the app's public key, and optionally `DROPBOX_SAVE_FOLDER=CloudRcade` in the deployment environment. Restart/recreate the app container to apply environment changes. No Dropbox app secret is used or needed.
+2. Register this exact OAuth redirect URI, replacing the origin with your arcade's HTTPS origin: `https://arcade.example.com/cloud-saves/?provider=dropbox`. Keep the trailing slash and query parameter. Set **Allow public clients (Implicit Grant & PKCE)** to **Allow**; this switch enables the PKCE flow.
+3. Set `WEBRCADE_PUBLIC_URL` to that origin, `DROPBOX_ENABLED=true`, `DROPBOX_APP_KEY` to the app's public key, and leave `DROPBOX_SAVE_FOLDER` blank to save directly in the Dropbox app folder, or set an optional subfolder such as `DROPBOX_SAVE_FOLDER=Game Saves` in the deployment environment. Restart/recreate the app container to apply environment changes. No Dropbox app secret is used or needed.
 4. Open **Settings → Cloud Storage → Choose storage**, select **Dropbox**, then **Link Dropbox**. Sign in and approve access on Dropbox. The same tab returns to the original library/game page. Each browser/device links separately.
-5. To activate a connection already linked in this browser, choose **Use this storage**. Your Dropbox Files contain `Apps/<your Dropbox app name>/<DROPBOX_SAVE_FOLDER>/`, with game ZIP/state files and the same `settings/` documents used by Nextcloud.
+5. To activate a connection already linked in this browser, choose **Use this storage**. By default, your Dropbox Files contain saves directly in `Apps/<your Dropbox app name>/` (for example, `Apps/CloudRcade/`). Setting `DROPBOX_SAVE_FOLDER=Game Saves` uses `Apps/<your Dropbox app name>/Game Saves/`, with game ZIP/state files and the same `settings/` documents used by Nextcloud.
 
 This uses authorization-code OAuth with S256 PKCE and a browser-held refresh token to renew short-lived access tokens. Dropbox passwords are entered only on Dropbox. The app key is public configuration; never add an app secret or a player's tokens to `.env`, feeds or source. See [Dropbox's OAuth guide](https://docs.dropboxapi.com/dropbox-api/docs/oauth).
 
@@ -81,7 +81,7 @@ Names and subpaths for game files come from the emulator rather than the library
 | Regular local progress and recovery records | Browser storage, scoped to the unlinked profile or connected cloud provider/account |
 | Native save-state slots | App's normal storage path, with cloud operations when linked |
 | Nextcloud game saves/states | Connected user's Files beneath `NEXTCLOUD_SAVE_FOLDER` |
-| Dropbox game saves/states | Connected user's app folder beneath `DROPBOX_SAVE_FOLDER` |
+| Dropbox game saves/states | Connected user's app folder; optional `DROPBOX_SAVE_FOLDER` subfolder |
 | Controller layouts/preferences | Browser storage; active provider's `settings/touch-controller.v1.json` |
 | Recently Played | Browser storage; active provider's `settings/recently-played.v1.json` |
 | Offline emulator/ROM assets | Separate browser asset cache, subject to quota and eviction |

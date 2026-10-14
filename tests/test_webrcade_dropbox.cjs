@@ -31,7 +31,7 @@ async function fetch(url, options = {}) {
  }
  if (route === 'auth/token/revoke') return Response.json(null);
  const args = JSON.parse(options.headers['Dropbox-API-Arg'] || options.body);
- assert(args.path.startsWith('/CloudRcade/'));
+ assert(args.path.startsWith('/') && !args.path.includes('//'));
  const remoteKey = JSON.stringify([token,args.path]), old = remote.get(remoteKey);
  if (route === 'files/upload') {
   assert.equal(args.autorename,false); assert.equal(args.strict_conflict,true);
@@ -134,6 +134,22 @@ const value = files => files?.find(f=>f.name==='sav')?.content[0];
  for (const path of ['../../private.zip','save/../private.zip','file.txt','/folder//file.zip']) await assert.rejects(transport.request('file',{uid:'alice',path}),e=>e.status===400);
  await assert.rejects(transport.request('file',{uid:'alice',method:'PUT',path:'valid.zip',body:'x'}),e=>e.status===428);
  await assert.rejects(transport.request('file',{uid:'alice',method:'PUT',path:'valid.zip',body:new Blob([new Uint8Array(67108865)]),extra:{'If-None-Match':'*'}}),e=>e.status===413);
+ // Unset/empty folders write directly to the app root. Explicit folders remain optional.
+ for(const folder of [undefined,'','Game Saves','CloudRcade']) {
+  const db={enabled:true,appKey:'fixture-app',...(folder===undefined?{}:{saveFolder:folder})};
+  const configured=fixture({dropbox:db});
+  const path='folder-choice-'+(folder===undefined?'unset':folder===''?'empty':folder==='Game Saves'?'custom':'old')+'.json';
+  await configured.dropbox.request('file',{uid:'alice',method:'PUT',path,body:'{}',extra:{'If-None-Match':'*'}});
+  const destination='/' + (folder?folder+'/':'')+path;
+  assert(remote.has(JSON.stringify(['alice',destination])));
+  assert.equal(await (await configured.dropbox.request('file',{uid:'alice',path})).text(),'{}');
+  await configured.dropbox.request('file',{uid:'alice',path,method:'HEAD'});
+  await configured.dropbox.request('file',{uid:'alice',path,method:'DELETE'});
+  assert(!remote.has(JSON.stringify(['alice',destination])));
+ }
+ for(const folder of ['../bad','..','/bad','bad/folder',12]) {
+  await assert.rejects(fixture({dropbox:{enabled:true,appKey:'fixture-app',saveFolder:folder}}).dropbox.request('file',{uid:'alice',path:'file.json'}),e=>e.status===400);
+ }
  // Real S256 construction and one-shot state-bound OAuth code exchange.
  disk.delete(key);const login=fixture();await login.dropbox.begin('https://arcade.test/play/?feed=test');
  const url=new URL(login.location.assigned),flow=JSON.parse(session.get(flowKey));
