@@ -52,7 +52,8 @@ function fixture({saved=null,paused=false,attempted=false,offline=false,iframe=f
  }});await f.settings.load();assert.equal(JSON.parse(f.local.get(key)).uid,'bob');assert.equal(f.locations.length,0);
  f=fixture({reply:(url,options,local)=>{local.set(key+'.paused','true');return Response.json({csrf:'test'});}});
  await f.settings.load();assert.equal(f.locations.length,0);
- // Native controls appear only for a supported provider and keep their switch value.
+ // The save adapter offers one effective provider; its chooser replaces the
+ // inherited Dropbox controls which did not route saves through this fork.
  const react={createRef:()=>({current:null}),cloneElement:(element,props,...children)=>({
   ...element,props:{...element.props,...props,...(children.length?{children:children.length===1?children[0]:children}:{})}})};
  const element=(children,props={})=>({props:{...props,children}});
@@ -64,9 +65,15 @@ function fixture({saved=null,paused=false,attempted=false,offline=false,iframe=f
  }
  let available=false;
  f.win.WrcadCloud.installUI({react,CloudStorageTab:CloudTab,storage:{getRedirectUri:()=>available?'https://supported.test/dropbox/':null}});
- let ui=new CloudTab(false),rows=ui.render();assert.equal(rows.length,3);assert.equal(rows[0].props.children[0].props.children,'Nextcloud');
- available=true;rows=ui.render();assert.equal(rows.length,4);assert.equal(rows[3].props.children[1].props.children.props.checked,false);
- ui=new CloudTab(true);rows=ui.render();assert.equal(rows.length,6);assert.equal(rows[3].props.children[1].props.children.props.checked,true);
- console.log('PASS supported-provider visibility and native switch independence');
+ for (const nativeEnabled of [false,true]) {
+  available=nativeEnabled;
+  const ui=new CloudTab(nativeEnabled),rows=ui.render();assert.equal(rows.length,4);
+  assert.equal(rows[0].props.children[0].props.children,'Nextcloud');
+  assert.equal(rows[3].props.children[0].props.children,'Save destination');
+  const chooser=rows[3].props.children[1].props.children.props.children;
+  assert.equal(chooser.props.label,'Choose storage');chooser.props.onClick();
+  assert.equal(new URL(f.locations.at(-1)).pathname,'/cloud-saves/');
+ }
+ console.log('PASS provider chooser and shared disable-saves control independent of obsolete upstream Dropbox switch');
  console.log('PASS automatic startup gate, offline/back/disconnect guards, native provider isolation and late expired-token account-switch protection');
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -270,7 +270,7 @@
   }
   window.addEventListener('storage', event => {
     if (event.key === KEY || event.key === null) { readHistory(); refreshBrowse(); }
-    if (event.key === prefix + '.nextcloud.connection.v1' || event.key === accountKey(activeAccount)) schedule();
+    if ([prefix + '.nextcloud.connection.v1', prefix + '.dropbox.connection.v1', prefix + '.cloud.provider.v1'].includes(event.key) || event.key === accountKey(activeAccount)) schedule();
   });
   window.addEventListener('online', () => schedule(0));
   window.addEventListener('focus', () => schedule(0));

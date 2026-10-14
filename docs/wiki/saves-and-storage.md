@@ -10,20 +10,30 @@ There are two different jobs often called “cloud storage”: **saving your pro
 | --- | --- | --- |
 | This browser | Keeps supported regular progress locally; no cloud account needed | Stay in the same browser/profile and site; avoid clearing site data |
 | Nextcloud | The fork's integrated saves/state slots, controller settings and Recently Played | Operator enables its server; player Links or completes configured automatic sign-in |
-| Dropbox | Shared-link ROM/feed hosting; native Dropbox save syncing is not supported end to end in this release | Follow [Dropbox hosting setup](#host-game-or-feed-files-in-dropbox) |
+| Dropbox | Integrated saves/state slots, controller settings and Recently Played; shared-link ROM/feed hosting remains available | Operator registers/enables its Dropbox app; player selects Dropbox and Links |
 | Google Drive | A place to keep source files/backups and download them for the operator's library; no Drive save connection is implemented | See [Google Drive setup](#google-drive-setup) |
 
-The fork routes game saves through its local/Nextcloud adapter. It retains some inherited Dropbox account controls, but native Dropbox save syncing is not an end-to-end supported feature of this release. Nextcloud preferences/history synchronization uses Nextcloud; hosting a ROM in Dropbox does not change that route.
+Nextcloud and Dropbox use the same game-save adapter, including regular local recovery, conditional cloud writes, supported native state slots, controller preferences and Recently Played. Choose one active save destination per browser in **Settings → Cloud Storage → Choose storage**. Each provider keeps its own connection and saved files; switching does not copy saves or continuously synchronize both clouds. Reopen games after switching. Hosting a ROM in Dropbox does not select its save destination.
 
-If you only want to play, start with browser-local storage or ask the operator to enable Nextcloud. If you want to supply a game library, continue to [library administration](library-administration.md); the arcade does not scan a player's personal cloud folders automatically.
+If you only want to play, start with browser-local storage or ask the operator to enable Nextcloud or Dropbox. If you want to supply a game library, continue to [library administration](library-administration.md); the arcade does not scan a player's personal cloud folders automatically.
 
 ## Dropbox setup
 
-### Inherited Dropbox account screen
+### Enable Dropbox saves
 
-On an origin recognized by the pinned upstream runtime, **Settings → Cloud Storage** can show **Other cloud storage**. Turning it on exposes inherited Dropbox Link/status controls. They are upstream account-authorization controls; a **Linked** status does not mean this fork uploads game saves to Dropbox. Arbitrary self-hosted origins are not in the pinned native redirect list, so most custom sites will not show this option.
+The operator registers one Dropbox application for the deployment; players only link their accounts.
 
-There is no Dropbox OAuth application/redirect setting in the root `.env.example`. Enabling Nextcloud does not configure Dropbox. Use the local/Nextcloud path for progress in this release. The [upstream cloud guide](https://docs.webrcade.com/storage/) describes upstream linking and its normal `/Apps/webrcade` application folder; it describes upstream behavior rather than a working Dropbox save setup for this fork.
+1. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), create a scoped **App folder** application. Enable `account_info.read`, `files.metadata.read`, `files.content.read` and `files.content.write` on its Permissions tab and apply the changes.
+2. Register this exact OAuth redirect URI, replacing the origin with your arcade's HTTPS origin: `https://arcade.example.com/cloud-saves/?provider=dropbox`. Keep the trailing slash and query parameter. Disable the legacy implicit grant if available.
+3. Set `WEBRCADE_PUBLIC_URL` to that origin, `DROPBOX_ENABLED=true`, `DROPBOX_APP_KEY` to the app's public key, and optionally `DROPBOX_SAVE_FOLDER=CloudRcade` in the deployment environment. Restart/recreate the app container to apply environment changes. No Dropbox app secret is used or needed.
+4. Open **Settings → Cloud Storage → Choose storage**, select **Dropbox**, then **Link Dropbox**. Sign in and approve access on Dropbox. The same tab returns to the original library/game page. Each browser/device links separately.
+5. To activate a connection already linked in this browser, choose **Use this storage**. Your Dropbox Files contain `Apps/<your Dropbox app name>/<DROPBOX_SAVE_FOLDER>/`, with game ZIP/state files and the same `settings/` documents used by Nextcloud.
+
+This uses authorization-code OAuth with S256 PKCE and a browser-held refresh token to renew short-lived access tokens. Dropbox passwords are entered only on Dropbox. The app key is public configuration; never add an app secret or a player's tokens to `.env`, feeds or source. See [Dropbox's OAuth guide](https://docs.dropboxapi.com/dropbox-api/docs/oauth).
+
+Dropbox follows the same 64 MiB per-file upload limit as the Nextcloud bridge. Conflicting creates/updates/deletes use Dropbox revisions and report errors while retaining regular local recovery copies. Account, app-key and provider boundaries keep local save backups and queued settings separate. Existing upstream Dropbox tokens/connections are not imported; link the deployment's app once through this screen.
+
+**Disconnect this browser** revokes this browser's Dropbox token and removes its connection; saved files remain in Dropbox. Dropbox sign-in and consent can reuse its own existing session, but Nextcloud's optional Authentik handoff applies only to Nextcloud.
 
 ### Host game or feed files in Dropbox
 
@@ -56,7 +66,7 @@ An **in-game save** is progress written by the game's own save system, such as b
 
 A **save state** is an emulator snapshot stored through the native state slots where that app supports them. It can resume a particular moment but depends on emulator/core compatibility. Keep in-game saves as your durable progress when updating a core. Open the pause menu, choose **Save States** when available, select a slot and choose **Save**. To resume, return to that slot and choose **Load**; loading replaces the current running moment. **Delete** removes the selected slot. Available slots and menu wording vary by emulator, and unsupported apps do not gain slots by linking a cloud account. Thumbnails appear when capture succeeds; a missing thumbnail does not by itself prove that the state failed to save.
 
-Nextcloud supports regular saves and native state slots through the configured cloud folder. State-slot data and its listing/thumbnail information are separate transfers; do not assume the regular-save recovery procedure guarantees an offline slot will appear or upload later. Controllers, Recently Played and shaders use their own settings/data paths. Linking cloud storage does not create a ROM backup.
+Nextcloud and Dropbox support regular saves and native state slots through the configured cloud folder. State-slot data and its listing/thumbnail information are separate transfers; do not assume the regular-save recovery procedure guarantees an offline slot will appear or upload later. Controllers, Recently Played and shaders use their own settings/data paths. Linking cloud storage does not create a ROM backup.
 
 ## Find your Nextcloud files
 
@@ -68,11 +78,12 @@ Names and subpaths for game files come from the emulator rather than the library
 
 | Data | Location and behavior |
 | --- | --- |
-| Regular local progress and recovery records | Browser storage, scoped to the unlinked profile or connected Nextcloud server/user |
+| Regular local progress and recovery records | Browser storage, scoped to the unlinked profile or connected cloud provider/account |
 | Native save-state slots | App's normal storage path, with cloud operations when linked |
 | Nextcloud game saves/states | Connected user's Files beneath `NEXTCLOUD_SAVE_FOLDER` |
-| Controller layouts/preferences | Browser storage; optional Nextcloud `settings/touch-controller.v1.json` |
-| Recently Played | Browser storage; optional Nextcloud `settings/recently-played.v1.json` |
+| Dropbox game saves/states | Connected user's app folder beneath `DROPBOX_SAVE_FOLDER` |
+| Controller layouts/preferences | Browser storage; active provider's `settings/touch-controller.v1.json` |
+| Recently Played | Browser storage; active provider's `settings/recently-played.v1.json` |
 | Offline emulator/ROM assets | Separate browser asset cache, subject to quota and eviction |
 | Scanner feeds, hashes and derived discs | Operator's writable `WEBRCADE_HOST_PATH` data directory |
 
@@ -81,7 +92,7 @@ A Docker data backup does not include saves that exist only in a player's browse
 ## Moving to another device
 
 1. On the first device, use the game's save action and exit normally. Allow upload work to finish and check for cloud errors.
-2. On the second device, open **Settings → Cloud Storage** and connect to the same Nextcloud server/user **before** launching the game.
+2. On the second device, open **Settings → Cloud Storage** and select/link the same provider and account **before** launching the game. For Nextcloud, use the same configured server; for Dropbox, use the same deployment app key and save folder.
 3. Load the same game from a feed using its existing save identity. Confirm the expected progress.
 4. Stop playing on the first device while using the second. Avoid two devices writing the same save at once.
 
@@ -106,9 +117,9 @@ The app reports cloud errors; inspect them before assuming another device has th
 
 ## Account and namespace boundaries
 
-Local backups are scoped to the connected server and user. Changing accounts while a game is running requires reopening the game before cloud operations; the existing game's final local save stays with its original profile. Another account does not automatically inherit the previous account's backups or queued settings. Existing legacy backups are retained by the explicit upgrade migration rather than reassigned to every new account.
+Local backups are scoped to the connected provider/server (or Dropbox app key) and user. Changing accounts while a game is running requires reopening the game before cloud operations; the existing game's final local save stays with its original profile. Another account does not automatically inherit the previous account's backups or queued settings. Existing legacy backups are retained by the explicit upgrade migration rather than reassigned to every new account.
 
-Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, the public site origin, and published game identities stable across upgrades. Changing a namespace/folder selects another storage location; it does not rename or delete old files. Changing site origin also changes browser storage access. Plan a migration and preserve the old data before changing these identities.
+Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, `DROPBOX_APP_KEY`, `DROPBOX_SAVE_FOLDER`, the public site origin, and published game identities stable across upgrades. Changing a namespace/folder selects another storage location; it does not rename or delete old files. Changing site origin also changes browser storage access. Plan a migration and preserve the old data before changing these identities.
 
 **Disconnect** revokes the browser's Nextcloud app credential and leaves remote save files in place. Clearing site data removes the browser connection and local data; it does not erase the Nextcloud folder. Revocation can also be performed through Nextcloud's own account settings.
 

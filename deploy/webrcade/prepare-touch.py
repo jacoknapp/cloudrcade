@@ -46,7 +46,7 @@ def overlay(relative, source, original, bundle, mains, tmp):
         original = original.replace('<head>', '<head><script src="' + controller_asset('psx-stream.js') + '"></script>', 1)
     names = re.findall(r'this\["(webpackJsonp[^"\]]+)"\]', bundle[:300])
     assert names and len(set(names)) == 1, source
-    cloud = '<script src="/cloud-saves/config.php"></script><script src="' + cloud_asset('runtime.js') + '"></script><script src="/cloud-saves/clock.js?v=1"></script><script src="' + cloud_asset('bridge.js') + '"></script><script>WrcadCloud.attachChunk(' + repr(names[0]) + ');</script>'
+    cloud = '<script src="/cloud-saves/config.php"></script><script src="' + cloud_asset('runtime.js') + '"></script><script src="/cloud-saves/clock.js?v=1"></script><script src="' + cloud_asset('dropbox.js') + '"></script><script src="' + cloud_asset('bridge.js') + '"></script><script>WrcadCloud.attachChunk(' + repr(names[0]) + ');</script>'
     if str(relative) == 'index.html':
         cloud += '<script src="' + controller_asset('category-art.js') + '"></script>'
         cloud += '<script src="' + controller_asset('recently-played.js') + '"></script>'

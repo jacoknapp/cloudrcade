@@ -121,18 +121,18 @@
         localStorage.setItem(PREFIX + uid, JSON.stringify(latest));
         apply({...merged, ...latest.pending});
         if (Object.keys(latest.pending).length) { schedule(); return; }
-        status('Controller settings saved to Nextcloud.');
+        status('Controller settings saved to ' + (cloud.providerName || 'Nextcloud') + '.');
         return;
       }
       throw new Error('Controller settings changed during sync');
     })().catch(() => {
-      status('Saved on this browser. Nextcloud sync will retry.');
+      status('Saved on this browser. ' + (cloud.providerName || 'Nextcloud') + ' sync will retry.');
       schedule(30000);
     }).finally(() => { running = null; });
     return running;
   };
   window.addEventListener('storage', e => {
-    if (e.key === prefix + '.nextcloud.connection.v1' || e.key === PREFIX + cloud.controlsAccount()) schedule();
+    if ([prefix + '.nextcloud.connection.v1', prefix + '.dropbox.connection.v1', prefix + '.cloud.provider.v1'].includes(e.key) || e.key === PREFIX + cloud.controlsAccount()) schedule();
   });
   window.addEventListener('online', () => schedule(0));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(0); });

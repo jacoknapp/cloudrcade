@@ -2,7 +2,7 @@
 
 [![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 
-**cloudЯcade** (cloudRcade, with a backwards R) lets you play a supplied game library in a web browser. It is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade), with Nextcloud saves, editable touch controls, Recently Played, offline caching, clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app. It preserves upstream history and credits; it is not an official webRcade release.
+**cloudЯcade** (cloudRcade, with a backwards R) lets you play a supplied game library in a web browser. It is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade), with Nextcloud and Dropbox saves, editable touch controls, Recently Played, offline caching, clock support, PlayStation disc streaming and an Azahar-based Nintendo 3DS app. It preserves upstream history and credits; it is not an official webRcade release.
 
 <a id="mobile-and-installed-web-app"></a>
 
@@ -22,7 +22,7 @@ PSP support is available by default; no player or Docker enable setting is neede
 
 <a id="nextcloud-and-sso"></a>
 
-Nextcloud is visible in **Settings → Cloud Storage** when the operator enables it. You can check the account, link it manually and manage the connection. The operator may also configure automatic sign-in. Browser-local saves work without a cloud connection for supported games. The inherited Dropbox option appears only when the upstream runtime supports linking on the current site. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) covers Dropbox shared-file hosting, its inherited account screen and Google Drive source files. Native Dropbox and Drive save synchronization are not supported end to end in this release.
+Nextcloud and Dropbox can sync supported game saves, state slots, controller preferences and Recently Played. Operators enable providers; players choose a save destination in **Settings → Cloud Storage → Choose storage** and link their own account. Dropbox requires the operator's scoped App Folder app and public app key; its sign-in uses PKCE without an app secret. Browser-local saves work without a cloud connection for supported games. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) explains provider setup, switching, shared-file hosting and Google Drive source files. Google Drive save synchronization is not implemented.
 
 <a id="internet-connection-for-streamed-games"></a>
 
