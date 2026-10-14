@@ -107,6 +107,9 @@ async function boot(){
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
   pauseMenu=createPauseMenu({root:get('gamecube-menu'),appProps:{...props,title:props?.title||metadata.title||'GameCube',app:'GameCube'},emulator:{getStateSlots:()=>saves.stateSlots(),saveStateForSlot:slot=>stateAction(false,slot),loadStateForSlot:slot=>stateAction(true,slot),deleteStateForSlot:slot=>saves.deleteState(slot),getPerformance:()=>perf?.details||'Waiting for measurements.',getSaveStatus:()=>saves?.syncStatus||(pausing?'Pausing game…':'Memory cards checked when Menu opens.'),isSaveBusy:()=>!!saves?.syncing,subscribeSaves:listener=>saves.subscribe(listener),exit:()=>close({leave:true})},onResume:resumeFromMenu,onPause:showPauseMenu});
+  // Desktop games start with audio enabled, independently of the touch panel.
+  // Browser permission to resume audio must never delay core startup.
+  if(!matchMedia('(pointer: coarse)').matches)void toggleAudio();
  });
 }
 get('boot').onclick=boot;
@@ -199,6 +202,7 @@ addEventListener('pageshow',()=>{if(!document.hidden)backgroundPause.foreground(
 // A return gesture retries interrupted browser audio without changing an
 // intentional menu pause or requiring a second trip through controller settings.
 addEventListener('pointerdown',()=>{if(sound&&session?.booted&&!session.paused&&!document.hidden)void resumeAudio().catch(error=>status(error.message));});
+addEventListener('keydown',()=>{if(sound&&session?.booted&&!session.paused&&!document.hidden)void resumeAudio().catch(error=>status(error.message));});
 addEventListener('message',async event=>{
  if(!embedded||event.source!==parent||event.origin!==location.origin||event.data!=='exit')return;
  try{await close();if(!session)event.source.postMessage('exitComplete',event.origin);}catch(error){status(error.message);}

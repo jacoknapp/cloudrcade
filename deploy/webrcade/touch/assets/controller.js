@@ -2,9 +2,10 @@
 (() => {
   'use strict';
   const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
-  const touchDevice = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+  // A touch-capable desktop using a mouse still uses the desktop interface.
+  const touchDevice = matchMedia('(pointer: coarse)').matches;
   const gamecubePage = location.pathname.startsWith('/experimental/gamecube/') || document.documentElement.dataset.cloudrcadeCore === 'gamecube';
-  if (!touchDevice && !gamecubePage) return;
+  if (!touchDevice) return;
   const KEY = prefix + '.touch.enabled.v1';
   const MUTE_KEY = prefix + '.touch.muted.v1';
   const DS_VIEW_KEY = prefix + '.touch.ds-view.v1';

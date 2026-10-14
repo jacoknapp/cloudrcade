@@ -63,11 +63,13 @@ def patch_bundle(raw):
  # A second switch runs lit 3DS draws on the CPU again, to compare speed on a device.
  litcpu=b'(function(){try{return localStorage.getItem("wrcad.3ds.litcpu.v1")==="1"}catch(e){return!1}})()'
  gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")!=="0"}catch(e){return!0}})()'
+ gc_enabled=b'(function(){try{return localStorage.getItem("wrcad.gamecube.enabled.v1")!=="0"}catch(e){return!0}})()'
+ gc_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl&&'+gc_enabled+b')'
  page=(b'var WrcadExperimental=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
-  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
-  b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl)?[[t.gcPerfRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
+  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.gcEnabledRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
+  b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl)?[[t.gcPerfRef],[t.gcEnabledRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
   b'var n=this.gridComps,a=this.props.setFocusGridComps,i=this.props.isActive;i&&i!==e.isActive&&a(n)},'
-  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef;return['
+  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef,v=this.gcEnabledRef,c=this.props.values,u=this.props.setValues;return['
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"3DS performance readout"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:r,onPad:function(e){return t.moveFocus(e.type,r)},onChange:function(e){'
   b'try{e.target.checked?localStorage.setItem("wrcad.3ds.perf.v1","1"):localStorage.removeItem("wrcad.3ds.perf.v1")}catch(x){}'
@@ -83,7 +85,8 @@ def patch_bundle(raw):
   b'n.forceUpdate()},checked:'+gcperf+b'}))):null,'
   b'window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl?'
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"GameCube (experimental)"),i.a.createElement(La,null,'
-  b'i.a.createElement("a",{href:window.WrcadCloudConfig.gamecubePrototypeUrl},"Open GameCube disc"))):null'
+  b'i.a.createElement(Va,{ref:v,onPad:function(e){return t.moveFocus(e.type,v)},onChange:function(e){'
+  b'u(j({},c,{gcEnabled:e.target.checked}))},checked:c.gcEnabled}))):null'
   b']},t}(_a);'
   b'WrcadExperimental.contextType=Wn;')
  icon=(b'data:image/svg+xml;base64,'+__import__('base64').b64encode(
@@ -91,12 +94,31 @@ def patch_bundle(raw):
   b'<path d="M0 0h24v24H0z" fill="none"/><path d="M19.8 18.4L14 10.67V6.5l1.35-1.69c.26-.33.03-.81-.39-.81H9.04'
   b'c-.42 0-.65.48-.39.81L10 6.5v4.17L4.2 18.4c-.49.66-.02 1.6.8 1.6h14c.82 0 1.29-.94.8-1.6z"/></svg>'))
  tab=(b',...((window.WrcadCloudConfig&&(window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubePrototypeUrl))?[{image:"'+icon+b'",label:"Experimental Settings",content:i.a.createElement(WrcadExperimental,'
-  b'{isActive:5===l,setFocusGridComps:d})}] : [])')
+  b'{isActive:5===l,setFocusGridComps:d,values:c,setValues:g})}] : [])')
  patched = raw.replace(old,new).replace(marker,hook+marker).replace(cloud_tab,cloud_tab+cloud_hook).replace(
   b'"'+default_feed+b'"',b'(new URL(window.WrcadCloudConfig&&window.WrcadCloudConfig.feedUrl||"/content/feeds/combined.json",location.href).href)' ).replace(
-  ds_type,psp_type+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl)?['+gamecube_type.rstrip(b',')+b'] : []),'+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?['+n3ds_type.rstrip(b',')+b'] : []),'+ds_type).replace(ds_alias,ds_alias+b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)&&st(rt,"3ds","retro-azahar"),(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl)&&st(rt,"gamecube","retro-dolphin"),st(rt,"psp","retro-ppsspp"),').replace(
+  ds_type,psp_type+b'...('+gc_available+b'?['+gamecube_type.rstrip(b',')+b'] : []),'+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?['+n3ds_type.rstrip(b',')+b'] : []),'+ds_type).replace(ds_alias,ds_alias+b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)&&st(rt,"3ds","retro-azahar"),'+gc_available+b'&&st(rt,"gamecube","retro-dolphin"),st(rt,"psp","retro-ppsspp"),').replace(
   after_advanced,after_advanced+page).replace(
   last_tab,last_tab[:-len(b']})')]+tab+b']})')
+
+ # Visibility is a GameCube-only preference. Apply on native Settings OK and
+ # retain normal Cancel behavior; reload once to rebuild registry/feed/search.
+ values=b'expApps:Yt.isExpAppsEnabled(),vsync:'
+ save=b's.expApps!==c.expApps?n.showAlertScreen'
+ assert patched.count(values)==patched.count(save)==1,'Unexpected settings save'
+ patched=patched.replace(values,b'gcEnabled:'+gc_enabled+b','+values).replace(save,
+  b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl&&s.gcEnabled!==c.gcEnabled)?'
+  b'(function(){try{localStorage.setItem("wrcad.gamecube.enabled.v1",c.gcEnabled?"1":"0")}catch(e){}'
+  b'return Yt.save().finally((function(){window.location.reload()}))})():'+save)
+ # Filter before validation so hidden games are not treated as invalid ROMs.
+ # A GameCube-only feed still needs an empty library with accessible Settings.
+ parse=b'_parseFeed=function(e){var t=this,n=Pt.instance;'
+ assert patched.count(parse)==1,'Unexpected feed parser'
+ filtered=(b'if(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubePrototypeUrl&&!'+gc_enabled+b'&&Array.isArray(e.categories)){'
+  b'e.categories=e.categories.map(function(c){return j({},c,{items:Array.isArray(c.items)?c.items.filter(function(a){return a.type!=="gamecube"&&a.type!=="retro-dolphin"}):c.items})})'
+  b'.filter(function(c){return !Array.isArray(c.items)||c.items.length});'
+  b'if(!e.categories.length){this.filterCategories=!1;e.categories=[{title:"No games",items:[]}]}}')
+ patched=patched.replace(parse,parse+filtered)
 
  # CloudRcade modification: replace the upstream logo with the env app name.
  logo=b'children:[Object(O.jsx)("div",{className:t+"-left-text",children:"web"}),Object(O.jsx)("img",{className:t+"-image",alt:"web\\u042fcade",src:n}),Object(O.jsx)("div",{className:t+"-right-text",children:"cade"})]'

@@ -1,5 +1,13 @@
 /* Shared native UI only. No library JS or canvas/core changes in game frames. */
+/* All settings tabs use the same viewport scale for labels, values and actions. */
+._QxYEW {
+  --cr-settings-text-size: clamp(14px, 1.6vw, 28px);
+  --cr-settings-heading-size: calc(var(--cr-settings-text-size) * 1.25);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 @media (pointer: coarse) and (max-width: 1366px) {
+  ._QxYEW { --cr-settings-text-size: 14px; --cr-settings-heading-size: 15px; }
   ._23LJF { position: fixed; background: #000b; font: 14px/1.4 Quicksand, sans-serif; }
   /* A consistent panel keeps page arrows and OK/Cancel under the same fingers. */
   ._QxYEW { width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-width: 440px; min-height: 0; height: min(400px, calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); gap: 0; background: #0b0b0b; border: 1px solid #e50914; border-radius: 8px; box-shadow: 0 16px 60px #000b; overflow: hidden; box-sizing: border-box; }
@@ -85,3 +93,9 @@
 @media (prefers-reduced-motion: reduce) {
   ._QxYEW, ._K9wjr, ._1O0HI ._2KOe- { animation: none; }
 }
+._QxYEW ._3aKyj, ._QxYEW ._19qVy, ._QxYEW ._1FOsd,
+._QxYEW ._2J1_d, ._QxYEW ._1YiUm, ._QxYEW ._1YZKt,
+._QxYEW ._6miOA, ._QxYEW input, ._QxYEW select, ._QxYEW textarea {
+  font-size: var(--cr-settings-text-size);
+}
+._QxYEW ._R64Gp { font-size: var(--cr-settings-heading-size); }
