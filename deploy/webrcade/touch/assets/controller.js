@@ -419,10 +419,13 @@
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
     const height = canvas.getBoundingClientRect().height;
-    // PlayStation portrait keeps its native picture size near the safe top,
-    // including while the controller drawer or pause menu is open.
+    // Center PlayStation portrait within the upper three-quarters of the safe
+    // visible screen, including while controls or pause menus are hidden.
     const portraitPSX = system === 'psx' && bounds.width < bounds.height;
-    const middle = portraitPSX ? Math.max(bounds.top, psxOrigin.getBoundingClientRect().top) + 16 + height / 2 :
+    const safe = portraitPSX ? psxOrigin.getBoundingClientRect() : null;
+    const safeTop = portraitPSX ? Math.max(bounds.top, safe.top) : bounds.top;
+    const safeBottom = portraitPSX ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
+    const middle = portraitPSX ? safeTop + Math.max(0, safeBottom - safeTop) * 3 / 8 :
       bounds.top + (bounds.height - excludedTop) / 2;
     // Fill/zoom can leave no room to move: keep the native picture visible.
     const center = height <= bounds.height ?

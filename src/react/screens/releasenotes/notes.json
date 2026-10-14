@@ -1,5 +1,13 @@
 [
   {
+    "version": "2.0.4",
+    "date": "October 14, 2026",
+    "title": "PlayStation portrait centering",
+    "changes": [
+      "The PlayStation picture is centered within the top three-quarters of the usable portrait screen."
+    ]
+  },
+  {
     "version": "2.0.3",
     "date": "October 14, 2026",
     "title": "PlayStation portrait layout",
