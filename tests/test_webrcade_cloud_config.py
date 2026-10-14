@@ -33,13 +33,13 @@ def main():
  custom={**BASE,'WEBRCADE_APP_NAME':'My Arcade','WEBRCADE_STORAGE_PREFIX':'myarcade','NEXTCLOUD_SAVE_FOLDER':'Game Saves','WEBRCADE_FEED_URL':'https://catalog.example.com/feed.json','WEBRCADE_ENABLE_3DS':'true'}
  body,_=run(custom);assert body['config']['appName']=='My Arcade' and body['config']['storagePrefix']=='myarcade' and body['config']['saveFolder']=='Game Saves' and body['config']['feedUrl']==custom['WEBRCADE_FEED_URL'] and body['config']['enable3DS']
  body,_=run({**custom,'WEBRCADE_STORAGE_PREFIX':'../bad','NEXTCLOUD_SAVE_FOLDER':'..','WEBRCADE_FEED_URL':'//evil.invalid/feed.json'});assert body['config']['storagePrefix']=='cloudrcade' and body['config']['saveFolder']=='CloudRcade' and body['config']['feedUrl']=='/content/feeds/combined.json'
- body,_=run({**BASE,'NEXTCLOUD_ENABLED':'false','DROPBOX_ENABLED':'true','DROPBOX_APP_KEY':'public-app-key','DROPBOX_SAVE_FOLDER':'Game Saves'});assert not body['config']['enabled'] and body['config']['dropbox']=={'enabled':True,'appKey':'public-app-key','saveFolder':'Game Saves'}
+ body,_=run({**BASE,'NEXTCLOUD_ENABLED':'false','DROPBOX_ENABLED':'true','DROPBOX_APP_KEY':'public-app-key','DROPBOX_SAVE_FOLDER':'Game Saves'});assert not body['config']['enabled'] and body['config']['dropbox']=={'enabled':True,'appKey':'public-app-key'}
  for settings in [{'DROPBOX_APP_KEY':''},{'DROPBOX_APP_KEY':'invalid/key'},{'WEBRCADE_PUBLIC_URL':'http://unsafe.test'}]:
   body,_=run({**BASE,'DROPBOX_ENABLED':'true','DROPBOX_APP_KEY':'public-key',**settings});assert not body['config']['dropbox']['enabled']
- body,_=run({**BASE,'DROPBOX_SAVE_FOLDER':'../bad'});assert body['config']['dropbox']['saveFolder']==''
+ body,_=run({**BASE,'DROPBOX_SAVE_FOLDER':'../bad'});assert 'saveFolder' not in body['config']['dropbox']
  for setting in [{},{'DROPBOX_SAVE_FOLDER':''},{'DROPBOX_SAVE_FOLDER':'   '}]:
-  body,_=run({**BASE,**setting});assert body['config']['dropbox']['saveFolder']==''
- body,_=run({**BASE,'DROPBOX_SAVE_FOLDER':'CloudRcade'});assert body['config']['dropbox']['saveFolder']=='CloudRcade'
+  body,_=run({**BASE,**setting});assert 'saveFolder' not in body['config']['dropbox']
+ body,_=run({**BASE,'DROPBOX_SAVE_FOLDER':'CloudRcade'});assert 'saveFolder' not in body['config']['dropbox']
  body,state=run(BASE,'login');assert state['status']==200 and body['start'] is None and body['login'].startswith(BASE['NEXTCLOUD_URL']+'/')
  assert state['calls']==[BASE['NEXTCLOUD_URL']+'/index.php/login/v2']
  body,state=run({**BASE,'NEXTCLOUD_AUTO_REDIRECT':'true','NEXTCLOUD_HANDOFF':'true'},'login');assert body['start']==BASE['NEXTCLOUD_URL']+'/apps/retroarcade_login/start'

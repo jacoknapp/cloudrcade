@@ -30,8 +30,6 @@ function cloudConfig(): array {
     if (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $folder) || in_array($folder, ['.', '..'], true)) $folder = 'CloudRcade';
     $dropboxKey = trim((string)getenv('DROPBOX_APP_KEY'));
     if (!preg_match('/^[A-Za-z0-9_-]{3,128}$/D', $dropboxKey)) $dropboxKey = '';
-    $dropboxFolder = trim((string)getenv('DROPBOX_SAVE_FOLDER'));
-    if ($dropboxFolder !== '' && (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $dropboxFolder) || in_array($dropboxFolder, ['.', '..'], true))) $dropboxFolder = '';
     $dropboxEnabled = cloudBool('DROPBOX_ENABLED') && $dropboxKey !== '' && cloudUrl('WEBRCADE_PUBLIC_URL', true) !== '';
     $feed = trim((string)getenv('WEBRCADE_FEED_URL')) ?: '/content/feeds/combined.json';
     if (!preg_match('~^/(?!/)[^\s\\\\]*$~D', $feed) && !validFeedUrl($feed)) $feed = '/content/feeds/combined.json';
@@ -41,7 +39,7 @@ function cloudConfig(): array {
         'storagePrefix' => $prefix, 'saveFolder' => $folder, 'feedUrl' => $feed,
         'enable3DS' => cloudBool('WEBRCADE_ENABLE_3DS'),
         'n3dsKeysUrl' => cloudBool('WEBRCADE_ENABLE_3DS') && n3dsKeysPath() !== '' ? '/cloud-saves/3ds-keys.php' : '',
-        'dropbox' => ['enabled' => $dropboxEnabled, 'appKey' => $dropboxKey, 'saveFolder' => $dropboxFolder],
+        'dropbox' => ['enabled' => $dropboxEnabled, 'appKey' => $dropboxKey],
         'enabled' => $enabled, 'autoRedirect' => $enabled && cloudBool('NEXTCLOUD_AUTO_REDIRECT'),
         'server' => $server, 'handoff' => cloudBool('NEXTCLOUD_HANDOFF'), 'accessAllowed' => $allowed,
         // Upgrade-only: claim legacy credentials only for the explicitly configured old server.

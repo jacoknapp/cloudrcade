@@ -12,7 +12,7 @@
   try { config = window.WrcadCloudConfig || JSON.parse(localStorage.getItem(CONFIG_KEY)) || config; } catch (_) {}
   if (window.WrcadCloudConfig) try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) {}
   if (provider === 'dropbox') config = {...config, enabled:Boolean(config.dropbox?.enabled), accessAllowed:true, autoRedirect:false,
-    server:'dropbox:' + config.dropbox?.appKey, legacyServer:'', saveFolder:config.dropbox?.saveFolder, message:'Dropbox has not been enabled on this site.'};
+    server:'dropbox:' + config.dropbox?.appKey, legacyServer:'', saveFolder:'', message:'Dropbox has not been enabled on this site.'};
   let connection = null, csrf = null, bootstrap = null;
   const AUTO_ATTEMPT = KEY + '.attempt', AUTO_PAUSED = KEY + '.paused';
   const versions = new Map(), blocked = new Set(), installed = new WeakSet();

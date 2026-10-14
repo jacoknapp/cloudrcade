@@ -57,7 +57,7 @@ function fixture(overrides = {}, local = backups) {
  const nav = {onLine:true};
  const location = {origin:'https://arcade.test', assign:url=>location.assigned=url, replace:url=>location.replaced=url};
  const win = {top:{},navigator:nav,addEventListener(){},WrcadCloudConfig:{storagePrefix:prefix, appName:'CloudRcade', enabled:true, server:'https://nextcloud.test', legacyServer:'https://nextcloud.test',accessAllowed:true,
-  dropbox:{enabled:true,appKey:'fixture-app',saveFolder:'CloudRcade'}, ...overrides}};
+  dropbox:{enabled:true,appKey:'fixture-app'}, ...overrides}};
  const ctx = vm.createContext({window:win,navigator:nav,location,localStorage:storage(disk),sessionStorage:storage(session),fetch,Blob,Response,URL,URLSearchParams,AbortSignal,
   crypto:require('node:crypto').webcrypto,TextEncoder,TextDecoder,Uint8Array,btoa,unescape,console});
  vm.runInContext(source('dropbox'),ctx); vm.runInContext(source('bridge'),ctx);
@@ -102,8 +102,8 @@ const value = files => files?.find(f=>f.name==='sav')?.content[0];
  assert.deepEqual(Array.from(restored),[7,8]);
  const slots=await b.manager.getStateSlots('/states/');assert(slots[1].time);assert.equal(slots[1].shot,'data:image/png;base64,fixture');
  await b.manager.delete('/states/state.1'); await b.manager.deleteCloudSingleFile('/states/state.1.json');
- assert.equal(remote.has(JSON.stringify(['alice','/CloudRcade/states/state.1.zip'])),false);
- assert.equal(remote.has(JSON.stringify(['alice','/CloudRcade/states/state.1.json'])),false);
+ assert.equal(remote.has(JSON.stringify(['alice','/states/state.1.zip'])),false);
+ assert.equal(remote.has(JSON.stringify(['alice','/states/state.1.json'])),false);
  // Both settings/history documents use ordinary conditional JSON transfers.
  for (const [load,save,doc] of [['loadControls','saveControls',{version:1,settings:{muted:true}}],['loadRecent','saveRecent',{version:1,entries:[]}]]) {
   await assert.rejects(a.cloud[load](),e=>e.status===404);await a.cloud[save](doc);assert.deepEqual(JSON.parse(JSON.stringify(await b.cloud[load]())),doc);
@@ -134,21 +134,18 @@ const value = files => files?.find(f=>f.name==='sav')?.content[0];
  for (const path of ['../../private.zip','save/../private.zip','file.txt','/folder//file.zip']) await assert.rejects(transport.request('file',{uid:'alice',path}),e=>e.status===400);
  await assert.rejects(transport.request('file',{uid:'alice',method:'PUT',path:'valid.zip',body:'x'}),e=>e.status===428);
  await assert.rejects(transport.request('file',{uid:'alice',method:'PUT',path:'valid.zip',body:new Blob([new Uint8Array(67108865)]),extra:{'If-None-Match':'*'}}),e=>e.status===413);
- // Unset/empty folders write directly to the app root. Explicit folders remain optional.
- for(const folder of [undefined,'','Game Saves','CloudRcade']) {
-  const db={enabled:true,appKey:'fixture-app',...(folder===undefined?{}:{saveFolder:folder})};
-  const configured=fixture({dropbox:db});
-  const path='folder-choice-'+(folder===undefined?'unset':folder===''?'empty':folder==='Game Saves'?'custom':'old')+'.json';
+ // The app registration owns the base folder. Obsolete cached save-folder
+ // settings must never add a subfolder or change the Dropbox app identity.
+ for(const folder of [undefined,'','Game Saves','CloudRcade','../bad',12]) {
+  const configured=fixture({dropbox:{enabled:true,appKey:'fixture-app',saveFolder:folder}});
+  const path='always-root.json';
   await configured.dropbox.request('file',{uid:'alice',method:'PUT',path,body:'{}',extra:{'If-None-Match':'*'}});
-  const destination='/' + (folder?folder+'/':'')+path;
+  const destination='/'+path;
   assert(remote.has(JSON.stringify(['alice',destination])));
   assert.equal(await (await configured.dropbox.request('file',{uid:'alice',path})).text(),'{}');
   await configured.dropbox.request('file',{uid:'alice',path,method:'HEAD'});
   await configured.dropbox.request('file',{uid:'alice',path,method:'DELETE'});
   assert(!remote.has(JSON.stringify(['alice',destination])));
- }
- for(const folder of ['../bad','..','/bad','bad/folder',12]) {
-  await assert.rejects(fixture({dropbox:{enabled:true,appKey:'fixture-app',saveFolder:folder}}).dropbox.request('file',{uid:'alice',path:'file.json'}),e=>e.status===400);
  }
  // Real S256 construction and one-shot state-bound OAuth code exchange.
  disk.delete(key);const login=fixture();await login.dropbox.begin('https://arcade.test/play/?feed=test');
@@ -169,7 +166,7 @@ const value = files => files?.find(f=>f.name==='sav')?.content[0];
  assert.equal(JSON.parse(disk.get(key)).uid,'alice');
  // A failed deletion with stale revision preserves the newer file.
  const client=fixture();await client.manager.load('/nes/test');
- const k=JSON.stringify(['alice','/CloudRcade/nes/test.zip']);remote.get(k).rev='fffffffff';
+ const k=JSON.stringify(['alice','/nes/test.zip']);remote.get(k).rev='fffffffff';
  await assert.rejects(client.dropbox.request('file',{uid:'alice',method:'DELETE',path:'nes/test.zip',extra:{'If-Match':'"000000001"'}}),e=>e.status===409);
  assert(remote.has(k));
  console.log('PASS Dropbox shared saves/states/metadata/delete/settings/history, cross-device conflicts, offline/lost-ack recovery, refresh/account/provider isolation and PKCE sign-in recovery');
