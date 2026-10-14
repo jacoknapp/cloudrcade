@@ -15,7 +15,7 @@ RUN WEBRCADE_SOURCE_ROOT=/source WEBRCADE_PLAYER_OUTPUT=/out-player.js python3 p
  && WEBRCADE_SOURCE_ROOT=/source WEBRCADE_EXTRA_APPS=/extra WEBRCADE_TOUCH_ROOT=/out-pages python3 prepare-touch.py
 
 FROM php:8.3-apache-bookworm AS web
-RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-tools mariadb-client nodejs npm openssl \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-tools nodejs npm openssl \
  && npm install -g miniflare@2.12.1 \
  && a2enmod headers proxy_http ssl \
  && mkdir -p /usr/local/apache2/conf/ssl \
@@ -42,7 +42,7 @@ LABEL com.centurylinklabs.watchtower.enable="false"
 COPY LICENSE LICENSE-third-party NOTICE THIRD_PARTY.md /var/www/html/licenses/
 COPY LICENSES/ /var/www/html/licenses/texts/
 COPY deploy/webrcade/rom-library.conf /etc/apache2/conf-enabled/rom-library.conf
-COPY deploy/webrcade/environment.py deploy/webrcade/refresh-feed.py deploy/webrcade/service.py /usr/local/share/cloudrcade/
+COPY deploy/webrcade/environment.py deploy/webrcade/refresh-feed.py deploy/webrcade/service.py deploy/webrcade/mount_layout.py deploy/webrcade/metadata_lookup.py /usr/local/share/cloudrcade/
 ENV WEBRCADE_APP_NAME=cloudЯcade WEBRCADE_STORAGE_PREFIX=cloudrcade \
     NEXTCLOUD_SAVE_FOLDER=CloudRcade WEBRCADE_ENABLE_3DS=true \
     WEBRCADE_ROM_ROOT=/var/www/html/content WEBRCADE_STATE_PATH=/data \

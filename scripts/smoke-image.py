@@ -55,7 +55,8 @@ class IconLinks(HTMLParser):
 
 with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     root = Path(temp)
-    roms, state, bios = root / 'roms', root / 'data', root / 'bios'
+    config_root, roms = root / 'config', root / 'roms'
+    state, bios = config_root / 'data', roms / '3DS/bios'
     for folder in [roms / 'nes/roms', roms / 'psp/roms', roms / 'fixtures', roms / '3DS/bios',
                    state / 'feeds', state / 'derived', bios]:
         folder.mkdir(parents=True, exist_ok=True)
@@ -71,19 +72,18 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     (bios / 'aes_keys.txt').write_text(synthetic_keys)
     (roms / '3DS/bios/aes_keys.txt').write_text(synthetic_keys)
     mounts = []
-    for source, target, readonly in [(roms, '/var/www/html/content', True),
-                                     (state, '/data', False),
-                                     (state / 'derived', '/var/www/html/derived', True),
-                                     (bios, '/run/webrcade/3ds', True)]:
+    for source, target, readonly in [(roms, '/roms', True), (config_root, '/config', False)]:
         mounts += ['--mount', f'type=bind,src={source},dst={target}' + (',readonly' if readonly else '')]
     args = ['run', *(['--platform', platform] if platform else []), '-d', '--name', name, '-p', '127.0.0.1::443',
             '-e', 'WEBRCADE_APP_NAME=Release Test Arcade', '-e', 'WEBRCADE_FEED_TITLE=Release Test Arcade',
             '-e', 'WEBRCADE_STORAGE_PREFIX=release_test', '-e', 'WEBRCADE_SCAN_INTERVAL_SECONDS=2',
             '-e', 'WEBRCADE_REQUIRED_ROM_DIR=nes/roms', '-e', 'WEBRCADE_ENABLE_3DS=true',
-            '-e', 'WEBRCADE_3DS_KEYS_FILE=/run/webrcade/3ds/aes_keys.txt', *mounts, image]
+            '-e', 'WEBRCADE_3DS_KEYS_FILE=/run/cloudrcade/3ds/aes_keys.txt', *mounts, image]
     try:
         docker(*args)
         info = json.loads(docker('inspect', name))[0]
+        assert len(info['Mounts']) == 2, 'config and ROM must be the only mounts'
+        assert sorted((m['Destination'], m['RW']) for m in info['Mounts']) == [('/config', True), ('/roms', False)]
         if platform:
             image_info = json.loads(docker('image', 'inspect', info['Image']))[0]
             assert image_info['Os'] + '/' + image_info['Architecture'] == platform, 'Wrong target image platform'
@@ -135,6 +135,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             with get(base + 'adapter-source/patch-runtime.py') as response:
                 assert hashlib.sha256(response.read()).hexdigest() == info['hostPatchSha256']
         assert config['n3dsKeysUrl'] == '/cloud-saves/3ds-keys.php'
+        with get('/cloud-saves/metadata.php?key='+'0'*64) as metadata_response:
+            assert json.load(metadata_response)=={'available':False}
+            assert 'no-store' in metadata_response.headers['Cache-Control']
         with get(config['n3dsKeysUrl']) as response:
             assert response.read().decode() == synthetic_keys
             assert 'no-store' in response.headers['Cache-Control']

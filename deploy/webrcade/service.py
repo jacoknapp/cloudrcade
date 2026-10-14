@@ -8,8 +8,10 @@ import subprocess
 import sys
 import threading
 import time
+from mount_layout import configure_mounts
 
 HERE = Path(__file__).resolve().parent
+configure_mounts()
 SCAN = [sys.executable, str(HERE / 'refresh-feed.py')]
 if sys.argv[1:] == ['scan']:
     raise SystemExit(subprocess.call(SCAN))

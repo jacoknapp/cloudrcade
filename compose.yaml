@@ -7,26 +7,10 @@ services:
       - "${WEBRCADE_BIND_ADDRESS:-127.0.0.1}:${WEBRCADE_HTTPS_PORT:-8443}:443"
     volumes:
       - type: bind
+        source: ${WEBRCADE_HOST_PATH:-./config}
+        target: /config
+      - type: bind
         source: ${WEBRCADE_ROM_PATH:-./roms}
-        target: /var/www/html/content
-        read_only: true
-      - type: bind
-        source: ${WEBRCADE_HOST_PATH:-./data}
-        target: /data
-      - type: bind
-        source: ${WEBRCADE_HOST_PATH:-./data}/derived
-        target: /var/www/html/derived
-        read_only: true
-      - type: bind
-        source: ${WEBRCADE_MANAGED_PATH:-./managed}
-        target: /var/www/html/managed
-        read_only: true
-      - type: bind
-        source: ${WEBRCADE_3DS_BIOS_PATH:-./roms/3DS/bios}
-        target: /run/cloudrcade/3ds
-        read_only: true
-      - type: bind
-        source: ${WEBRCADE_CONFIG_PATH:-./config}
-        target: /run/cloudrcade/config
+        target: /roms
         read_only: true
     restart: unless-stopped

@@ -24,7 +24,8 @@ def patch_bundle(raw):
  # React mounts the library; the hash above guards every pinned symbol here.
  marker=b'var re=oe;Object(l.X)(["images/default-thumb.png"])'
  assert raw.count(marker)==1,'Unexpected library bootstrap'
- hook=(b'window.WrcadRecent&&window.WrcadRecent.install({react:i.a,Browse:V,Library:oe});'
+ hook=(b'window.WrcadMetadata&&window.WrcadMetadata.install({Browse:V});'
+       b'window.WrcadRecent&&window.WrcadRecent.install({react:i.a,Browse:V,Library:oe});'
        b'window.WrcadMobile&&window.WrcadMobile.install({react:i.a,Browse:V,GamepadEnum:l.r});')
  cloud_tab=b'ni.contextType=Wn;'
  assert raw.count(cloud_tab)==1,'Unexpected cloud settings tab'

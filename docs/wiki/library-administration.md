@@ -134,27 +134,25 @@ The title controls the visible name; `categories` create system folders; `items`
 
 The feed's host and each ROM's host need suitable HTTPS/access/CORS behavior. A browser needs permission to fetch the file from a different website (**CORS**); being able to open a preview page is not enough. Linking Nextcloud does not grant access to a Dropbox/Drive ROM. Do not hand-edit `data/feeds/combined.json` for lasting custom entries: the next successful scanner run regenerates it. Keep your custom feed separately.
 
-## Optional Gaseous metadata
+## Metadata on demand
 
-Metadata is disabled by default. Without it, filenames supply titles. With a supported Gaseous database, matching rows can supply titles, descriptions and IGDB cover URLs. Most systems match hashes; 3DS matches filenames to avoid hashing multi-gigabyte files.
+CloudRcade can fetch metadata directly from IGDB when a game is selected in the
+library. Provider credentials stay server-side in `/config/metadata.json`:
 
-Mount an external JSON credential file under the host directory selected by `WEBRCADE_CONFIG_PATH` (default `./config`). Set:
-
-```dotenv
-WEBRCADE_METADATA_ENABLED=true
-WEBRCADE_METADATA_CONFIG=/run/cloudrcade/config/metadata.json
-WEBRCADE_METADATA_DB_HOST=database.example.com
-WEBRCADE_METADATA_DB_PORT=3306
+```json
+{"IGDBConfiguration":{"ClientId":"your-client-id","Secret":"your-client-secret"}}
 ```
 
-The JSON's `DatabaseConfiguration` supplies `UserName`, `Password` and `DatabaseName`. Use an appropriate read-only database account and a reachable, protected database connection. Keep credentials outside Git and release images. The scanner passes the password through its child environment rather than command-line arguments.
+Set `WEBRCADE_METADATA_ENABLED=true`. Cached results are reused, requests are
+serialized and bounded, and missing credentials/provider outages never prevent
+launching games. Existing imported metadata remains available in the local cache;
+no Gaseous service, database, SQL client or socket is required. New lookups are
+cached under `data/metadata/` and included in subsequent feed scans. Keep the
+metadata credential file readable only by the container's root/www-data group
+(mode0640, host GID33). Never store credentials under the public ROM tree.
 
-Alternatively, add a read-only shared MariaDB socket-directory mount to your own Compose configuration and set `WEBRCADE_METADATA_DB_SOCKET` to its path inside the app. Socket transport takes precedence over TCP host/port. The database container must also share that directory. The root example does not add a socket mount for you.
-
-`WEBRCADE_METADATA_PATH_PREFIX` can map Gaseous catalog paths into `WEBRCADE_MANAGED_ROOT` (root example `/var/www/html/managed`, mounted from `WEBRCADE_MANAGED_PATH`). The legacy `WEBRCADE_METADATA_CONTAINER` option is for host-run scanner compatibility; integrated operation should use direct TCP/socket mode and needs no Docker socket.
-
-## Mount guards and exclusions
-
-`WEBRCADE_REQUIRED_ROM_DIR` requires a particular directory below the scanner root. `WEBRCADE_REQUIRE_ROM_MOUNT` optionally requires the root to be a mountpoint. Use these when they match your storage layout so an absent share does not look like a valid replacement library.
-
-`WEBRCADE_ENABLE_3DS=false` omits 3DS from generated feeds. `WEBRCADE_3DS_SKIP_DIRS` and `WEBRCADE_3DS_SKIP_NAMES` are pipe-separated directory components and filename stems to exclude. These are operator settings. They control 3DS feed inclusion and app registration; the browser's inherited Experimental apps preference and 3DS diagnostic settings are separate. Recreate the container after environment changes and run/review a scan.
+Deploy with a writable config folder at `/config` and read-only games at `/roms`.
+Config contains `data/`, `tls/` and optional `metadata.json`; games keep their
+normal system folders, managed imports use `managed/`, and the 3DS key stays in
+`3DS/bios/aes_keys.txt`. Existing internal paths are mapped inside the image, so
+public game/feed URLs and save identities remain stable.

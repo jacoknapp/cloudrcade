@@ -25,7 +25,7 @@ You need Docker with Compose, space for ROMs and writable app data, and an HTTPS
 git clone https://github.com/jacoknapp/cloudrcade.git
 cd cloudrcade
 cp .env.example .env
-mkdir -p roms/nes/roms roms/3DS/bios data/feeds data/derived managed config
+mkdir -p roms/nes/roms roms/3DS/bios config/data/feeds config/data/derived config/tls roms/managed
 ```
 
 Edit `.env`. Set `WEBRCADE_PUBLIC_URL` to your public origin, for example `https://arcade.example.com`. The default initial feed is `/content/feeds/combined.json`. Keep relative feed/content URLs for a same-origin deployment. Leave Nextcloud and metadata disabled for the first test if you do not need them yet.

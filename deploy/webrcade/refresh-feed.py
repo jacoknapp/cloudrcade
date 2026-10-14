@@ -7,6 +7,7 @@ import runpy
 _env = runpy.run_path(str(Path(__file__).with_name('environment.py')))
 load_environment, env_bool = _env['load_environment'], _env['env_bool']
 load_environment()
+cached_item=runpy.run_path(str(Path(__file__).with_name('metadata_lookup.py')))['cached_item']
 
 ROOT = Path(os.environ.get('WEBRCADE_ROM_ROOT', '/var/www/html/content'))
 STATE = Path(os.environ.get('WEBRCADE_STATE_PATH', '/data'))
@@ -30,6 +31,17 @@ SYSTEMS = {
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
  'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
+
+def managed_matches(path,folder,extensions):
+ if path.suffix.lower() not in extensions:return False
+ if path.suffix.lower()=='.iso':
+  if folder=='GameCube':return gamecube_game(path) is not None
+  if folder!='psp':return False
+  with path.open('rb') as f:return b'PSP_GAME' in f.read(512*1024)
+ if path.suffix.lower()=='.bin':
+  if folder!='segaMD':return False
+  with path.open('rb') as f:f.seek(0x100);return f.read(4)==b'SEGA'
+ return True
 
 def gamecube_game(path):
  # Disc identity and format validation need only the header, never a GB hash.
@@ -58,33 +70,15 @@ def rom_url(path):
  return BASE+quote(relative)
 
 def metadata():
- if not env_bool('WEBRCADE_METADATA_ENABLED'): return []
- cfg=json.load(open(os.environ['WEBRCADE_METADATA_CONFIG']))['DatabaseConfiguration']
- sql="""SELECT JSON_OBJECT('path',r.Path,'md5',r.MD5,'game',r.GameId,
- 'platform',r.PlatformId,'title',g.Name,'summary',g.Summary,'cover',c.ImageId)
- FROM Games_Roms r LEFT JOIN Game g ON r.GameId=g.Id LEFT JOIN Cover c ON g.Cover=c.Id;"""
- socket=os.environ.get('WEBRCADE_METADATA_DB_SOCKET','').strip()
- host=os.environ.get('WEBRCADE_METADATA_DB_HOST','').strip()
- options=['--batch','--raw','--skip-column-names','--default-character-set=utf8mb4',
-          '-u'+cfg['UserName'],'-D'+cfg['DatabaseName']]
- if socket:
-  command=['mariadb','--protocol=SOCKET','--socket='+socket,*options]
-  child_env={**os.environ,'MYSQL_PWD':cfg['Password']}
- elif host:
-  command=['mariadb','--host='+host,'--port='+os.environ.get('WEBRCADE_METADATA_DB_PORT','3306'),*options]
-  child_env={**os.environ,'MYSQL_PWD':cfg['Password']}
- else:
-  # Compatibility for operators running the scanner on a Docker host.
-  command=['docker','exec','-i','-e','MYSQL_PWD',
-           os.environ['WEBRCADE_METADATA_CONTAINER'],'mariadb',*options]
-  child_env={**os.environ,'MYSQL_PWD':cfg['Password']}
- proc=subprocess.run(command,input=sql,text=True,capture_output=True,timeout=60,env=child_env)
- if proc.returncode: raise RuntimeError('Gaseous metadata query failed')
- return [json.loads(line) for line in proc.stdout.splitlines() if line]
+ # Existing imported metadata is a local cache, never a live catalog dependency.
+ cached=STATE/'metadata-cache.json'
+ if not env_bool('WEBRCADE_METADATA_ENABLED') or not cached.is_file(): return []
+ rows=json.loads(cached.read_text())
+ return rows if isinstance(rows,list) else []
 
 def n3ds_game(path):
  """Return a cheap identity for a bootable 3DS game, or None for anything else."""
- relative=path.relative_to(ROOT/'3DS')
+ relative=path.relative_to(ROOT/'3DS') if path.is_relative_to(ROOT/'3DS') else path.relative_to(MANAGED)
  if N3DS_SKIP_DIRS.intersection(relative.parts[:-1]) or path.stem in N3DS_SKIP_NAMES: return None
  align=lambda value:(value+63)&~63
  try:
@@ -153,16 +147,18 @@ def main():
   try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError: print('Refresh already running'); return
   required = os.environ.get('WEBRCADE_REQUIRED_ROM_DIR', '')
-  if not ROOT.is_dir() or (env_bool('WEBRCADE_REQUIRE_ROM_MOUNT') and not os.path.ismount(ROOT)) or (required and not (ROOT/required).is_dir()):
+  if not ROOT.is_dir() or (env_bool('WEBRCADE_REQUIRE_ROM_MOUNT') and not os.path.ismount(ROOT.resolve())) or (required and not (ROOT/required).is_dir()):
    raise RuntimeError('ROM share unavailable; retaining previous feeds')
   (STATE/'derived').mkdir(exist_ok=True)
   try:
-   rows=metadata(); atomic(STATE/'metadata-cache.json',rows); metadata_source='live'
+   rows=metadata(); metadata_source='cached' if rows else 'filenames'
   except (RuntimeError,subprocess.SubprocessError,OSError):
    cached=STATE/'metadata-cache.json'
    rows=json.loads(cached.read_text()) if cached.exists() else []
    metadata_source='cached' if cached.exists() else 'filenames'
-   print('Gaseous unavailable; using '+metadata_source+' metadata',flush=True)
+   print('Metadata cache unavailable; using '+metadata_source+' metadata',flush=True)
+  managed_files=sorted(p for p in MANAGED.rglob('*') if p.is_file()) if MANAGED.is_dir() else []
+  managed_platforms={str(MANAGED/r['path'][len(MANAGED_PREFIX):]):r['platform'] for r in rows if MANAGED_PREFIX and r['path'].startswith(MANAGED_PREFIX)}
   by_hash={r['md5'].lower():r for r in rows if r['md5']}
   # 3DS files are several GB; match their metadata by file name instead of hashing them.
   n3ds_by_name={Path(r['path']).name:r for r in rows if r['platform'] in N3DS_PLATFORMS}
@@ -196,7 +192,7 @@ def main():
    if folder == 'GameCube' and not Path('/var/www/html/experimental/gamecube/core-info.json').is_file(): continue
    items=[]
    candidates=sorted((ROOT/folder if folder in ('3DS','GameCube') else ROOT/folder/'roms').rglob('*'))
-   if MANAGED_PREFIX: candidates += sorted(MANAGED/r['path'][len(MANAGED_PREFIX):] for r in rows if r['platform']==platform and r['path'].startswith(MANAGED_PREFIX))
+   candidates += [p for p in managed_files if managed_platforms.get(str(p))==platform or (str(p) not in managed_platforms and managed_matches(p,folder,extensions))]
    # A SNES hack was filed under NES; route it by format.
    if folder=='snes': candidates+=sorted((ROOT/'nes/roms').glob('*.smc'))
    for p in candidates:
@@ -236,6 +232,7 @@ def main():
      item['longTitle']=info['title']+' — '+display
      if info.get('summary'): item['description']=info['summary']
      if info.get('cover'): item['thumbnail']='https://images.igdb.com/igdb/image/upload/t_cover_big/'+info['cover']+'.jpg'
+    item.update(cached_item(item, STATE/'metadata'))
     items.append(item)
    print(folder, len(items), 'entries', flush=True)
    atomic(cache_path,cache)

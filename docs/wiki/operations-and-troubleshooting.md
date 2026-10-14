@@ -36,7 +36,7 @@ The root Compose file reads `.env`. URL, branding, cloud and scanner settings ar
 | Group | Variables and purpose |
 | --- | --- |
 | Image/listener | `WEBRCADE_IMAGE` chooses an image; `WEBRCADE_BIND_ADDRESS` and `WEBRCADE_HTTPS_PORT` publish container HTTPS |
-| Host mounts | `WEBRCADE_HOST_PATH`, `WEBRCADE_ROM_PATH`, `WEBRCADE_MANAGED_PATH`, `WEBRCADE_CONFIG_PATH`, `WEBRCADE_3DS_BIOS_PATH` select data/ROM/managed/config/key directories |
+| Host mounts | `WEBRCADE_HOST_PATH` mounts the config folder at `/config`; `WEBRCADE_ROM_PATH` mounts games at `/roms` read-only. Config contains `data/`, `tls/` and optional `metadata.json`; managed games are under `roms/managed`, keys under `roms/3DS/bios`. A metadata database socket can be a third mount |
 | Public URLs | `WEBRCADE_PUBLIC_URL` is the public HTTPS origin; `WEBRCADE_FEED_URL` selects the initial feed; `WEBRCADE_CONTENT_URL` prefixes generated asset URLs |
 | Branding | `WEBRCADE_APP_NAME`, `WEBRCADE_FEED_TITLE`, `WEBRCADE_FEED_DESCRIPTION` set visible names/text |
 | Persistent identities | `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`; preserve these to keep selecting existing data |

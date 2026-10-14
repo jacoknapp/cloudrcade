@@ -79,6 +79,7 @@ class RefreshTests(unittest.TestCase):
  def test_metadata_outage_uses_cache(self):
   self.put('snes/roms/game.sfc',b'game');m.main()
   before=(self.state/'feeds/combined.json').read_bytes()
+  (self.state/'metadata-cache.json').write_text('[]')
   with patch.object(m,'metadata',side_effect=RuntimeError('offline')):m.main()
   self.assertEqual(before,(self.state/'feeds/combined.json').read_bytes())
   self.assertEqual(json.load(open(self.state/'last-scan.json'))['metadata_source'],'cached')
@@ -126,35 +127,11 @@ class RefreshTests(unittest.TestCase):
    before=(self.state/'feeds/combined.json').read_bytes();m.main()
    self.assertEqual((self.state/'feeds/combined.json').read_bytes(),before)
 class MetadataConnectionTests(unittest.TestCase):
- def test_integrated_metadata_uses_direct_host_and_keeps_password_out_of_argv(self):
+ def test_metadata_is_local_cache_without_catalog_dependency(self):
+  rows=[{'path':'example.nes','md5':'abc','platform':18}]
   with tempfile.TemporaryDirectory() as temp:
-   config=Path(temp)/'metadata.json'
-   config.write_text(json.dumps({'DatabaseConfiguration':{'UserName':'readonly','DatabaseName':'catalog','Password':'synthetic-only'}}))
-   fake=type('Result',(),{'returncode':0,'stdout':'{"path":"example.nes"}\n'})()
-   with patch.dict(os.environ,{'WEBRCADE_METADATA_ENABLED':'true','WEBRCADE_METADATA_CONFIG':str(config),'WEBRCADE_METADATA_DB_HOST':'db.example.test','WEBRCADE_METADATA_DB_PORT':'3307'}),patch.object(m.subprocess,'run',return_value=fake) as query:
-    self.assertEqual(m.metadata(),[{'path':'example.nes'}])
-    args=query.call_args.args[0];options=query.call_args.kwargs
-    self.assertEqual(args[0],'mariadb');self.assertIn('--host=db.example.test',args);self.assertIn('--port=3307',args)
-    self.assertNotIn('synthetic-only',' '.join(args));self.assertEqual(options['env']['MYSQL_PWD'],'synthetic-only')
- def test_socket_metadata_uses_local_transport_without_password_in_argv(self):
-  with tempfile.TemporaryDirectory() as temp:
-   config=Path(temp)/'metadata.json'
-   config.write_text(json.dumps({'DatabaseConfiguration':{'UserName':'readonly','DatabaseName':'catalog','Password':'synthetic-only'}}))
-   fake=type('Result',(),{'returncode':0,'stdout':'{"path":"example.nes"}\n'})()
-   with patch.dict(os.environ,{'WEBRCADE_METADATA_ENABLED':'true','WEBRCADE_METADATA_CONFIG':str(config),'WEBRCADE_METADATA_DB_HOST':'ignored.example.test','WEBRCADE_METADATA_DB_SOCKET':'/run/catalog/mysqld.sock'}),patch.object(m.subprocess,'run',return_value=fake) as query:
-    self.assertEqual(m.metadata(),[{'path':'example.nes'}])
-    args=query.call_args.args[0];options=query.call_args.kwargs
-    self.assertIn('--protocol=SOCKET',args);self.assertIn('--socket=/run/catalog/mysqld.sock',args)
-    self.assertFalse(any(x.startswith('--host=') or x.startswith('--port=') for x in args))
-    self.assertNotIn('synthetic-only',' '.join(args));self.assertEqual(options['env']['MYSQL_PWD'],'synthetic-only')
- def test_host_metadata_driver_also_keeps_password_out_of_argv(self):
-  with tempfile.TemporaryDirectory() as temp:
-   config=Path(temp)/'metadata.json'
-   config.write_text(json.dumps({'DatabaseConfiguration':{'UserName':'readonly','DatabaseName':'catalog','Password':'synthetic-only'}}))
-   fake=type('Result',(),{'returncode':0,'stdout':''})()
-   with patch.dict(os.environ,{'WEBRCADE_METADATA_ENABLED':'true','WEBRCADE_METADATA_CONFIG':str(config),'WEBRCADE_METADATA_DB_HOST':'','WEBRCADE_METADATA_CONTAINER':'example-db'}),patch.object(m.subprocess,'run',return_value=fake) as query:
-    self.assertEqual(m.metadata(),[])
-    args=query.call_args.args[0];options=query.call_args.kwargs
-    self.assertEqual(args[:5],['docker','exec','-i','-e','MYSQL_PWD'])
-    self.assertNotIn('synthetic-only',' '.join(args));self.assertEqual(options['env']['MYSQL_PWD'],'synthetic-only')
+   state=Path(temp);(state/'metadata-cache.json').write_text(json.dumps(rows))
+   with patch.object(m,'STATE',state),patch.dict(os.environ,{'WEBRCADE_METADATA_ENABLED':'true'}),patch.object(m.subprocess,'run') as query:
+    self.assertEqual(m.metadata(),rows);query.assert_not_called()
+    (state/'metadata-cache.json').unlink();self.assertEqual(m.metadata(),[])
 if __name__=='__main__':unittest.main()

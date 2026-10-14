@@ -1,5 +1,13 @@
 [
   {
+    "version": "2.0.2",
+    "date": "October 14, 2026",
+    "title": "Simpler server storage",
+    "changes": [
+      "Server deployments now use one configuration folder and one game folder. Existing game URLs, saves and settings are preserved."
+    ]
+  },
+  {
     "version": "2.0.1",
     "date": "October 14, 2026",
     "title": "GameCube performance readout is optional",
