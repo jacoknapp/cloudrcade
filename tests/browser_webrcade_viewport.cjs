@@ -94,7 +94,7 @@ const fixture = `
               core+' picture fits visible phone');
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
-              assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height*3/8))<.5,'PSX picture centered in upper three-quarters of safe portrait');
+              assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height/4))<.5,'PSX picture centered one-quarter down safe portrait');
               assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
             }
             if(core==='psp' && viewport.width<height) {
@@ -111,7 +111,7 @@ const fixture = `
           await page.evaluate(()=>window.opaqueInset=60);
           await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();
           await page.waitForTimeout(180);const off=await game.locator('canvas').boundingBox();
-          assert.deepEqual(off,initial,'PSX upper-three-quarter centering and native size remain with controls off/drawer open');
+          assert.deepEqual(off,initial,'PSX quarter-height centering and native size remain with controls off/drawer open');
           await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
           await page.evaluate(()=>window.opaqueInset=0);
         } else if(!['nds','3ds','psp'].includes(core)) {
@@ -157,7 +157,7 @@ const fixture = `
       }));
       assert.equal(stable,0,'no repeated viewport writes while dimensions are stable');
       assert.deepEqual(errors,[]);
-      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX upper-three-quarter portrait and PSP above controls; native buffers intact');
+      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX quarter-height portrait and PSP above controls; native buffers intact');
       await context.close();
       const desktop=await browser.newPage({viewport:{width:1440,height:900}});
       await desktop.goto('data:text/html,<html><head></head><body></body></html>');
