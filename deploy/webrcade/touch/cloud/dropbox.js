@@ -90,9 +90,7 @@
     path = path?.replace(/^\/+/, '') || '';
     if (path.length > 1024 || !/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*\.(zip|json)$/.test(path) || path.split('/').some(p => p === '.' || p === '..'))
       throw error('Invalid save path.', 400);
-    const folder = config.dropbox.saveFolder ?? '';
-    if (typeof folder !== 'string' || (folder !== '' && (!/^[A-Za-z0-9 _.-]{1,128}$/.test(folder) || ['.', '..'].includes(folder)))) throw error('Invalid save folder.', 400);
-    return '/' + (folder ? folder + '/' : '') + path;
+    return '/' + path;
   }
   function revision(value) {
     if (typeof value !== 'string' || !/^[0-9a-f]{9,}$/.test(value)) throw error('Dropbox did not return a valid save revision.');
@@ -209,7 +207,7 @@
     const show = () => {
       const value = read();
       $('#connect').hidden = Boolean(value); $('#disconnect').hidden = !value; $('#use-provider').hidden = !value;
-      $('#status').textContent = value ? `Connected as ${value.name}. Saves use ${config.dropbox.saveFolder ? config.dropbox.saveFolder + ' inside this app’s Dropbox folder' : 'this app’s Dropbox folder'}.` : 'Sign in to Dropbox to connect your saves.';
+      $('#status').textContent = value ? `Connected as ${value.name}. Saves use this app’s Dropbox folder.` : 'Sign in to Dropbox to connect your saves.';
     };
     const finish = async target => {
       const url = new URL(target || returnTo, location.origin);

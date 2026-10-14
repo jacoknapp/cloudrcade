@@ -5,7 +5,7 @@ const {chromium,webkit}=require('playwright');
 const origin=process.env.WEBRCADE_TEST_ORIGIN;
 if(!origin)throw new Error('WEBRCADE_TEST_ORIGIN must point at an isolated image with current generated overlays/assets.');
 const config={storagePrefix:'dropbox-native-fixture',appName:'Dropbox native test',enabled:false,autoRedirect:false,accessAllowed:true,server:'',
- dropbox:{enabled:true,appKey:'fixture-app',saveFolder:''}};
+ dropbox:{enabled:true,appKey:'fixture-app'}};
 // Original NROM program: disable interrupts, initialize stack, loop. Battery RAM enabled.
 const rom=Buffer.alloc(16+16384+8192);Buffer.from([0x4e,0x45,0x53,0x1a,1,1,2]).copy(rom);
 Buffer.from([0x78,0xd8,0xa2,0xff,0x9a,0x4c,0x05,0x80]).copy(rom,16);

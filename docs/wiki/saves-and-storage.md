@@ -25,9 +25,9 @@ The operator registers one Dropbox application for the deployment; players only 
 
 1. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), create a scoped **App folder** application. Enable `account_info.read`, `files.metadata.read`, `files.content.read` and `files.content.write` on its Permissions tab and apply the changes.
 2. Register this exact OAuth redirect URI, replacing the origin with your arcade's HTTPS origin: `https://arcade.example.com/cloud-saves/?provider=dropbox`. Keep the trailing slash and query parameter. Set **Allow public clients (Implicit Grant & PKCE)** to **Allow**; this switch enables the PKCE flow.
-3. Set `WEBRCADE_PUBLIC_URL` to that origin, `DROPBOX_ENABLED=true`, `DROPBOX_APP_KEY` to the app's public key, and leave `DROPBOX_SAVE_FOLDER` blank to save directly in the Dropbox app folder, or set an optional subfolder such as `DROPBOX_SAVE_FOLDER=Game Saves` in the deployment environment. Restart/recreate the app container to apply environment changes. No Dropbox app secret is used or needed.
+3. Set `WEBRCADE_PUBLIC_URL` to that origin, `DROPBOX_ENABLED=true`, `DROPBOX_APP_KEY` to the app's public key in the deployment environment. Restart/recreate the app container to apply environment changes. No Dropbox app secret is used or needed.
 4. Open **Settings → Cloud Storage → Choose storage**, select **Dropbox**, then **Link Dropbox**. Sign in and approve access on Dropbox. The same tab returns to the original library/game page. Each browser/device links separately.
-5. To activate a connection already linked in this browser, choose **Use this storage**. By default, your Dropbox Files contain saves directly in `Apps/<your Dropbox app name>/` (for example, `Apps/CloudRcade/`). Setting `DROPBOX_SAVE_FOLDER=Game Saves` uses `Apps/<your Dropbox app name>/Game Saves/`, with game ZIP/state files and the same `settings/` documents used by Nextcloud.
+5. To activate a connection already linked in this browser, choose **Use this storage**. By default, your Dropbox Files contain saves directly in `Apps/<your Dropbox app name>/` (for example, `Apps/CloudRcade/`). Game ZIP/state files and the same `settings/` documents used by Nextcloud live beneath that root. The app-folder name is managed in Dropbox’s App Console, not through a CloudRcade save-folder setting.
 
 This uses authorization-code OAuth with S256 PKCE and a browser-held refresh token to renew short-lived access tokens. Dropbox passwords are entered only on Dropbox. The app key is public configuration; never add an app secret or a player's tokens to `.env`, feeds or source. See [Dropbox's OAuth guide](https://docs.dropboxapi.com/dropbox-api/docs/oauth).
 
@@ -81,7 +81,7 @@ Names and subpaths for game files come from the emulator rather than the library
 | Regular local progress and recovery records | Browser storage, scoped to the unlinked profile or connected cloud provider/account |
 | Native save-state slots | App's normal storage path, with cloud operations when linked |
 | Nextcloud game saves/states | Connected user's Files beneath `NEXTCLOUD_SAVE_FOLDER` |
-| Dropbox game saves/states | Connected user's app folder; optional `DROPBOX_SAVE_FOLDER` subfolder |
+| Dropbox game saves/states | Connected user's Dropbox app-folder root |
 | Controller layouts/preferences | Browser storage; active provider's `settings/touch-controller.v1.json` |
 | Recently Played | Browser storage; active provider's `settings/recently-played.v1.json` |
 | Offline emulator/ROM assets | Separate browser asset cache, subject to quota and eviction |
@@ -119,7 +119,7 @@ The app reports cloud errors; inspect them before assuming another device has th
 
 Local backups are scoped to the connected provider/server (or Dropbox app key) and user. Changing accounts while a game is running requires reopening the game before cloud operations; the existing game's final local save stays with its original profile. Another account does not automatically inherit the previous account's backups or queued settings. Existing legacy backups are retained by the explicit upgrade migration rather than reassigned to every new account.
 
-Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, `DROPBOX_APP_KEY`, `DROPBOX_SAVE_FOLDER`, the public site origin, and published game identities stable across upgrades. Changing a namespace/folder selects another storage location; it does not rename or delete old files. Changing site origin also changes browser storage access. Plan a migration and preserve the old data before changing these identities.
+Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, `DROPBOX_APP_KEY`, the public site origin, and published game identities stable across upgrades. Changing a namespace/folder selects another storage location; it does not rename or delete old files. Changing site origin also changes browser storage access. Plan a migration and preserve the old data before changing these identities.
 
 **Disconnect** revokes the browser's Nextcloud app credential and leaves remote save files in place. Clearing site data removes the browser connection and local data; it does not erase the Nextcloud folder. Revocation can also be performed through Nextcloud's own account settings.
 
