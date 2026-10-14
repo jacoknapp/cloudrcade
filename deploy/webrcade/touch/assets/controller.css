@@ -35,6 +35,12 @@ html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh);
 #wrcad-touch .kt-ds-screens > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 #wrcad-touch .kt-ds-screens > div button { padding: 8px; font-size: 13px; }
 .kt-ds-origin, .kt-3ds-origin, .kt-psp-origin, .kt-psx-origin { position: fixed; visibility: hidden; top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px); pointer-events: none; }
+/* PSX's default portrait picture area is independent of the live controller.
+ * Reserve the standard lower area; controller edits/visibility do not move it. */
+@media (orientation: portrait) {
+  .kt-psx-origin { --kt-psx-reserved-height: 264px; bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + var(--kt-psx-reserved-height)); }
+  html[data-cr-installed] .kt-psx-origin { bottom: calc(max(12px, calc(env(safe-area-inset-bottom, 0px) - 12px)) + var(--kt-psx-reserved-height)); }
+}
 html.kt-ds-active .touch-overlay-buttons-right > .touch-overlay-button-small,
 html.kt-ds-active .touch-overlay-buttons-right > .touch-overlay-button-last { display: none !important; }
 html.kt-ds-active #touch-overlay { display: none !important; }

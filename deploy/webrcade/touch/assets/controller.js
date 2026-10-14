@@ -418,29 +418,15 @@
           Math.abs(outer.screen.width - outer.innerWidth) < 1 && difference > 0 && difference <= 100)
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
-    let height = canvas.getBoundingClientRect().height;
-    // Center PlayStation portrait above the standard controller block. Measure
-    // its CSS geometry so hiding controls or opening pause does not move play.
+    const height = canvas.getBoundingClientRect().height;
+    // PSX has its own default portrait picture area, independent of live
+    // controller positions, visibility and sizing.
     const portraitPSX = system === 'psx' && bounds.width < bounds.height;
     const safe = portraitPSX ? psxOrigin.getBoundingClientRect() : null;
     const safeTop = portraitPSX ? Math.max(bounds.top, safe.top) : bounds.top;
     const safeBottom = portraitPSX ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
-    let middle = bounds.top + (bounds.height - excludedTop) / 2;
-    if (portraitPSX) {
-      const controls = getComputedStyle(pad);
-      const playBottom = Math.max(safeTop, Math.min(safeBottom,
-        bounds.bottom - parseFloat(controls.bottom) - parseFloat(controls.height) - 20));
-      middle = (safeTop + playBottom) / 2;
-      // Small phones may need a smaller CSS picture to clear the controls.
-      // Preserve its aspect ratio and the core's native drawing buffer.
-      const width = canvas.getBoundingClientRect().width;
-      const scale = Math.min(1, bounds.width / width, (playBottom - safeTop) / height);
-      if (scale > 0 && scale < 1 - 1e-7) {
-        canvas.style.setProperty('width', `${width * scale}px`, 'important');
-        canvas.style.setProperty('height', `${height * scale}px`, 'important');
-        height *= scale;
-      }
-    }
+    const middle = portraitPSX ? (safeTop + Math.max(safeTop, safeBottom)) / 2 :
+      bounds.top + (bounds.height - excludedTop) / 2;
     // Fill/zoom can leave no room to move: keep the native picture visible.
     const center = height <= bounds.height ?
       Math.max(bounds.top + height / 2, Math.min(bounds.bottom - height / 2, middle)) :

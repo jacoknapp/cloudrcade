@@ -4,7 +4,7 @@
     "date": "October 14, 2026",
     "title": "PlayStation portrait centering",
     "changes": [
-      "The PlayStation picture is centered in the available portrait space above the standard controller block."
+      "PlayStation uses an independent default portrait picture area above the standard controls. Controller layout changes leave picture placement unchanged; desktop stays centered."
     ]
   },
   {

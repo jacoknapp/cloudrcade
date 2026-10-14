@@ -95,7 +95,7 @@ const fixture = `
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
               const pad=await game.locator('.kt-pad').boundingBox();
-              assert(Math.abs(picture.y+picture.height/2-(safe.y+pad.y-20)/2)<.5,'PSX picture centered above standard portrait controls');
+              assert(Math.abs(picture.y+picture.height/2-(safe.y+pad.y-20)/2)<.5,'PSX picture centered above standard portrait controls: '+JSON.stringify({picture,safe,pad,viewport,inset,origin:await game.locator('.kt-psx-origin').evaluate(el=>({bottom:getComputedStyle(el).bottom,top:getComputedStyle(el).top,reserve:getComputedStyle(el).getPropertyValue('--kt-psx-reserved-height')}))}));
               assert(picture.y+picture.height<=pad.y-19.5,'PSX picture clears standard controller block');
               assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
             }
@@ -110,6 +110,21 @@ const fixture = `
         if(core==='psx') {
           await page.setViewportSize({width:390,height:784});await page.waitForTimeout(180);
           const initial=await game.locator('canvas').boundingBox();
+          await game.locator('.kt-pad').evaluate(el=>el.style.height='120px');
+          await game.locator('.kt-shoulders').evaluate(el=>el.style.transform='translateY(-50px)');
+          await page.waitForTimeout(180);
+          assert.deepEqual(await game.locator('canvas').boundingBox(),initial,'PSX default picture placement is independent of controller block sizing and positions');
+          await game.locator('.kt-pad').evaluate(el=>el.style.removeProperty('height'));
+          await game.locator('.kt-shoulders').evaluate(el=>el.style.removeProperty('transform'));
+          await game.locator('canvas').evaluate(el=>{el.style.width='390px';el.style.height='784px';});
+          await page.waitForTimeout(180);
+          const fill=await game.locator('canvas').boundingBox();
+          assert.equal(fill.width,390,'PSX native Fill width is not constrained to the default portrait area');
+          assert.equal(fill.height,784,'PSX native Fill height is not constrained to the default portrait area');
+          assert(Math.abs(fill.y+fill.height/2-392)<.5,'PSX native Fill can use the whole screen');
+          await game.evaluate(()=>app.emulator.updateScreenSize());
+          await page.waitForTimeout(180);
+          assert.deepEqual(await game.locator('canvas').boundingBox(),initial,'PSX native resize restores the default position');
           await page.evaluate(()=>window.opaqueInset=60);
           await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();
           await page.waitForTimeout(180);const off=await game.locator('canvas').boundingBox();
