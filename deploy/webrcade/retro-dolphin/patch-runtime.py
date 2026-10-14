@@ -243,6 +243,9 @@ def patch_runtime(app, native_core_sha=None):
     # Hardware mode must fail clearly instead of quietly activating a CPU rasterizer.
     replace('  hardwareVideoBackend = videoBackend === "WebGPU-Real";',
             '  hardwareVideoBackend = videoBackend === "WebGPU-Real";\n'
+            '  // The device GPU owns this canvas from startup. A queued legacy\n'
+            '  // preview must never resize or overwrite its native backbuffer.\n'
+            '  cmdRingOwnsCanvas = hardwareVideoBackend;\n'
             '  if (hardwareVideoBackend && !canvas && !wgpuDetachedPresenter) {\n'
             '    throw new Error("GameCube hardware rendering requires the transferred browser canvas");\n'
             '  }')
