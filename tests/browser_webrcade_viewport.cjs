@@ -13,9 +13,9 @@ const fixture = `
   const dimensions = handheld ? [160,144] : location.pathname.includes('/psx/') ? [320,240] : [480,272], ratio = dimensions[0]/dimensions[1];
   const canvas = document.createElement('canvas'); [canvas.width,canvas.height]=dimensions;
   document.body.append(canvas);
-  const controller={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,
+  const controller={isControlDown:function(cid,analogToDigital=true){return analogToDigital && ['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid] ? this[['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid]](0) : false},isPadButtonDown:()=>false,getAxisValue:()=>0,
     isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
-  window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{canvas,started:true,paused:false,
+  window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{canvas,started:true,paused:false,analogMode:false,
     SS_16_9:2,SS_FILL:3,getScreenSize:()=>0,getDefaultAspectRatio:()=>ratio,getProps:()=>({}),
     getScreenLayout:()=>0,getPrefs:()=>({getScreenLayout:()=>0}),
     controllers:{getController:()=>controller},updateScreenSize(){
@@ -23,6 +23,13 @@ const fixture = `
       canvas.style.height=parseFloat(canvas.style.width)/ratio+'px';
     },pause(value){this.paused=value;return true}}};
   app.emulator.updateScreenSize(); addEventListener('resize',()=>app.emulator.updateScreenSize());
+  if(location.pathname.includes('/psx/')) {
+    // Pinned native audio-screen markup/styles; the adapter must relocate this
+    // visual hint without replacing the real core's audio activation handler.
+    const audio=document.createElement('div');audio.className='_1EdfC';
+    audio.innerHTML='<div class="_2fzXq"><div class="_3kAeI"><button class="_3_mWk"><span class="_1s7E8">Tap Screen to Unmute</span></button></div></div>';
+    document.body.append(audio);
+  }
 `;
 (async () => {
   for (const engine of [chromium,webkit]) {
@@ -53,6 +60,10 @@ const fixture = `
           <link rel="stylesheet" href="/viewport.css"><link rel="stylesheet" href="/${game?'controller':'mobile'}.css">
           <style>html,body{margin:0;background:black;overflow:hidden}
             canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+            ._1EdfC{position:absolute;display:flex;z-index:49;inset:0;align-items:center;pointer-events:none}
+            ._2fzXq{height:100vh;width:100vw;position:relative;overflow:hidden}
+            ._3kAeI{padding:1rem}._3_mWk{margin:0;padding:.6rem 1rem;display:flex;align-items:center;font-size:1.8rem;line-height:2rem;white-space:nowrap}
+
             #webrcade-app{position:fixed;inset:0}#webrcade-app-iframe{width:100%;height:100%;border:0}
           </style><script defer src="/brand.js"></script></head><body>${game?
           '<script>'+fixture+'</script><script defer src="/controller.js"></script>':
@@ -94,10 +105,15 @@ const fixture = `
               core+' picture fits visible phone');
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
-              const pad=await game.locator('.kt-pad').boundingBox();
-              assert(Math.abs(picture.y+picture.height/2-(safe.y+pad.y-20)/2)<.5,'PSX picture centered above standard portrait controls: '+JSON.stringify({picture,safe,pad,viewport,inset,origin:await game.locator('.kt-psx-origin').evaluate(el=>({bottom:getComputedStyle(el).bottom,top:getComputedStyle(el).top,reserve:getComputedStyle(el).getPropertyValue('--kt-psx-reserved-height')}))}));
-              assert(picture.y+picture.height<=pad.y-19.5,'PSX picture clears standard controller block');
+              assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height/2))<.5,'PSX approved default picture position remains independent of DualShock controls');
               assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
+            }
+            if(core==='psx') {
+              assert.equal(await game.locator('.kt-analog-left:visible,.kt-analog-right:visible').count(),2,'PSX shows both sticks before analog-mode activation');
+              const prompt=await game.locator('._3kAeI').boundingBox();
+              assert(Math.abs(prompt.x+prompt.width/2-picture.x-picture.width/2)<.5 && Math.abs(prompt.y+prompt.height/2-picture.y-picture.height/2)<.5,'PSX native unmute prompt centers over the picture');
+              const label=await game.locator('._3_mWk').boundingBox();
+              assert(label.x>=-.5 && label.y>=-.5 && label.x+label.width<=viewport.width+.5 && label.y+label.height<=height+.5,'PSX audio prompt fits phone');
             }
             if(core==='psp' && viewport.width<height) {
               const pad=await game.locator('.kt-pad').boundingBox();
@@ -110,6 +126,25 @@ const fixture = `
         if(core==='psx') {
           await page.setViewportSize({width:390,height:784});await page.waitForTimeout(180);
           const initial=await game.locator('canvas').boundingBox();
+          const controllerLayout=await game.locator('.kt-pad').evaluate(el=>el.getBoundingClientRect().toJSON());
+          const left=await game.locator('.kt-analog-left').boundingBox();
+          await page.mouse.move(left.x+left.width*.85,left.y+left.height/2);await page.mouse.down();
+          assert(await game.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(3,true)),'PSX left stick supplies digital-mode D-pad input');
+          assert.equal(await game.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(3,false)),false,'analog-mode polling keeps D-pad separate from stick');
+          for(const mode of [true,false]) {
+            await game.evaluate(mode=>app.emulator.analogMode=mode,mode);await page.waitForTimeout(180);
+            assert.equal(await game.locator('.kt-analog-left:visible,.kt-analog-right:visible').count(),2,'core mode changes never pop sticks in or out');
+            assert.deepEqual(await game.locator('.kt-pad').evaluate(el=>el.getBoundingClientRect().toJSON()),controllerLayout,'DualShock block stays stable across core mode changes');
+            assert.deepEqual(await game.locator('canvas').boundingBox(),initial,'PSX mode changes leave approved picture placement unchanged');
+            assert(await game.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(0,true))>.5,'mode changes do not drop held stick input');
+          }
+          await page.mouse.up();
+          const right=await game.locator('.kt-analog-right').boundingBox();
+          await page.mouse.move(right.x+right.width*.85,right.y+right.height/2);await page.mouse.down();
+          assert(await game.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true))>.5,'right stick supplies its own axes');
+          assert.equal(await game.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(0,true)),0,'right stick leaves left axes released');
+          await page.mouse.up();
+
           await game.locator('.kt-pad').evaluate(el=>el.style.height='120px');
           await game.locator('.kt-shoulders').evaluate(el=>el.style.transform='translateY(-50px)');
           await page.waitForTimeout(180);

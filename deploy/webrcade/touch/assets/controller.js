@@ -168,6 +168,7 @@
     if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
   }
   document.documentElement.classList.toggle('kt-ds-active', system === 'nds');
+  document.documentElement.classList.toggle('kt-psx-active', system === 'psx');
   const dsScreens = $('.kt-ds-screens');
   // Measures the safe area for screen placement. It lives outside the controller
   // host, which is hidden behind the audio prompt and pause screens and would
@@ -305,12 +306,13 @@
   }
   if (n64 || n3ds || system === 'psp' || gamecube) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
   if (n3ds || gamecube) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
-  const psxSticks = system === 'psx' ? [
-    addDirection('stick-left', 'analog', 0, 'kt-analog-left'),
-    addDirection('stick-right', 'analog', 1, 'kt-analog-right'),
-  ] : [];
-  for (const element of psxSticks) element.hidden = true;
-  let psxAnalog = false;
+  if (system === 'psx') {
+    // A steady DualShock overlay avoids layout changes when games select digital
+    // or analog input. The core retains its per-game controller-mode setting.
+    addDirection('stick-left', 'analog', 0, 'kt-analog-left');
+    addDirection('stick-right', 'analog', 1, 'kt-analog-right');
+    host.classList.add('kt-dualshock');
+  }
   const LAYOUT_KEY = prefix + '.touch.layouts.v1';
   let layouts = {};
   try {
@@ -432,6 +434,15 @@
       Math.max(bounds.top + height / 2, Math.min(bounds.bottom - height / 2, middle)) :
       bounds.top + bounds.height / 2;
     const pixels = value => `${Math.round(value * 1000) / 1000}px`;
+    if (system === 'psx') {
+      // The native unmute prompt follows the actual picture, including Fill and
+      // landscape. Keep its native gesture handler and timed text dismissal.
+      for (const [name, value] of Object.entries({'--kt-psx-picture-left': pixels(bounds.left + bounds.width / 2),
+        '--kt-psx-picture-top': pixels(center)})) {
+        if (document.documentElement.style.getPropertyValue(name) !== value)
+          document.documentElement.style.setProperty(name, value);
+      }
+    }
     for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
       left: pixels(bounds.left + bounds.width / 2), top: pixels(center)})) {
       if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')
@@ -1030,13 +1041,6 @@
         });
         n3dsObserver.observe(n3dsOrigin);
       }
-    }
-    const analog = system === 'psx' && Boolean(emulator?.analogMode);
-    if (analog !== psxAnalog) {
-      clear(); psxAnalog = analog;
-      host.classList.toggle('kt-dualshock', analog);
-      for (const element of psxSticks) element.hidden = !analog;
-      layoutStamp = '';
     }
     if (emulator && !patchedEmulators.has(emulator)) {
       patchedEmulators.add(emulator);

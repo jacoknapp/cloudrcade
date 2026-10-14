@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.0.5",
+    "date": "October 14, 2026",
+    "title": "PlayStation touch controls",
+    "changes": [
+      "PlayStation shows both DualShock sticks from the start, without controller pop-in when a game switches modes.",
+      "The PlayStation audio activation prompt appears over the game picture."
+    ]
+  },
+  {
     "version": "2.0.4",
     "date": "October 14, 2026",
     "title": "PlayStation portrait centering",
