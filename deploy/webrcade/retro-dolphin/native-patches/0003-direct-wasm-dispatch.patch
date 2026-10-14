@@ -1,0 +1,13 @@
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -60,6 +60,10 @@
+ }  // namespace
+ #endif
+ #line 56
++#ifdef __EMSCRIPTEN__
++#undef DOLPHIN_WEB_DIRECT_WASM_BLOCK_DISPATCH
++#define DOLPHIN_WEB_DIRECT_WASM_BLOCK_DISPATCH 1
++#endif
+ #ifndef DOLPHIN_WEB_DIRECT_WASM_BLOCK_DISPATCH
+ #define DOLPHIN_WEB_DIRECT_WASM_BLOCK_DISPATCH 0
+ #endif

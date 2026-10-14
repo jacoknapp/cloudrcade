@@ -1,0 +1,113 @@
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
+@@ -54,6 +54,8 @@
+   // transforms the (correct) EFB with a garbage colmat → opaque-black
+   // EFB-copy textures → every textured draw that samples them is black.
+   void UploadUtilityUniforms(const void* data, u32 size);
++  // Release after publishing the pass that last referenced this texture.
++  void ReleaseTextureResource(u32 id);
+ 
+   std::unique_ptr<AbstractTexture> CreateTexture(const TextureConfig& config,
+                                                  std::string_view name) override;
+@@ -330,6 +332,8 @@
+     std::array<u32, 8> sampler_ids{};
+   };
+   Bg1Slot m_bg1_cache[kBg1CacheSize] = {};
++  std::vector<u32> m_retired_bind_groups;
++  void ReleaseRetiredBindGroups();
+ };
+ 
+ class WebGPUEFBInterface final : public EFBInterfaceBase
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
+@@ -1564,6 +1564,7 @@
+   {
+     if (g_vertex_manager)
+       static_cast<VertexManager*>(g_vertex_manager.get())->DiscardPendingGeometryRange();
++    ReleaseRetiredBindGroups();
+     return false;
+   }
+   if (g_vertex_manager &&
+@@ -1580,13 +1581,50 @@
+     m_pending_clear = false;
+     m_pending_clear_color = false;
+     m_pending_clear_depth = false;
++    ReleaseRetiredBindGroups();
+     return true;
+   }
+   m_cmd_stream.AbortPass();
+   InvalidateGeometryUploadPack();
+   if (m_ubo_cache_active)
+     InvalidateUboSlices();
++  ReleaseRetiredBindGroups();
+   return false;
++}
++
++void WebGPUGfx::ReleaseRetiredBindGroups()
++{
++  // PushDestroy poisons an unpublished pass. Only call after ending/aborting it.
++  for (const u32 id : m_retired_bind_groups)
++    m_cmd_stream.PushDestroy(3, id);
++  m_retired_bind_groups.clear();
++}
++
++void WebGPUGfx::ReleaseTextureResource(u32 id)
++{
++  if (id == 0)
++    return;
++  EndPassIfOpen();
++  for (Bg1Slot& slot : m_bg1_cache)
++  {
++    if (slot.id != 0 && std::find(slot.texture_ids.begin(), slot.texture_ids.end(), id) !=
++                            slot.texture_ids.end())
++    {
++      m_cmd_stream.PushDestroy(3, slot.id);
++      slot = {};
++    }
++  }
++  for (u32& texture_id : m_tex_id)
++  {
++    if (texture_id == id)
++      texture_id = 0;
++  }
++  if (m_fb_color_id == id)
++    m_fb_color_id = 0;
++  if (m_fb_depth_id == id)
++    m_fb_depth_id = 0;
++  ResetRecordedPassState();
++  m_cmd_stream.PushDestroy(2, id);
+ }
+ 
+ 
+@@ -2208,6 +2246,8 @@
+     const u32 id = m_cmd_stream.PushCreateBindGroup(b.data(), b.size(), 1);
+     if (id)
+     {
++      if (slot->id != 0)
++        m_retired_bind_groups.push_back(slot->id);
+       slot->id = id;  // evicts any colliding entry (harmless rebuild)
+       slot->sig = sig;
+       slot->texture_ids = texture_ids;
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
+@@ -7,6 +7,7 @@
+ #include <cstring>
+ 
+ #include "VideoBackends/WebGPU/WebGPUCommandStream.h"
++#include "VideoBackends/WebGPU/WebGPUGfx.h"
+ 
+ namespace WebGPU
+ {
+@@ -99,7 +100,11 @@
+   return cs.PushUploadTexture(m_bridge_id, src, bytes_per_row, width, height, level, layer);
+ }
+ 
+-WebGPUTexture::~WebGPUTexture() = default;
++WebGPUTexture::~WebGPUTexture()
++{
++  if (g_gfx && m_bridge_id != 0)
++    static_cast<WebGPUGfx*>(g_gfx.get())->ReleaseTextureResource(m_bridge_id);
++}
+ 
+ void WebGPUTexture::CopyRectangleFromTexture(const AbstractTexture* src,
+                                              const MathUtil::Rectangle<int>& src_rect,

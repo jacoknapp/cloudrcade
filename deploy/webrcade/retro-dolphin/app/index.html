@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-cloudrcade-core="gamecube">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CloudRcade — GameCube</title>
+<link rel="icon" href="/touch-controls/cloudrcade.svg">
+<link rel="stylesheet" href="/touch-controls/viewport.css">
+<link rel="stylesheet" href="/touch-controls/controller.css">
+<link rel="stylesheet" href="pause-ui.css">
+<link rel="stylesheet" href="/touch-controls/menus.css">
+<style>
+ :root { color-scheme:dark; font:16px system-ui,sans-serif; background:#000; color:#eee; }
+ body { max-width:960px; margin:32px auto; padding:0 20px; }
+ button,input { font:inherit; } #launcher button,#launcher input { margin:6px 8px 6px 0; }
+ button { padding:8px 16px; cursor:pointer; }
+ canvas { width:100%; aspect-ratio:4/3; object-fit:contain; background:#000; display:block; }
+ /* The canvas retains keyboard focus without a browser focus ring over video.
+  * Menu buttons retain their visible keyboard focus indicators. */
+ #screen:focus { outline:none; }
+ a { color:#b5a4ff; } #status { min-height:1.5em; overflow-wrap:anywhere; }
+ .library #launcher { display:none; }
+ .library { max-width:none; margin:0; padding:0; }
+ .library #status { position:fixed; top:40%; left:10%; right:10%; text-align:center; }
+ .running { max-width:none; margin:0; padding:0; overflow:hidden; }
+ .running #launcher,.running #status { display:none; }
+ #gamecube-menu { position:fixed; inset:0; z-index:100; font-family:Quicksand,sans-serif; }
+ #gamecube-menu[hidden] { display:none; }
+ #gamecube-failure { position:fixed; inset:0; z-index:101; background:#000; display:grid; place-content:center; padding:24px; text-align:center; }
+ #gamecube-failure[hidden] { display:none; }
+ #gamecube-failure-detail { max-width:560px; overflow-wrap:anywhere; }
+ #gamecube-menu-error { position:fixed; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); z-index:102; padding:12px; background:#161616; color:#eee; border:1px solid #e50914; font-size:14px; }
+ #gamecube-performance-details { box-sizing:border-box; position:fixed; inset:0; padding:max(20px,env(safe-area-inset-top)) 20px max(90px,env(safe-area-inset-bottom)); background:#111; overflow:auto; font:14px/1.5 system-ui,sans-serif; }
+ #gamecube-performance-details pre { white-space:pre-wrap; font:12px/1.6 ui-monospace,Menlo,monospace; }
+ #gamecube-menu-sync, #gamecube-save-toast { position:fixed; z-index:101; pointer-events:none; left:16px; right:16px; bottom:max(16px,env(safe-area-inset-bottom)); margin:0; padding:10px; background:#161616; color:#eee; font:13px/1.4 system-ui,sans-serif; }
+ #gamecube-save-toast[hidden], .gc-paused-menu #gamecube-save-toast, .gc-save-spinner[hidden] { display:none; }
+ .gc-save-spinner { display:inline-block; width:14px; height:14px; margin-right:9px; vertical-align:-3px; border:2px solid #ffffff40; border-top-color:#69dec8; border-radius:50%; animation:gc-save-spin .8s linear infinite; }
+ @keyframes gc-save-spin { to { transform:rotate(360deg); } }
+ html.gc-paused-menu { font-size:1vw; }
+ @media (pointer:coarse) and (max-width:1366px) {
+  html.gc-paused-menu { font-size:14px; }
+  #gamecube-menu .gc-native-slottab { width:100%; }
+  #gamecube-menu .gc-native-slottab-content { flex-direction:column; padding:12px 0; }
+  #gamecube-menu .gc-native-slottab-content-left { display:none; }
+  #gamecube-menu .gc-native-slottab-content-right { width:100%; padding:0; font-size:14px; }
+  #gamecube-menu .gc-native-slottab-content-right-title { font-size:14px; }
+  #gamecube-menu .gc-native-slottab-content-right-subtitle { font-size:13px; margin-top:6px; }
+  #gamecube-menu .gc-native-slottab-content-right-buttons { padding:12px 0 0; width:100%; justify-content:flex-start; gap:8px; flex-wrap:wrap; }
+ }
+</style>
+<script src="/cloud-saves/config.php"></script>
+<script src="/cloud-saves/runtime.js"></script>
+<script src="/cloud-saves/dropbox.js"></script>
+<script src="/cloud-saves/bridge.js"></script>
+<script src="recovery.js"></script>
+<script defer src="/touch-controls/brand.js"></script>
+<script defer src="/touch-controls/controller.js"></script>
+</head>
+<body>
+<div id="launcher">
+<h1 id="title">GameCube</h1>
+<p><a id="backLibrary" href="/play/">Back to library</a></p>
+<p>Select a GameCube ISO or GCM. Menu pauses the game and opens CloudRcade's standard menu for save states and exit. The side panel controls the touch layout and mute.</p>
+<button id="initialize">Initialize core</button>
+<label>Disc <input id="disc" type="file" accept=".iso,.gcm"></label>
+<label>or URL <input id="url" type="url" placeholder="https://…/game.iso"></label>
+<button id="selectUrl">Select URL</button><button id="boot" disabled>Boot disc</button>
+<button id="close" disabled>Close session</button>
+<p>Requires browser WebGPU on the device GPU. Games over50MB stream using the existing2MiB disk chunks and16MiB cache.</p>
+<p>Keyboard: X/Z/V/B = A/B/X/Y; Q/E/C = L/R/Z; Enter = Start; arrows = D-pad; WASD = stick; IJKL = C-stick; Escape = pause menu. Standard gamepads and existing touch controls are supported.</p>
+<p id="details"></p>
+<p><a href="LICENSE.dolphin">Dolphin license</a> · <a href="gamecube-source.tar.gz">Corresponding source</a> · <a href="adapter-source/README.md">Browser adapter source</a> · <a href="sys/GC/font-licenses.txt">Font license</a></p>
+</div>
+<p id="status" role="status">Core is stopped.</p>
+<canvas id="screen" width="640" height="480" aria-label="GameCube video"></canvas>
+<div id="gamecube-menu" hidden></div>
+<p id="gamecube-save-toast" role="status" aria-busy="false" hidden><span class="gc-save-spinner" aria-hidden="true" hidden></span><span data-save-message></span></p>
+<div id="gamecube-failure" hidden role="alert">
+<p>GameCube stopped.</p>
+<p id="gamecube-failure-detail"></p>
+<p><button id="restartGame">Restart game</button><button id="leaveFailedGame">Return to library</button></p>
+</div>
+<script type="module" src="lab.mjs"></script>
+</body></html>

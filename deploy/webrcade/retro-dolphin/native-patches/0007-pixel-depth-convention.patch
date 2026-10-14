@@ -1,0 +1,57 @@
+--- a/Source/Core/VideoCommon/PixelShaderGen.cpp
++++ b/Source/Core/VideoCommon/PixelShaderGen.cpp
+@@ -1159,16 +1159,10 @@
+   }
+   else
+   {
+-    // §28as: WebGPU/Vulkan emits native [0,1] clip-control window
+-    // depth (rawpos.z = projected depth, NOT GL-inverted) — true
+-    // whether or not the depth RANGE is reversed (reversal is a
+-    // viewport/compare concern, independent of the fog zCoord
+-    // formula). Decouple from bSupportsReversedDepthRange for
+-    // api_type Vulkan so flag=false (the single non-reverse
+-    // convention that kills the mixed-pass flicker, §28aq/ar)
+-    // keeps fog correct instead of saturating to the black fog
+-    // colour (the §28b regression). OGL/D3D/SW untouched.
+-    if (!host_config.backend_reversed_depth_range && api_type != APIType::Vulkan)
++    // Vertex depth uses the backend's reversed convention. Convert window
++    // depth back to GX depth before fog and Z-texture operations, including
++    // the WebGPU backend that uses Vulkan shader generation.
++    if (!host_config.backend_reversed_depth_range)
+       out.Write("\tint zCoord = int((1.0 - rawpos.z) * 16777216.0);\n");
+     else
+       out.Write("\tint zCoord = int(rawpos.z * 16777216.0);\n");
+@@ -1185,7 +1179,7 @@
+                            uid_data->ztest == EmulatedZ::EarlyWithZComplocHack;
+   if (uid_data->per_pixel_depth && early_ztest)
+   {
+-    if (!host_config.backend_reversed_depth_range && api_type != APIType::Vulkan)  // §28as
++    if (!host_config.backend_reversed_depth_range)
+       out.Write("\tdepth = 1.0 - float(zCoord) / 16777216.0;\n");
+     else
+       out.Write("\tdepth = float(zCoord) / 16777216.0;\n");
+@@ -1207,7 +1201,7 @@
+ 
+   if (uid_data->per_pixel_depth && uid_data->ztest == EmulatedZ::Late)
+   {
+-    if (!host_config.backend_reversed_depth_range && api_type != APIType::Vulkan)  // §28as
++    if (!host_config.backend_reversed_depth_range)
+       out.Write("\tdepth = 1.0 - float(zCoord) / 16777216.0;\n");
+     else
+       out.Write("\tdepth = float(zCoord) / 16777216.0;\n");
+@@ -1763,12 +1757,10 @@
+   }
+   if (per_pixel_depth)
+   {
+-    // §28as: Vulkan/WebGPU non-reverse [0,1] convention → a
+-    // discarded fragment writes the FAR plane (1.0) so it can't
+-    // occlude, independent of bSupportsReversedDepthRange.
++    // A rejected pixel must use the far plane in the same convention as
++    // ordinary per-pixel depth output.
+     out.Write("\t\tdepth = {};\n",
+-              (!g_backend_info.bSupportsReversedDepthRange &&
+-               api_type != APIType::Vulkan) ? "0.0" : "1.0");
++              !g_backend_info.bSupportsReversedDepthRange ? "0.0" : "1.0");
+   }
+ 
+   // ZCOMPLOC HACK:

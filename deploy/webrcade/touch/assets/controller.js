@@ -2,7 +2,10 @@
 (() => {
   'use strict';
   const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
-  if (!(navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches)) return;
+  // A touch-capable desktop using a mouse still uses the desktop interface.
+  const touchDevice = matchMedia('(pointer: coarse)').matches;
+  const gamecubePage = location.pathname.startsWith('/experimental/gamecube/') || document.documentElement.dataset.cloudrcadeCore === 'gamecube';
+  if (!touchDevice) return;
   const KEY = prefix + '.touch.enabled.v1';
   const MUTE_KEY = prefix + '.touch.muted.v1';
   const DS_VIEW_KEY = prefix + '.touch.ds-view.v1';
@@ -156,9 +159,14 @@
     genesis: ['genesis', 'genplusgx-md', 'retro-genplusgx-md', 'retro-genesis'],
     psx: ['psx', 'beetle-psx'],
     psp: ['psp', 'retro-ppsspp'],
+    gamecube: ['gamecube', 'retro-dolphin'],
   };
   const core = launchProps?.type || emulatorPath;
-  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || emulatorPath;
+  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (gamecubePage ? 'gamecube' : emulatorPath);
+  const gamecube = system === 'gamecube' || gamecubePage;
+  if (gamecube) {
+    if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
+  }
   document.documentElement.classList.toggle('kt-ds-active', system === 'nds');
   const dsScreens = $('.kt-ds-screens');
   // Measures the safe area for screen placement. It lives outside the controller
@@ -286,7 +294,7 @@
       system === 'psx' ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
-  configureDirection(stick, n64 || n3ds || system === 'psp' ? 'analog' : 'digital');
+  configureDirection(stick, n64 || n3ds || system === 'psp' || gamecube ? 'analog' : 'digital');
   function addDirection(id, kind, index, className) {
     const element = stick.cloneNode(true);
     element.dataset.layoutId = id;
@@ -295,8 +303,8 @@
     pad.append(element); directions.push(element);
     return element;
   }
-  if (n64 || n3ds || system === 'psp') addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
-  if (n3ds) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
+  if (n64 || n3ds || system === 'psp' || gamecube) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
+  if (n3ds || gamecube) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
   const psxSticks = system === 'psx' ? [
     addDirection('stick-left', 'analog', 0, 'kt-analog-left'),
     addDirection('stick-right', 'analog', 1, 'kt-analog-right'),
@@ -531,6 +539,7 @@
   });
   host.classList.toggle('kt-n64', n64);
   host.classList.toggle('kt-3ds', n3ds);
+  host.classList.toggle('kt-gamecube', gamecube);
   host.classList.toggle('kt-psp', system === 'psp');
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
@@ -562,6 +571,10 @@
     $('[data-cid="10"]').textContent = 'Z';
     $('[data-cid="11"]').hidden = true;
     $('[data-cid="12"]').hidden = true;
+  }
+  if (gamecube) {
+    const z = $('[data-cid="12"]'); z.textContent = 'Z'; $('.kt-shoulders').append(z);
+    $('[data-cid="10"]').hidden = true; $('[data-cid="11"]').hidden = true;
   }
   if (system === 'psx' || system === 'psp') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
@@ -622,10 +635,23 @@
         element.dataset.direction === 'digital' && held.has([0, 2, 3, 1][i])));
     }
   }
+  const gamecubeDock = {stamp: '', top: 0};
   function dockPosition() {
     const point = currentLayout().dock;
-    return Array.isArray(point) && point.length === 2 && point.every(Number.isFinite) ?
-      point : [dockSide === 'left' ? 0 : 1, .18 + 24 / innerHeight];
+    if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
+    if (gamecube && innerWidth > innerHeight && innerWidth <= 650 && innerHeight <= 550) {
+      // The short landscape layout reaches the top of the window. Put its
+      // settings tab between the shoulder and face buttons, without pushing
+      // Z onto R. Re-measure on viewport changes, never on every input frame.
+      const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.top}:${controllerBounds.bottom}`;
+      if (stamp !== gamecubeDock.stamp) {
+        const style = getComputedStyle(pad);
+        gamecubeDock.top = controllerBounds.bottom - parseFloat(style.bottom) - parseFloat(style.height) + 66;
+        gamecubeDock.stamp = stamp;
+      }
+      return [dockSide === 'left' ? 0 : 1, (gamecubeDock.top + 24) / innerHeight];
+    }
+    return [dockSide === 'left' ? 0 : 1, .18 + 24 / innerHeight];
   }
   function drawDock() {
     const [x, y] = dockPosition();
@@ -650,7 +676,7 @@
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
-    pad.hidden = drawerOpen || (!editing && (!enabled || !gameReady));
+    pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!enabled || !gameReady));
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
@@ -670,6 +696,7 @@
     tab.setAttribute('aria-expanded', String(open));
     draw();
     if (open) cloud()?.syncControls?.();
+    if (gamecube) window.WrcadGameCube?.menuOpen(open);
   }
   toggle.addEventListener('click', () => {
     if (editing) finishEdit(false);
@@ -1030,7 +1057,7 @@
     const framed = Boolean(document.getElementById('webrcade-app-iframe'));
     // Layout editing intentionally pauses the emulator. Keep its toolbar and
     // dock usable until Save/Cancel, while hiding controls on native pause screens.
-    host.hidden = framed || !(ready || (editing && emulator === editEmulator));
+    host.hidden = framed || !(ready || (gamecube && emulator?.started && !window.app.isPauseScreen()) || (editing && emulator === editEmulator));
     if (host.hidden && drawerOpen) setDrawer(false);
     if (ready !== gameReady || controller !== activeController || framed) clear();
     activeController = controller; gameReady = ready;

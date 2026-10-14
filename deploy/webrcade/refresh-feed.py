@@ -28,7 +28,15 @@ SYSTEMS = {
  'psx': ('PlayStation', 'psx', {'.chd', '.pbp', '.cue'}, 7),
  'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
+ 'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
+
+def gamecube_game(path):
+ # Disc identity and format validation need only the header, never a GB hash.
+ with path.open('rb') as stream: head=stream.read(0x20)
+ if len(head)!=0x20 or head[0x1c:0x20]!=bytes.fromhex('c2339f3d') or head[0x18:0x1c]==bytes.fromhex('5d1c9ea3'): return None
+ if not re.fullmatch(b'[A-Z0-9]{6}',head[:6]): return None
+ return 'gamecube:'+head[:8].hex()+':'+str(path.stat().st_size)
 # The 3DS share mixes games with updates, DLC, homebrew and console backups.
 N3DS_SKIP_DIRS = set(filter(None, os.environ.get('WEBRCADE_3DS_SKIP_DIRS', '').split('|')))
 N3DS_SKIP_NAMES = set(filter(None, os.environ.get('WEBRCADE_3DS_SKIP_NAMES', '').split('|')))
@@ -185,14 +193,19 @@ def main():
   counts={}; scanned=0; duplicates=0; seen=set(); errors=[]
   for folder,(title,core,extensions,platform) in SYSTEMS.items():
    if folder == '3DS' and not env_bool('WEBRCADE_ENABLE_3DS'): continue
+   if folder == 'GameCube' and not Path('/var/www/html/experimental/gamecube/core-info.json').is_file(): continue
    items=[]
-   candidates=sorted((ROOT/folder if folder=='3DS' else ROOT/folder/'roms').rglob('*'))
+   candidates=sorted((ROOT/folder if folder in ('3DS','GameCube') else ROOT/folder/'roms').rglob('*'))
    if MANAGED_PREFIX: candidates += sorted(MANAGED/r['path'][len(MANAGED_PREFIX):] for r in rows if r['platform']==platform and r['path'].startswith(MANAGED_PREFIX))
    # A SNES hack was filed under NES; route it by format.
    if folder=='snes': candidates+=sorted((ROOT/'nes/roms').glob('*.smc'))
    for p in candidates:
     if not p.is_file() or p.suffix.lower() not in extensions: continue
-    if folder=='3DS':
+    if folder=='GameCube':
+     identity=gamecube_game(p)
+     if identity is None: continue
+     scanned+=1; md5=None; info={}
+    elif folder=='3DS':
      identity=n3ds_game(p)
      if identity is None: continue
      scanned+=1; md5=None; info=n3ds_by_name.get(p.name,{})

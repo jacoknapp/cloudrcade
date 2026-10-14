@@ -1,11 +1,16 @@
 name: Docker release
 on:
   push:
-    branches: [master, beta/psp-core]
+    branches: [main, beta/psp-core]
     tags: ['v*']
   pull_request:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      rebuild_cores:
+        description: Rebuild all cores from source, bypassing caches
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,6 +23,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      FORCE_CORE_REBUILD: ${{ inputs.rebuild_cores == true && 'true' || 'false' }}
     permissions:
       contents: read
       packages: write
@@ -32,10 +39,43 @@ jobs:
           sudo apt-get install -y php-cli php-curl rsync
           python3 scripts/check-release.py
           python3 scripts/test.py
+      - name: Calculate exact core input keys
+        id: core_keys
+        run: python3 scripts/core-cache.py keys
+      - name: Restore gamecube build
+        id: cache_gamecube
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/gamecube
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['gamecube'] }}
+      - name: Restore gamecube-native build
+        id: cache_gamecube_native
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/gamecube-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['gamecube-native'] }}
+      - name: Restore 3ds build
+        id: cache_three_ds
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/3ds
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['3ds'] }}
+      - name: Restore psp build
+        id: cache_psp
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/psp
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['psp'] }}
+      - name: Prepare GameCube and corresponding source
+        run: python3 scripts/core-cache.py prepare gamecube
       - name: Prepare key-free 3DS app and corresponding source
-        run: python3 scripts/prepare-core.py
+        run: python3 scripts/core-cache.py prepare 3ds
       - name: Build PSP app and corresponding source
-        run: bash deploy/webrcade/retro-ppsspp/build.sh
+        run: python3 scripts/core-cache.py prepare psp
       - uses: docker/setup-qemu-action@v3
         if: github.ref != 'refs/heads/beta/psp-core'
         with:
@@ -58,7 +98,7 @@ jobs:
         run: |
           image="ghcr.io/${REPOSITORY,,}"
           echo "web=$image:sha-$COMMIT" >> "$GITHUB_OUTPUT"
-          if [ "$REF_NAME" = master ]; then tag=latest; elif [ "$REF_NAME" = beta/psp-core ]; then tag=beta-psp-core; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
+          if [ "$REF_NAME" = main ]; then tag=latest; elif [ "$REF_NAME" = beta/psp-core ]; then tag=beta-psp-core; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
           echo "web_alias=$image:$tag" >> "$GITHUB_OUTPUT"
           if [ "$REF_NAME" = beta/psp-core ]; then platforms=linux/amd64; else platforms=linux/amd64,linux/arm64; fi
           echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
@@ -73,7 +113,7 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
       - name: Verify AMD64 app and scheduled feed builder
-        run: python3 scripts/smoke-image.py cloudrcade:test linux/amd64
+        run: python3 scripts/smoke-image.py cloudrcade:test linux/amd64 --gamecube
       - name: Build ARM64 app image
         if: github.ref != 'refs/heads/beta/psp-core'
         uses: docker/build-push-action@v6
@@ -87,7 +127,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=web
       - name: Verify ARM64 app and scheduled feed builder under QEMU
         if: github.ref != 'refs/heads/beta/psp-core'
-        run: python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64
+        run: python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64 --gamecube
       - name: Publish verified app images
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
@@ -103,3 +143,27 @@ jobs:
           cache-to: type=gha,mode=max,scope=web
           provenance: true
           sbom: true
+      - name: Cache verified gamecube build
+        if: github.event_name != 'pull_request' && steps.cache_gamecube.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/gamecube
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['gamecube'] }}
+      - name: Cache verified gamecube-native build
+        if: github.event_name != 'pull_request' && steps.cache_gamecube_native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/gamecube-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['gamecube-native'] }}
+      - name: Cache verified 3ds build
+        if: github.event_name != 'pull_request' && steps.cache_three_ds.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/3ds
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['3ds'] }}
+      - name: Cache verified psp build
+        if: github.event_name != 'pull_request' && steps.cache_psp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/psp
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['psp'] }}

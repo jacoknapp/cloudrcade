@@ -35,6 +35,10 @@ COPY release/3ds/app/ /var/www/touch/apps/retro-azahar/
 COPY release/3ds/sources/ /var/www/html/licenses/sources/
 COPY release/psp/app/ /var/www/touch/apps/retro-ppsspp/
 COPY release/psp/sources/ /var/www/html/licenses/sources/
+COPY release/gamecube/app/ /var/www/html/experimental/gamecube/
+COPY deploy/webrcade/retro-dolphin/apache.conf /etc/apache2/conf-enabled/gamecube.conf
+# Deploy qualified images explicitly, preserving the current release policy.
+LABEL com.centurylinklabs.watchtower.enable="false"
 COPY LICENSE LICENSE-third-party NOTICE THIRD_PARTY.md /var/www/html/licenses/
 COPY LICENSES/ /var/www/html/licenses/texts/
 COPY deploy/webrcade/rom-library.conf /etc/apache2/conf-enabled/rom-library.conf
@@ -46,3 +50,6 @@ ENV WEBRCADE_APP_NAME=cloudЯcade WEBRCADE_STORAGE_PREFIX=cloudrcade \
 CMD ["python3", "/usr/local/share/cloudrcade/service.py"]
 STOPSIGNAL SIGTERM
 EXPOSE 80 443
+
+# Compatibility target for existing build commands. Both targets include GameCube.
+FROM web AS web-gamecube

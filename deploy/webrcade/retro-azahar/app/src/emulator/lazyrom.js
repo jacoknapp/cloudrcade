@@ -3,8 +3,8 @@
 // The Emscripten file system runs on the browser thread, so chunks are fetched with
 // synchronous requests; those cannot return binary data, hence the x-user-defined decoding.
 
-const CHUNK_SIZE = 2 * 1024 * 1024;
-const MAX_CHUNKS = 8; // At most 16 MiB, including on phones.
+export const CHUNK_SIZE = 2 * 1024 * 1024;
+export const MAX_CHUNKS = 8; // At most 16 MiB, including on phones.
 
 export class LazyRom {
   constructor(url, size) {

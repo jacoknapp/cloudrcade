@@ -49,6 +49,10 @@ def patch_bundle(raw):
   b'location:"app/retro-ppsspp/",background:"app/retro-ppsspp/images/psp.svg",'
   b'thumbnail:"app/retro-ppsspp/images/psp.svg",description:"PSP browser core. Requires WebGL2 and HTTPS.",'
   b'validate:Je,extensions:["iso","cso","pbp","elf"],multiThreaded:!0,defaults:{rom:""}},')
+ gamecube_type=(b'{key:"retro-dolphin",alias:"gamecube",name:"Nintendo GameCube",coreName:"Dolphin",slowExit:!0,'
+  b'location:"/experimental/gamecube/",background:"/experimental/gamecube/gamecube.svg",'
+  b'thumbnail:"/experimental/gamecube/gamecube.svg",description:"GameCube browser core. Requires device WebGPU and HTTPS.",'
+  b'validate:Je,extensions:["iso","gcm"],multiThreaded:!0,defaults:{rom:""}},')
  # A settings page like the pinned ones (same base class, row, label and switch
  # components), defined right after the Advanced page it follows.
  after_advanced=b'ei.contextType=Wn;'
@@ -58,10 +62,13 @@ def patch_bundle(raw):
  perf=b'(function(){try{return localStorage.getItem("wrcad.3ds.perf.v1")==="1"}catch(e){return!1}})()'
  # A second switch runs lit 3DS draws on the CPU again, to compare speed on a device.
  litcpu=b'(function(){try{return localStorage.getItem("wrcad.3ds.litcpu.v1")==="1"}catch(e){return!1}})()'
- page=(b'var WrcadExperimental=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
-  b't.litRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef]],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
+ gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")!=="0"}catch(e){return!0}})()'
+ gc_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)'
+ page=(b'var WrcadCoreSettings=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
+  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
+  b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)?[[t.gcPerfRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
   b'var n=this.gridComps,a=this.props.setFocusGridComps,i=this.props.isActive;i&&i!==e.isActive&&a(n)},'
-  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef;return['
+  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef;return['
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"3DS performance readout"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:r,onPad:function(e){return t.moveFocus(e.type,r)},onChange:function(e){'
   b'try{e.target.checked?localStorage.setItem("wrcad.3ds.perf.v1","1"):localStorage.removeItem("wrcad.3ds.perf.v1")}catch(x){}'
@@ -69,17 +76,23 @@ def patch_bundle(raw):
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"3DS lighting on CPU (slower)"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:l,onPad:function(e){return t.moveFocus(e.type,l)},onChange:function(e){'
   b'try{e.target.checked?localStorage.setItem("wrcad.3ds.litcpu.v1","1"):localStorage.removeItem("wrcad.3ds.litcpu.v1")}catch(x){}'
-  b'n.forceUpdate()},checked:'+litcpu+b'})))]},t}(_a);'
-  b'WrcadExperimental.contextType=Wn;')
+  b'n.forceUpdate()},checked:'+litcpu+b'}))),'
+  b'window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl?'
+  b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"GameCube performance readout"),i.a.createElement(La,null,'
+  b'i.a.createElement(Va,{ref:g,onPad:function(e){return t.moveFocus(e.type,g)},onChange:function(e){'
+  b'try{localStorage.setItem("wrcad.gamecube.perf.v1",e.target.checked?"1":"0")}catch(x){}'
+  b'n.forceUpdate()},checked:'+gcperf+b'}))):null'
+  b']},t}(_a);'
+  b'WrcadCoreSettings.contextType=Wn;')
  icon=(b'data:image/svg+xml;base64,'+__import__('base64').b64encode(
   b'<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#FFFFFF">'
   b'<path d="M0 0h24v24H0z" fill="none"/><path d="M19.8 18.4L14 10.67V6.5l1.35-1.69c.26-.33.03-.81-.39-.81H9.04'
   b'c-.42 0-.65.48-.39.81L10 6.5v4.17L4.2 18.4c-.49.66-.02 1.6.8 1.6h14c.82 0 1.29-.94.8-1.6z"/></svg>'))
- tab=(b',...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?[{image:"'+icon+b'",label:"Experimental Settings",content:i.a.createElement(WrcadExperimental,'
-  b'{isActive:5===l,setFocusGridComps:d})}] : [])')
+ tab=(b',...((window.WrcadCloudConfig&&(window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl))?[{image:"'+icon+b'",label:"Core Settings",content:i.a.createElement(WrcadCoreSettings,'
+  b'{isActive:5===l,setFocusGridComps:d,values:c,setValues:g})}] : [])')
  patched = raw.replace(old,new).replace(marker,hook+marker).replace(cloud_tab,cloud_tab+cloud_hook).replace(
   b'"'+default_feed+b'"',b'(new URL(window.WrcadCloudConfig&&window.WrcadCloudConfig.feedUrl||"/content/feeds/combined.json",location.href).href)' ).replace(
-  ds_type,psp_type+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?['+n3ds_type.rstrip(b',')+b'] : []),'+ds_type).replace(ds_alias,ds_alias+b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)&&st(rt,"3ds","retro-azahar"),st(rt,"psp","retro-ppsspp"),').replace(
+  ds_type,psp_type+b'...('+gc_available+b'?['+gamecube_type.rstrip(b',')+b'] : []),'+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?['+n3ds_type.rstrip(b',')+b'] : []),'+ds_type).replace(ds_alias,ds_alias+b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)&&st(rt,"3ds","retro-azahar"),'+gc_available+b'&&st(rt,"gamecube","retro-dolphin"),st(rt,"psp","retro-ppsspp"),').replace(
   after_advanced,after_advanced+page).replace(
   last_tab,last_tab[:-len(b']})')]+tab+b']})')
 

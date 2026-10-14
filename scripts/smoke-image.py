@@ -2,7 +2,7 @@
 """Verify one-container HTTP, mounted BIOS, scheduled scans and safe shutdown.
 
 Uses synthetic ROM/disc/key fixtures only, never accounts or operator files.
-Usage: python3 scripts/smoke-image.py cloudrcade:test [linux/amd64|linux/arm64]
+Usage: python3 scripts/smoke-image.py cloudrcade:test [linux/amd64|linux/arm64] [--gamecube]
 """
 import hashlib
 from html.parser import HTMLParser
@@ -21,6 +21,7 @@ import uuid
 
 image = sys.argv[1]
 platform = sys.argv[2] if len(sys.argv) > 2 else None
+gamecube = '--gamecube' in sys.argv[3:]
 if platform not in (None, 'linux/amd64', 'linux/arm64'):
     raise SystemExit('Supported smoke-test platforms: linux/amd64, linux/arm64')
 name = 'cloudrcade-smoke-' + uuid.uuid4().hex[:10]
@@ -60,6 +61,10 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         folder.mkdir(parents=True, exist_ok=True)
     (roms / 'nes/roms/first.nes').write_bytes(b'NES\x1a' + bytes(12) + b'first-fixture')
     (roms / 'psp/roms/psp-fixture.elf').write_bytes(b'\x7fELF' + bytes(16))
+    (roms / 'GameCube').mkdir()
+    gc_header=bytearray(32); gc_header[:6]=b'TEST01'; gc_header[28:32]=bytes.fromhex('c2339f3d')
+    (roms / 'GameCube/gamecube-fixture.iso').write_bytes(gc_header)
+    (roms / 'GameCube/invalid.iso').write_bytes(bytes(32))
     (roms / 'fixtures/disc.bin').write_bytes(bytes(2352 * 32))
     (roms / 'fixtures/disc.cue').write_text('FILE "disc.bin" BINARY\n TRACK 01 MODE1/2352\n INDEX 01 00:00:00\n')
     synthetic_keys = 'slot0x18KeyX=' + '00' * 16 + '\n'
@@ -96,6 +101,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
 
         until(lambda: any(item['title'] == 'first' for item in items()))
         assert any(item['title'] == 'psp-fixture' and item['type'] == 'psp' for item in items())
+        assert any(item['title']=='gamecube-fixture' and item['type']=='gamecube' for item in items()) == gamecube
+        assert not any(item['title']=='invalid' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.
         docker('exec', name, 'chdman', 'createcd', '-np', '4', '-i',
                '/var/www/html/content/fixtures/disc.cue', '-o', '/data/derived/smoke-disc.chd')
@@ -104,6 +111,28 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         config = json.load(response)['config']
         assert config['appName'] == 'Release Test Arcade' and config['storagePrefix'] == 'release_test'
         assert not config['enabled'] and not config['autoRedirect']
+        assert config['gamecubeUrl'] == ('/experimental/gamecube/' if gamecube else '')
+        if gamecube:
+            base = '/experimental/gamecube/'
+            with get(base) as response:
+                assert b'Experimental GameCube' in response.read()
+                assert response.headers['Cross-Origin-Opener-Policy'] == 'same-origin'
+                assert response.headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
+            with get(base + 'core-info.json') as response:
+                info = json.load(response)
+                assert not info['experimental'] and info['videoBackend'] == 'WebGPU-Real'
+                assert info['streamThresholdBytes'] == 50_000_000
+            for filename, expected in info['adapterFilesSha256'].items():
+                with get(base + filename) as response:
+                    assert hashlib.sha256(response.read()).hexdigest() == expected
+                    assert 'javascript' in response.headers['Content-Type']
+            for filename, expected in info['artifacts'].items():
+                with get(base + 'cores/dolphin/' + filename) as response:
+                    assert hashlib.sha256(response.read()).hexdigest() == expected
+            with get(base + 'gamecube-source.tar.gz') as response:
+                assert hashlib.sha256(response.read()).hexdigest() == info['sourceSha256']
+            with get(base + 'adapter-source/patch-runtime.py') as response:
+                assert hashlib.sha256(response.read()).hexdigest() == info['hostPatchSha256']
         assert config['n3dsKeysUrl'] == '/cloud-saves/3ds-keys.php'
         with get(config['n3dsKeysUrl']) as response:
             assert response.read().decode() == synthetic_keys
@@ -155,6 +184,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert b'RETRO_PPSSPP:"retro-ppsspp"' in psp_wrapper, 'PSP canonical app type is missing'
             assert b'.psp.enabled.v1' not in psp_wrapper, 'PSP still requires the retired opt-in'
             assert b'PlayStation Portable (experimental)' not in psp_wrapper
+        assert '.gamecube.enabled.v1' not in player, 'GameCube still requires the retired opt-in'
+        assert 'GameCube (experimental)' not in player
         assert '.psp.enabled.v1' not in player, 'Library still requires the retired PSP opt-in'
         assert 'Enable PSP (experimental)' not in player
         with get('/play/app/retro-ppsspp/js/v3/ppsspp_libretro.wasm') as response:
