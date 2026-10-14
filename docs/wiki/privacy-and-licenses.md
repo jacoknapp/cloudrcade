@@ -6,7 +6,7 @@
 
 Nextcloud **Link** approves a browser connection for game progress. Nextcloud **Manage → Disconnect this browser** revokes it while leaving remote files intact. The arcade shows connection/account status; check it on shared devices. Keep your browser profile trusted because it holds saves and the remembered credential.
 
-Dropbox ROM/feed sharing and Google Drive file sharing are separate from save synchronization. People who can fetch a shared file URL can obtain that file. Do not put private BIOS/key material in shared links or public feeds. Google also explains that shared-file owner information can be visible in its [sharing help](https://support.google.com/drive/answer/2494822).
+Dropbox ROM/feed sharing and Google Drive file sharing are separate from account-linked save synchronization. People who can fetch a shared file URL can obtain that file. Do not put private BIOS/key material in shared links or public feeds. Google also explains that shared-file owner information can be visible in its [sharing help](https://support.google.com/drive/answer/2494822).
 
 ## Data handled by the app
 
@@ -33,3 +33,7 @@ The frontend and standalone deployment additions use Apache 2.0 with upstream no
 Read [LICENSE](../../LICENSE), [NOTICE](../../NOTICE), [THIRD_PARTY.md](../../THIRD_PARTY.md), [license snapshots](../../LICENSES/) and the [integration license](../../integrations/nextcloud/LICENSE). The modified 3DS corresponding source ships in the image at `/licenses/sources/3ds-source.tar.gz`. Wrapper reference snapshots and upstream source links document provenance without claiming exact matching source for every inherited binary.
 
 ROM/BIOS ownership and permission are separate from the emulator/frontend license. Supply content you are entitled to use and distribute, and assess applicable requirements for your deployment. cloudЯcade is an independent fork preserving webRcade history and credits; it is not an official webRcade release.
+
+## Dropbox account storage
+
+When Dropbox is the selected save destination, the shared adapter sends supported saves, state slots, controller settings, history and auxiliary save data directly to the fixed Dropbox API origins. A scoped App Folder application confines its file access to that application's folder. The browser stores refresh/access tokens in this site's storage, as it does the Nextcloud app credential, and supplies Dropbox access tokens only to Dropbox. Tokens are excluded from the offline asset cache. Pending PKCE login state and an exchanged token awaiting account lookup live temporarily in this tab's session storage; completion clears them. Disconnect revokes the connection without deleting saved files. Account and provider selection are independent of ROM/feed hosting.

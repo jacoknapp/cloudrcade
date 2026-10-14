@@ -18,6 +18,8 @@ Start here if you use an arcade someone else runs. You do not need to edit `.env
 | There is no sound | Tap a control/menu, check Mute audio, volume and output device | Report game/browser/device; browsers can require a gesture |
 | A streamed game stops or pauses | Restore the connection to the game server | Ask the operator to check file/range responses; uncached chunks need access |
 | 3DS hitches on a new scene | Let new shaders compile; repeat visits can reuse observed shaders | Speed varies by game/device; see [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) |
+| Dropbox is missing from Choose storage | Check `DROPBOX_ENABLED`, the public `DROPBOX_APP_KEY` and HTTPS `WEBRCADE_PUBLIC_URL`; recreate the container after environment changes | Register the exact callback from [Dropbox setup](saves-and-storage.md#enable-dropbox-saves) |
+| Dropbox asks to reconnect | Link again through Choose storage; preserve browser data and pending saves | Check the app's scopes/authorization and the account's connected apps |
 | A Drive/Dropbox feed link fails | Confirm it is a feed JSON file, not a folder/preview page; use the documented setup route | Ask the feed author to test direct file access and browser permissions |
 | Offline launch fails | Try online in the same browser/profile; fully load/test required assets | A partly streamed game or uncached 3DS keys cannot be fixed by installing the app |
 

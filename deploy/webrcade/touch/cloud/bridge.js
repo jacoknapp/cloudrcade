@@ -1,13 +1,18 @@
-/* Nextcloud adapter for the pinned webRcade 0.2.3 module interfaces. */
+/* Cloud storage adapter for the pinned webRcade 0.2.3 module interfaces. */
 (() => {
   'use strict';
   const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
-  const KEY = prefix + '.nextcloud.connection.v1';
+  const dropbox = window.WrcadDropbox;
+  const provider = dropbox?.selected() || 'nextcloud';
+  const providerName = provider === 'dropbox' ? 'Dropbox' : 'Nextcloud';
+  const KEY = provider === 'dropbox' ? dropbox.key : prefix + '.nextcloud.connection.v1';
   const API = '/cloud-saves/api.php';
   const CONFIG_KEY = prefix + '.nextcloud.config.v1';
   let config = {enabled:false, autoRedirect:false, accessAllowed:false, server:''};
   try { config = window.WrcadCloudConfig || JSON.parse(localStorage.getItem(CONFIG_KEY)) || config; } catch (_) {}
   if (window.WrcadCloudConfig) try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) {}
+  if (provider === 'dropbox') config = {...config, enabled:Boolean(config.dropbox?.enabled), accessAllowed:true, autoRedirect:false,
+    server:'dropbox:' + config.dropbox?.appKey, legacyServer:'', saveFolder:config.dropbox?.saveFolder, message:'Dropbox has not been enabled on this site.'};
   let connection = null, csrf = null, bootstrap = null;
   const AUTO_ATTEMPT = KEY + '.attempt', AUTO_PAUSED = KEY + '.paused';
   const versions = new Map(), blocked = new Set(), installed = new WeakSet();
@@ -15,6 +20,7 @@
   const LOCAL_META = prefix + '-local-sync.json', LEGACY_OWNER = prefix + '.saves.legacy-owner.v1';
   const stats = {settings: 0, storage: 0, saves: 0, resources: 0};
   function readConnection() {
+    if (provider === 'dropbox') { connection = dropbox.read(); return; }
     try {
       const value = JSON.parse(localStorage.getItem(KEY));
       connection = value && ['login','password','uid'].every(key => typeof value[key] === 'string' && value[key]) &&
@@ -25,10 +31,10 @@
   // Claim pre-upgrade, unscoped backups only once, for the browser's existing
   // profile. Subsequent accounts must never inherit that profile's saves.
   try {
-    if (localStorage.getItem(LEGACY_OWNER) === null)
+    if (provider === 'nextcloud' && localStorage.getItem(LEGACY_OWNER) === null)
       localStorage.setItem(LEGACY_OWNER, JSON.stringify(connection?.uid || null));
   } catch (_) { /* Without a durable owner, do not import unscoped backups. */ }
-  function account() { readConnection(); return connection?.uid || null; }
+  function account() { readConnection(); return (!dropbox || dropbox.selected() === provider) ? connection?.uid || null : null; }
   function requireAccount(uid) {
     if (!uid || account() !== uid) throw new Error('Cloud account changed. Reopen the game before using cloud saves. Your local progress has been kept for the original account.');
   }
@@ -46,7 +52,7 @@
     return next.finally(() => { if (queues.get(key) === next) queues.delete(key); });
   }
   window.addEventListener('storage', e => {
-    if (e.key === KEY) { readConnection(); versions.clear(); blocked.clear(); }
+    if (e.key === KEY || e.key === dropbox?.providerKey) { readConnection(); versions.clear(); blocked.clear(); }
   });
   function headers(auth) {
     if (!auth) return {};
@@ -56,6 +62,11 @@
   }
   async function request(action, {method = 'GET', path, body, extra = {}, retried = false, uid = account()} = {}) {
     if (action !== 'status') requireAccount(uid);
+    if (provider === 'dropbox') {
+      const response = await dropbox.request(action, {method, path, body, extra, uid, timeoutMs});
+      requireAccount(uid);
+      return response;
+    }
     const auth = connection;
     if (!csrf) {
       bootstrap ||= fetch(API + '?action=status', {cache: 'no-store'}).then(async response => {
@@ -73,7 +84,7 @@
       return request(action, {method, path, body, extra, retried:true, uid});
     }
     if (!response.ok) {
-      let message = 'Nextcloud could not complete the save operation.';
+      let message = providerName + ' could not complete the save operation.';
       try { message = (await response.json()).error || message; } catch (_) {}
       const error = new Error(message); error.status = response.status;
       throw error;
@@ -90,7 +101,7 @@
       panel.style.cssText = 'position:fixed;z-index:2147483647;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(620px,calc(100% - 32px));box-sizing:border-box;padding:14px 44px 14px 18px;border:1px solid #69dec8;border-radius:10px;background:#090e19;color:#ecf3ff;font:15px/1.5 system-ui;box-shadow:0 4px 24px #0008';
       panel.append(document.createTextNode(message));
       const dismiss = document.createElement('button'); dismiss.textContent = '×';
-      dismiss.setAttribute('aria-label','Dismiss Nextcloud message');
+      dismiss.setAttribute('aria-label','Dismiss cloud storage message');
       dismiss.style.cssText = 'position:absolute;right:10px;top:8px;background:none;border:0;color:inherit;font:24px system-ui;cursor:pointer';
       dismiss.onclick = () => panel.remove(); panel.append(dismiss); document.body.append(panel);
     };
@@ -101,6 +112,7 @@
     localStorage.removeItem(AUTO_PAUSED);
     const url = new URL('/cloud-saves/', location.origin);
     url.searchParams.set(automatic ? 'auto' : 'connect', '1');
+    url.searchParams.set('provider', provider);
     url.searchParams.set('return', returnUri || window.top.location.href);
     window.top.location.assign(url.href);
     return Promise.resolve();
@@ -170,7 +182,7 @@
     requireAccount(uid);
     const key = versionKey(uid, path);
     if (condition === undefined) {
-      if (blocked.has(key)) throw new Error('This save could not be loaded from Nextcloud. Reopen the game after reconnecting. Your local copy has been kept.');
+      if (blocked.has(key)) throw new Error('This save could not be loaded from ' + providerName + '. Reopen the game after reconnecting. Your local copy has been kept.');
       if (!versions.has(key)) {
         try {
           const response = await request('file', {method:'HEAD', path, uid});
@@ -343,7 +355,7 @@
               catch (e) { warn(this, e); }
             } else {
               try {
-                callback?.('Loading from Nextcloud…');
+                callback?.('Loading from ' + providerName + '…');
                 const remote = await this.loadCloud(path);
                 const base = versions.get(versionKey(owner(this), this.getZipFileName(path))) ?? null;
                 // Old unmarked backups are retained separately during migration.
@@ -379,7 +391,7 @@
         try {
           requireAccountIfConnected(this);
           if (!enabled()) return true;
-          callback?.('Saving to Nextcloud…'); await flush(this, path, record); return true;
+          callback?.('Saving to ' + providerName + '…'); await flush(this, path, record); return true;
         } catch (e) { warn(this, e); return false; }
         finally { callback?.(null); }
       });
@@ -390,7 +402,7 @@
       try {
         requireAccountIfConnected(this);
         if (!enabled()) return;
-        callback?.('Saving to Nextcloud…');
+        callback?.('Saving to ' + providerName + '…');
         await this.saveCloud(path, files);
         await this.saveCloudSingleFile(path + '.json', JSON.stringify({time:Date.now(), shot:shot || canvas?.toDataURL() || null,
           imageProps:imageProps || {}, ...otherProps}));
@@ -450,7 +462,7 @@
   }
   const controlsPath = '/settings/touch-controller.v1.json';
   const recentPath = '/settings/recently-played.v1.json';
-  function installUI({react, CloudStorageTab, storage}) {
+  function installUI({react, CloudStorageTab}) {
     if (installed.has(CloudStorageTab)) return;
     installed.add(CloudStorageTab);
     const original = CloudStorageTab.prototype.render;
@@ -458,46 +470,50 @@
       // Reuse the pinned native fields/buttons, including keyboard/gamepad focus.
       const view = Object.create(this);
       view.props = {...this.props, values:{...this.props.values, cloudStorage:true}};
-      const [, [provider, status, disableSaves]] = original.call(view);
-      this.nextcloudRef ||= react.createRef();
+      const [, [providerRow, status, disableSaves]] = original.call(view);
+      this.providerLinkRef ||= react.createRef();
       const row = (template, label, content) => react.cloneElement(template, {},
         react.cloneElement(template.props.children[0], {}, label),
         react.cloneElement(template.props.children[1], {}, content));
-      const manage = provider.props.children[1].props.children;
+      const manage = providerRow.props.children[1].props.children;
       const button = react.cloneElement(manage.props.children, {
-        ref:this.nextcloudRef, label:account() ? 'Manage' : 'Link',
-        onPad:e => this.context.focusGrid.moveFocus(e.type, this.nextcloudRef),
+        ref:this.providerLinkRef, label:account() ? 'Manage' : 'Link',
+        onPad:e => this.context.focusGrid.moveFocus(e.type, this.providerLinkRef),
         onClick:() => {
           if (!account()) { connect(); return; }
           const url = new URL('/cloud-saves/', location.origin);
+          url.searchParams.set('provider', provider);
           url.searchParams.set('return', window.top.location.href);
           window.top.location.assign(url.href);
         }
       });
-      const nextcloud = row(provider, 'Nextcloud', react.cloneElement(manage, {}, button));
-      const nextcloudStatus = row(status, 'Status', !config.accessAllowed ? config.message : account() ?
+      const linkedProvider = row(providerRow, providerName, react.cloneElement(manage, {}, button));
+      const providerStatus = row(status, 'Status', !config.accessAllowed ? config.message : account() ?
         'Connected' + (connection.name ? ' as ' + connection.name : '') + ' · automatic saves' :
         'Disconnected · saves stay on this browser');
-      const available = Boolean(storage.getRedirectUri?.());
-      this.gridComps = config.enabled ? [[this.nextcloudRef], [this.disableSavesRef]] : [];
-      const rows = config.enabled ? [nextcloud, nextcloudStatus, disableSaves] : [];
-      if (available) {
-        const native = original.call(this);
-        const toggle = native[0];
-        rows.push(react.cloneElement(toggle, {},
-          react.cloneElement(toggle.props.children[0], {}, 'Other cloud storage'), toggle.props.children[1]));
-        this.gridComps.push([this.cloudStorageRef]);
-        if (this.props.values.cloudStorage) {
-          rows.push(...native[1].slice(0, 2));
-          this.gridComps.push([this.dropboxRef]);
-        }
+      this.gridComps = config.enabled ? [[this.providerLinkRef], [this.disableSavesRef]] : [];
+      const rows = config.enabled ? [linkedProvider, providerStatus, disableSaves] : [];
+      if (window.WrcadCloudConfig?.dropbox?.enabled || window.WrcadCloudConfig?.enabled) {
+        this.providerRef ||= react.createRef();
+        const choose = react.cloneElement(manage.props.children, {
+          ref:this.providerRef, label:'Choose storage',
+          onPad:e => this.context.focusGrid.moveFocus(e.type, this.providerRef),
+          onClick:() => {
+            const url = new URL('/cloud-saves/', location.origin);
+            url.searchParams.set('return', window.top.location.href);
+            window.top.location.assign(url.href);
+          }
+        });
+        rows.push(row(providerRow, 'Save destination', react.cloneElement(manage, {}, choose)));
+        this.gridComps.push([this.providerRef]);
       }
       if (!rows.length) rows.push(row(status, 'Cloud storage', config.message));
       return rows;
     };
   }
   window.WrcadCloud = {attachChunk, install, installUI, stats, connect, unlink,
-    controlsAccount: () => enabled() ? account() : null,
+    providerName,
+    controlsAccount: () => enabled() ? (provider === 'dropbox' ? JSON.stringify([config.server, account()]) : account()) : null,
     loadControls: async () => JSON.parse(await (await download(controlsPath)).text()),
     saveControls: value => upload(JSON.stringify(value), controlsPath),
     loadRecent: async () => JSON.parse(await (await download(recentPath)).text()),

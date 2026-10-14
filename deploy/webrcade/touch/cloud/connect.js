@@ -16,6 +16,29 @@
   } catch (_) {}
   try { sessionStorage.setItem(RETURN_KEY, returnTo); } catch (_) {}
   $('#return').href = returnTo;
+  const publicConfig = window.WrcadCloudConfig || {};
+  const selectedProvider = params.get('provider') || window.WrcadDropbox?.selected() || 'nextcloud';
+  const select = $('#provider');
+  for (const [id, name, available] of [['nextcloud','Nextcloud',publicConfig.enabled], ['dropbox','Dropbox',publicConfig.dropbox?.enabled]]) {
+    if (!available && selectedProvider !== id) continue;
+    const option = document.createElement('option'); option.value = id; option.textContent = name;
+    select.append(option);
+  }
+  select.value = selectedProvider;
+  select.onchange = () => {
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set('provider', select.value); url.searchParams.set('return', returnTo);
+    location.assign(url.href);
+  };
+  if (selectedProvider === 'dropbox' && window.WrcadDropbox) {
+    // Remove the single-use OAuth code before loading any further resources.
+    history.replaceState(null, '', location.pathname + '?provider=dropbox');
+    window.WrcadDropbox.manage({params, returnTo}); return;
+  }
+  $('#use-provider').onclick = async () => {
+    try { await request('verify'); finish(); } catch (e) { failure(e); }
+  };
+
   function authHeaders() {
     if (!connection) return {};
     return {'X-Nextcloud-Authorization': 'Basic ' + btoa(unescape(encodeURIComponent(connection.login + ':' + connection.password))),
@@ -34,9 +57,11 @@
   function show(data) {
     $('#connect').hidden = data.connected;
     $('#disconnect').hidden = !data.connected;
+    $('#use-provider').hidden = !data.connected;
     if (data.connected) $('#status').textContent = `Connected${data.user ? ' as ' + data.user : ''}. Saves use your ${config.saveFolder} folder.`;
   }
   function finish() {
+    localStorage.setItem(prefix + '.cloud.provider.v1', 'nextcloud');
     try { loginWindow?.close(); } catch (_) {}
     localStorage.removeItem(KEY + '.enable');
     localStorage.removeItem(KEY + '.paused');
