@@ -28,7 +28,7 @@ SYSTEMS = {
  'psx': ('PlayStation', 'psx', {'.chd', '.pbp', '.cue'}, 7),
  'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
- 'GameCube': ('Nintendo GameCube (experimental)', 'gamecube', {'.iso', '.gcm'}, 21),
+ 'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
 
 def gamecube_game(path):

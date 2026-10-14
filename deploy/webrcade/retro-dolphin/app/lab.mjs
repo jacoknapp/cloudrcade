@@ -90,12 +90,12 @@ async function select(load){
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else status(error.message);}}
  finally{if(current===generation){selectionAbort=null;busy=false;controls();}}
 }
-get('initialize').onclick=()=>perform(async owned=>{status('Initializing experimental Dolphin core…');await owned.initialize();if(session===owned)status('Dolphin initialized. Select a disc to boot.');});
+get('initialize').onclick=()=>perform(async owned=>{status('Initializing Dolphin core…');await owned.initialize();if(session===owned)status('Dolphin initialized. Select a disc to boot.');});
 get('disc').onchange=event=>{const file=event.target.files[0];if(!file){selected=null;controls();return;}select(async()=>{await inspectDisc(file);return file;});};
 get('selectUrl').onclick=()=>select(signal=>{status('Checking GameCube disc URL…');return remoteDisc(get('url').value,{signal});});
 async function boot(){
  await perform(async owned=>{
-  status('Booting experimental GameCube core…');
+  status('Booting GameCube core…');
   saves=new GameCubeSaves(props?.title||selected.name,props||{},text=>status(text));
   disposeSaveFeedback=saveFeedback(get('gamecube-save-toast'),saves);
   const metadata=await owned.boot(selected,(adapter,disc)=>saves.initialize(adapter,disc));

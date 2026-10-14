@@ -38,7 +38,7 @@ function cloudConfig(): array {
     return ['appName' => trim((string)getenv('WEBRCADE_APP_NAME')) ?: 'cloudЯcade', 'iconVersion' => $iconVersion,
         'storagePrefix' => $prefix, 'saveFolder' => $folder, 'feedUrl' => $feed,
         'enable3DS' => cloudBool('WEBRCADE_ENABLE_3DS'),
-        'gamecubePrototypeUrl' => is_file('/var/www/html/experimental/gamecube/core-info.json') ? '/experimental/gamecube/' : '',
+        'gamecubeUrl' => is_file('/var/www/html/experimental/gamecube/core-info.json') ? '/experimental/gamecube/' : '',
         'n3dsKeysUrl' => cloudBool('WEBRCADE_ENABLE_3DS') && n3dsKeysPath() !== '' ? '/cloud-saves/3ds-keys.php' : '',
         'dropbox' => ['enabled' => $dropboxEnabled, 'appKey' => $dropboxKey],
         'enabled' => $enabled, 'autoRedirect' => $enabled && cloudBool('NEXTCLOUD_AUTO_REDIRECT'),

@@ -1,5 +1,5 @@
 const INPUT_FIELDS = ['mask','stickX','stickY','cStickX','cStickY','triggerLeft','triggerRight','analogA','analogB'];
-// CloudRcade experimental GameCube session. The upstream Dolphin runtime is GPL-2.0-or-later.
+// CloudRcade GameCube session. The upstream Dolphin runtime is GPL-2.0-or-later.
 export function requireCapabilities(scope = globalThis) {
   if (!scope.isSecureContext || !scope.crossOriginIsolated ||
       typeof scope.SharedArrayBuffer !== 'function' || typeof scope.Worker !== 'function') {

@@ -1,5 +1,5 @@
 // GameCube-only readout. Reuses the existing worker poll; no GPU probes or
-// browser animation counters. The Experimental Settings switch controls it.
+// browser animation counters. The Core Settings switch controls it.
 export const PERF_KEY = 'wrcad.gamecube.perf.v1';
 export function perfEnabled(storage) {
   try { return (storage || globalThis.localStorage).getItem(PERF_KEY) !== '0'; } catch { return true; }

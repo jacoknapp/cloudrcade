@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         config = json.load(response)['config']
         assert config['appName'] == 'Release Test Arcade' and config['storagePrefix'] == 'release_test'
         assert not config['enabled'] and not config['autoRedirect']
-        assert config['gamecubePrototypeUrl'] == ('/experimental/gamecube/' if gamecube else '')
+        assert config['gamecubeUrl'] == ('/experimental/gamecube/' if gamecube else '')
         if gamecube:
             base = '/experimental/gamecube/'
             with get(base) as response:
@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
                 assert response.headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
             with get(base + 'core-info.json') as response:
                 info = json.load(response)
-                assert info['experimental'] and info['videoBackend'] == 'WebGPU-Real'
+                assert not info['experimental'] and info['videoBackend'] == 'WebGPU-Real'
                 assert info['streamThresholdBytes'] == 50_000_000
             for filename, expected in info['adapterFilesSha256'].items():
                 with get(base + filename) as response:
@@ -184,6 +184,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert b'RETRO_PPSSPP:"retro-ppsspp"' in psp_wrapper, 'PSP canonical app type is missing'
             assert b'.psp.enabled.v1' not in psp_wrapper, 'PSP still requires the retired opt-in'
             assert b'PlayStation Portable (experimental)' not in psp_wrapper
+        assert '.gamecube.enabled.v1' not in player, 'GameCube still requires the retired opt-in'
+        assert 'GameCube (experimental)' not in player
         assert '.psp.enabled.v1' not in player, 'Library still requires the retired PSP opt-in'
         assert 'Enable PSP (experimental)' not in player
         with get('/play/app/retro-ppsspp/js/v3/ppsspp_libretro.wasm') as response:

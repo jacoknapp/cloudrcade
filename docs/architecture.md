@@ -45,7 +45,7 @@ docker buildx build --platform linux/amd64,linux/arm64 --target web \
 CI loads and tests each architecture separately, including actual CHD conversion
 and scheduled scanning, before pushing the combined image. For a local ARM64
 test, build with `--platform linux/arm64 --load -t cloudrcade:test-arm64` and run
-`python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64`. Emulation is
+`python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64 --gamecube`. Emulation is
 required to run that test on an AMD64 host. These checks verify the server
 runtime; physical ARM hardware and game performance require device testing.
 
@@ -58,13 +58,12 @@ The PSP application is source-built with
 FFmpeg (the pinned PPSSPP submodule), RetroArch, wrapper/scaffold, filesystem
 dependency and Emscripten. The image includes both its runtime assets and
 corresponding source archive. PSP is available by default with no player
-or Docker enable flag. The `beta/psp-core` branch publishes
-the separate `beta-psp-core` image tag; only master updates `latest`.
-Internal JavaScript and WASM interface names use a generic `Wrcad` namespace.
-The beta branch includes the experimental
-[GameCube core](../deploy/webrcade/retro-dolphin/README.md) through the
-`web-gamecube` target and publishes AMD64 only. The main release retains both
-server architectures.
+or Docker enable flag. The standard `web` release includes the
+[GameCube core](../deploy/webrcade/retro-dolphin/README.md), enabled by default
+with no experimental opt-in. `main` publishes `latest` for AMD64 and ARM64;
+GameCube renders in the client browser using its device GPU. The historical
+GameCube launch URL remains compatible with existing links. The transition
+`beta/psp-core` build remains AMD64-only until that branch is removed.
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 

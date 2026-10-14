@@ -47,7 +47,7 @@ The default listener is `127.0.0.1:8443`. Finish gateway setup and verify the fi
 
 [Folder layout and adding games](docs/wiki/library-administration.md) explains every scanner system directory, BIOS files, generated feeds and derived discs. [Operations](docs/wiki/operations-and-troubleshooting.md) covers environment variables, backup, upgrades and troubleshooting. [Nextcloud and access](docs/wiki/nextcloud-and-access.md#enable-a-server) covers manual linking, optional automatic login and SSO. All deployment URLs, flags, names, namespaces and paths remain environment-controlled.
 
-The release image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `master` builds and publishes it; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` release tags are also published.
+The release image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `main` builds and publishes it; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` release tags are also published.
 
 Images support **Linux AMD64 and ARM64**, including 64-bit ARM servers and Raspberry Pi systems running a 64-bit OS. Docker selects the matching image automatically. Both architectures pass the app and scanner smoke checks before publication.
 

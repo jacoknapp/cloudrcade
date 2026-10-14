@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare an isolated GameCube prototype from pinned upstream artifacts.
+"""Prepare an GameCube browser core from pinned upstream artifacts.
 
 Requires Git, Node >=22, Python >=3.10, tar and network access. WORK is a
 dedicated upstream checkout; OUT is generated release/gamecube. No ROMs,
@@ -114,7 +114,7 @@ def prepare(work, out):
         shutil.copy2(HERE.parent / 'retro-azahar/app/src/emulator/lazyrom.js', stage / 'adapter-source/app/lazyrom.mjs')
         shutil.copytree(stage / 'adapter-source', stage / 'app/adapter-source')
         (stage / 'app/core-info.json').write_text(json.dumps({
-            **LOCK, 'experimental': True, 'binaryOrigin': 'cloudrcade-linux-source-build',
+            **LOCK, 'experimental': False, 'binaryOrigin': 'cloudrcade-linux-source-build',
             'locallySourceBuilt': True, 'upstreamArtifacts': LOCK['artifacts'],
             'artifacts': native_lock['artifacts'], 'nativeBuild': native_lock,
             'stateFormatId': native_lock.get('stateFormatId', native_lock['artifacts']['dolphin-core-upstream.wasm']),
@@ -130,7 +130,7 @@ def prepare(work, out):
         shutil.rmtree(stage / 'native-build')
         # Rename only after all sources and runtime files have been staged.
         stage.rename(out)
-    print(f'Prepared experimental GameCube prototype: {out / "app"}')
+    print(f'Prepared GameCube core: {out / "app"}')
 
 
 if __name__ == '__main__':

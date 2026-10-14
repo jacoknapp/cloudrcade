@@ -76,7 +76,7 @@ if __name__ == '__main__':
     default = Path(__file__).resolve().parents[3] / 'release/gamecube/app'
     root = Path(sys.argv[1] if len(sys.argv) > 1 else default).resolve()
     if not (root / 'core-info.json').is_file():
-        raise SystemExit('Prepare the prototype before serving it')
+        raise SystemExit('Prepare the core before serving it')
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 18572
     server = ThreadingHTTPServer(('127.0.0.1', port), partial(Handler, directory=str(root)))
     print(f'GameCube lab: http://127.0.0.1:{port}/', flush=True)

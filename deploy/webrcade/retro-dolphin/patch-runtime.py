@@ -133,6 +133,7 @@ def patch_runtime(app, native_core_sha=None):
           break;
         }
 ''' + text[end:]
+    replace('postStatus(`Experimental WASM ${reason}`);', 'postStatus(`WASM ${reason}`);')
     # A light intro and a heavy world cannot provide a causal JIT comparison.
     # Keep the safety fuse for five seconds without native frame progress.
     start = text.index('function maybeDisablePpcWasmJit(')
@@ -147,7 +148,7 @@ def patch_runtime(app, native_core_sha=None):
   api.setPpcWasmJitEnabled(0);
   ppcWasmJitActive = false;
   ppcWasmJitDisabledForSession = true;
-  postStatus("Experimental WASM JIT disabled after five seconds without core frame progress");
+  postStatus("WASM JIT disabled after five seconds without core frame progress");
 }
 
 ''' + text[end:]

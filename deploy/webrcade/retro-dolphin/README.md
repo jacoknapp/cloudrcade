@@ -1,6 +1,6 @@
-# Experimental GameCube
+# GameCube
 
-The beta image adds Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
+The release image includes Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
 files under the GameCube content directory launch Dolphin in the browser, using
 the device GPU through WebGPU. Keyboard, standard gamepad and touch controls,
 acknowledged pause/resume, Web Audio, memory cards and eight save-state slots are
@@ -9,13 +9,14 @@ slot editor, with the same keyboard and gamepad navigation as the other cores.
 Return to Browse saves memory cards before leaving. The controller settings
 drawer handles only touch controls, mute and layout editing. GameCube has its
 own default button and stick geometry; saved per-system layouts remain usable.
-The first Menu or drawer gesture unlocks browser audio; master mute still applies.
+Desktop audio starts enabled after Play; browser gestures retry audio activation.
+Touch devices use Menu or the drawer to enable audio; master mute still applies.
 Memory cards sync on pause (Menu or app backgrounding) and when returning to the
 library. There is no periodic upload during gameplay. Unchanged cards skip
 storage writes, and failed cloud sync remains retryable on the next pause/exit.
 The built-in
 GameCube performance readout is enabled by default; switch it off or on in the
-library's Experimental Settings before launching. It samples native frame and
+library's Core Settings before launching. It samples native frame and
 emulated-time counters once per second. It reports rendered FPS, native game target
 and emulation speed, plus device WebGPU resolution and WASM memory. Sunshine NTSC
 targets30 rendered FPS at100% speed; presentation is capped at60 FPS for games
@@ -23,10 +24,11 @@ that normally render at60. The cap does not alter the emulated game clock.
 It resets after pause/resume or loading states and adds no GPU timing probes.
 Local and connected Nextcloud saves use the existing CloudRcade account isolation,
 conflict handling and offline recovery bridge. States use the verified serialization-format namespace, allowing compatible
-native performance rebuilds to retain existing slots. Game compatibility and mobile memory support are experimental.
+native performance rebuilds to retain existing slots. Game compatibility and performance depend on the browser and device.
 
 PSP remains available without a beta flag. The beta publishes AMD64 images only.
-The standard `web` Docker target excludes GameCube; beta uses `web-gamecube`.
+The standard release includes GameCube with no enable flag. The historical
+`/experimental/gamecube/` URL remains compatible with existing library links.
 GameCube availability follows the packaged core, with no global renderer/read
 change. Its disc URL threshold is50,000,000bytes. Larger games stream through
 strict HTTP206 requests with strong ETag/Last-Modified and If-Range validation.
@@ -119,7 +121,7 @@ or the workflow's explicit full-rebuild option compile the core independently.
 `WORK` is a dedicated upstream checkout; `OUT` is a new output directory (default
 `release/gamecube`). Unexpected remotes, tracked edits, mismatching artifacts and
 existing outputs are rejected. The localhost lab's manual disc controls are at
-`/experimental/gamecube/` in beta. Its native `props` launch automatically selects
+the compatible `/experimental/gamecube/` URL. Its native `props` launch automatically selects
 and boots a library disc. The lab server does not supply the CloudRcade save API;
 use a packaged image to test full saves. Synthetic browser checks validate DiscIO,
 streaming and lifecycle; actual GPU/game qualification requires a hardware browser.
