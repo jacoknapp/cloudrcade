@@ -94,7 +94,9 @@ const fixture = `
               core+' picture fits visible phone');
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
-              assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height/4))<.5,'PSX picture centered one-quarter down safe portrait');
+              const pad=await game.locator('.kt-pad').boundingBox();
+              assert(Math.abs(picture.y+picture.height/2-(safe.y+pad.y-20)/2)<.5,'PSX picture centered above standard portrait controls');
+              assert(picture.y+picture.height<=pad.y-19.5,'PSX picture clears standard controller block');
               assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
             }
             if(core==='psp' && viewport.width<height) {
@@ -111,7 +113,7 @@ const fixture = `
           await page.evaluate(()=>window.opaqueInset=60);
           await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();
           await page.waitForTimeout(180);const off=await game.locator('canvas').boundingBox();
-          assert.deepEqual(off,initial,'PSX quarter-height centering and native size remain with controls off/drawer open');
+          assert.deepEqual(off,initial,'PSX centering above standard controls and native size remain with controls off/drawer open');
           await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
           await page.evaluate(()=>window.opaqueInset=0);
         } else if(!['nds','3ds','psp'].includes(core)) {
@@ -157,12 +159,24 @@ const fixture = `
       }));
       assert.equal(stable,0,'no repeated viewport writes while dimensions are stable');
       assert.deepEqual(errors,[]);
-      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX quarter-height portrait and PSP above controls; native buffers intact');
+      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX portrait above standard controls and PSP above controls; native buffers intact');
       await context.close();
       const desktop=await browser.newPage({viewport:{width:1440,height:900}});
       await desktop.goto('data:text/html,<html><head></head><body></body></html>');
       await desktop.addScriptTag({content:asset('brand.js')});
       assert.equal(await desktop.evaluate(()=>document.documentElement.style.getPropertyValue('--cr-viewport-height')),'','desktop keeps native sizing');
+      await desktop.route('http://viewport.test/play/app/psx/',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><body style="margin:0"><style>canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}</style><script>${fixture}</script></body></html>`}));
+      await desktop.goto('http://viewport.test/play/app/psx/');
+      const nativeStyle=await desktop.locator('canvas').getAttribute('style');
+      await desktop.addScriptTag({content:asset('controller.js')});
+      assert.equal(await desktop.locator('canvas').getAttribute('style'),nativeStyle,'desktop PSX retains native canvas styling');
+      assert.equal(await desktop.locator('#wrcad-touch').count(),0,'desktop PSX has no touch controller');
+      for(const viewport of [{width:1440,height:900},{width:900,height:1440}]) {
+        await desktop.setViewportSize(viewport);await desktop.waitForTimeout(100);
+        const picture=await desktop.locator('canvas').boundingBox();
+        assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5 && Math.abs(picture.y+picture.height/2-viewport.height/2)<.5,'desktop PSX stays centered in either orientation');
+      }
+      console.log('PASS',engine.name(),'desktop PSX native centering and no touch overlay in both orientations');
       await desktop.close();
     } finally {await browser.close();}
   }
