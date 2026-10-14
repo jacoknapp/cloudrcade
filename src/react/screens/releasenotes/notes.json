@@ -1,5 +1,13 @@
 [
   {
+    "version": "2.0.1",
+    "date": "October 14, 2026",
+    "title": "GameCube performance readout is optional",
+    "changes": [
+      "The *GameCube performance readout* now starts off by default. Enable it in Settings > Core Settings; your saved choice is preserved."
+    ]
+  },
+  {
     "version": "1.0.1",
     "date": "October 10, 2026",
     "title": "Mobile play and a refreshed library",

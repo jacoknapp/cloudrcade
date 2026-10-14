@@ -51,14 +51,18 @@ const findBrowse=()=>{function find(n){if(!n)return null;if(n.stateNode?.browseS
     assert.equal(await row().count(),0,'no experimental label or enable checkbox');
     assert.equal(await page.getByText('Experimental Settings',{exact:true}).count(),0);
     if(available){
-     assert(await perf.locator('..').locator('input').isChecked(),'performance monitor remains enabled');
+     assert(!(await perf.locator('..').locator('input').isChecked()),'performance monitor defaults off');
      assert((await titles()).includes('Cube fixture'),'old disabled preference cannot hide GameCube');
      assert((await titles()).includes('Cube alias'),'registered core alias is available');
      assert(await page.evaluate('('+findBrowse.toString()+')().getSearchItems("Cube").length>0'),'search includes GameCube');
      await perf.locator('..').locator('label').click();
+     assert.equal(await page.evaluate(k=>localStorage.getItem(k),prefix+'.gamecube.perf.v1'),'1');
+     await page.locator('._E4PtH').getByRole('button',{name:'OK',exact:true}).click();
+     await open();await coreSettings();assert(await perf.locator('..').locator('input').isChecked(),'saved opt-in persists');
+     await perf.locator('..').locator('label').click();
      assert.equal(await page.evaluate(k=>localStorage.getItem(k),prefix+'.gamecube.perf.v1'),'0');
      await page.locator('._E4PtH').getByRole('button',{name:'OK',exact:true}).click();
-     await open();await coreSettings();assert(!(await perf.locator('..').locator('input').isChecked()),'readout preference persists');
+     await open();await coreSettings();assert(!(await perf.locator('..').locator('input').isChecked()),'saved opt-out persists');
      assert.equal(await page.evaluate(k=>localStorage.getItem(k),key),'0','retired flag is ignored, not overwritten');
      assert.equal(await page.evaluate(k=>localStorage.getItem(k),prefix+'.3ds.perf.v1'),null,'GameCube setting leaves 3DS unchanged');
      cubeOnly=true;await open();await coreSettings();assert((await titles()).includes('Cube fixture'),'GameCube-only feed works with old opt-out');

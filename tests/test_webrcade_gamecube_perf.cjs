@@ -5,9 +5,10 @@ const path = require('node:path');
 (async () => {
   const {GameCubePerf, perfEnabled, PERF_KEY} = await import(pathToFileURL(path.resolve(__dirname,
     '../deploy/webrcade/retro-dolphin/app/perf.mjs')));
-  assert(perfEnabled({getItem:key=>{assert.equal(key,PERF_KEY);return null;}}));
+  assert.equal(perfEnabled({getItem:key=>{assert.equal(key,PERF_KEY);return null;}}),false);
+  assert(perfEnabled({getItem:()=> '1'}));
   assert.equal(perfEnabled({getItem:()=> '0'}),false);
-  assert(perfEnabled({getItem:()=>{throw new Error('storage blocked');}}));
+  assert.equal(perfEnabled({getItem:()=>{throw new Error('storage blocked');}}),false);
   const element = {}, perf = new GameCubePerf(element);
   const frame = (ms,count,ticks,generation=0)=>({capturedAtMs:ms,frame:count,coreTicks:ticks,
     coreTicksPerSecond:486000000,loadedCheckpointGeneration:generation,width:640,height:528,heapBytes:1.5*1024**3,gamecubeDiagnostics:{render:{frames:count,epoch:generation,samples:30,p95Ms:33.4,maxMs:34,ageMs:4}}});

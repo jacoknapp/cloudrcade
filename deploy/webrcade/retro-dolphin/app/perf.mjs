@@ -2,7 +2,7 @@
 // browser animation counters. The Core Settings switch controls it.
 export const PERF_KEY = 'wrcad.gamecube.perf.v1';
 export function perfEnabled(storage) {
-  try { return (storage || globalThis.localStorage).getItem(PERF_KEY) !== '0'; } catch { return true; }
+  try { return (storage || globalThis.localStorage).getItem(PERF_KEY) === '1'; } catch { return false; }
 }
 function heapDetails(heap) {
   if (!heap) return [];

@@ -62,7 +62,7 @@ def patch_bundle(raw):
  perf=b'(function(){try{return localStorage.getItem("wrcad.3ds.perf.v1")==="1"}catch(e){return!1}})()'
  # A second switch runs lit 3DS draws on the CPU again, to compare speed on a device.
  litcpu=b'(function(){try{return localStorage.getItem("wrcad.3ds.litcpu.v1")==="1"}catch(e){return!1}})()'
- gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")!=="0"}catch(e){return!0}})()'
+ gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")==="1"}catch(e){return!1}})()'
  gc_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)'
  page=(b'var WrcadCoreSettings=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
   b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
