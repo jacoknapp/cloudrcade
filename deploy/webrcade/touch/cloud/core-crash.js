@@ -37,7 +37,7 @@
   }
   async function deliver(value){
     try{
-      const response=await fetch('/cloud-saves/core-crash-log.php',{method:'POST',credentials:'same-origin',keepalive:true,
+      const response=await fetch('/cloud-saves/core-crash-log.php',{method:'POST',credentials:'same-origin',keepalive:true,referrerPolicy:'no-referrer',
         headers:{'Content-Type':'application/json'},body:JSON.stringify(value),signal:AbortSignal.timeout(5000)});
       return response.ok;
     }catch{return false;}

@@ -11,7 +11,7 @@ const key='wrcad.core.active.v1';
    context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
    await context.route('http://recovery.test/**',r=>{
     if(new URL(r.request().url()).pathname==='/cloud-saves/core-crash-log.php'){
-     assert.equal(r.request().method(),'POST');const value=r.request().postDataJSON();
+     assert.equal(r.request().method(),'POST');assert.equal(r.request().headers().referer,undefined,'game URL must not reach server log referrers');const value=r.request().postDataJSON();
      if(offline)return r.abort();reports.push(value);return r.fulfill({status:204,body:''});
     }
     return r.fulfill({contentType:'text/html',body:'<!doctype html><html'+(new URL(r.request().url()).pathname.startsWith('/experimental/gamecube/')?' data-cloudrcade-core="gamecube"':'')+'><body><p>Library fixture</p><script>'+script+';window.WrcadGameCubeRecovery=window.WrcadCoreCrash;</script></body>'});

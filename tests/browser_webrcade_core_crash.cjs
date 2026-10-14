@@ -7,7 +7,7 @@ const origin=process.env.WEBRCADE_GAMECUBE_ORIGIN;
   for(const system of ['nes','retro-ppsspp','retro-azahar']){
    const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block'}),reports=[];
    await context.addInitScript(()=>{let config;Object.defineProperty(window,'WrcadCloudConfig',{get:()=>config,set:v=>{config={...v,enabled:false,autoRedirect:false,storagePrefix:'shadowcrash_standard_fixture'};}});});
-   await context.route('**/cloud-saves/core-crash-log.php',r=>{reports.push(r.request().postDataJSON());return r.fulfill({status:204,body:''});});
+   await context.route('**/cloud-saves/core-crash-log.php',r=>{assert.equal(r.request().headers().referer,undefined);reports.push(r.request().postDataJSON());return r.fulfill({status:204,body:''});});
    const page=await context.newPage();await page.goto(origin+'/play/app/'+system+'/');
    await page.waitForFunction(()=>window.WrcadCoreCrash&&typeof window.app?.exit==='function');
    assert(await page.evaluate(()=>app.exit.toString().includes('WrcadCoreCrash')),'actual SDK exit hook missing: '+system);
