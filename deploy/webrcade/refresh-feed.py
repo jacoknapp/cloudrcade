@@ -179,10 +179,12 @@ def main():
   ids_path=STATE/'psx-save-ids.json'
   disc_ids=json.loads(ids_path.read_text()) if ids_path.exists() else {}
   previous=STATE/'feeds'/'combined.json'
+  published_roms=set()
   if previous.exists():
    for category in json.loads(previous.read_text()).get('categories',[]):
     for item in category.get('items',[]):
      props=item.get('props',{})
+     if props.get('rom'): published_roms.add(props['rom'])
      if item.get('type')=='psx' and props.get('uid') and len(props.get('discs',[]))==1:
       disc_ids.setdefault(props['discs'][0],props['uid'])
   reserved_ids={uid:disc for disc,uid in disc_ids.items()}
@@ -195,6 +197,8 @@ def main():
    candidates += [p for p in managed_files if managed_platforms.get(str(p))==platform or (str(p) not in managed_platforms and managed_matches(p,folder,extensions))]
    # A SNES hack was filed under NES; route it by format.
    if folder=='snes': candidates+=sorted((ROOT/'nes/roms').glob('*.smc'))
+   # Keep the published copy when newly discovered duplicates sort earlier.
+   candidates.sort(key=lambda p:(rom_url(p) not in published_roms,str(p)))
    for p in candidates:
     if not p.is_file() or p.suffix.lower() not in extensions: continue
     if folder=='GameCube':

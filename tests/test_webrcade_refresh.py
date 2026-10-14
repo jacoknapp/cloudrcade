@@ -83,6 +83,12 @@ class RefreshTests(unittest.TestCase):
   with patch.object(m,'metadata',side_effect=RuntimeError('offline')):m.main()
   self.assertEqual(before,(self.state/'feeds/combined.json').read_bytes())
   self.assertEqual(json.load(open(self.state/'last-scan.json'))['metadata_source'],'cached')
+ def test_new_duplicate_preserves_published_rom_url(self):
+  self.put('snes/roms/Z-original.sfc',b'same-game')
+  m.main();before=json.loads((self.state/'feeds/combined.json').read_text())['categories'][0]['items'][0]['props']
+  self.put('snes/roms/A-new-copy.sfc',b'same-game')
+  m.main();after=json.loads((self.state/'feeds/combined.json').read_text())['categories'][0]['items'][0]['props']
+  self.assertEqual(after,before)
  def test_bad_cue_preserves_previous_feed(self):
   self.put('snes/roms/game.sfc',b'game');m.main()
   before=(self.state/'feeds/combined.json').read_bytes()
