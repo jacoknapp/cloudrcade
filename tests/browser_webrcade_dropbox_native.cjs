@@ -23,6 +23,20 @@ for(const offset of [0x3ffa,0x3ffc,0x3ffe]){rom[16+offset]=0;rom[16+offset+1]=0x
      const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cloudrcade-dropbox-webkit-'));profiles.push(profile);
      context=await engine.launchPersistentContext(profile,{...options,headless:true});
     }else context=await browser.newContext(options);
+    // WebKit's route API omits file-backed Blob POST bodies. Capture the bytes
+    // passed to the real fetch so the isolated Dropbox double receives them.
+    const uploadBodies=new Map();
+    await context.exposeBinding('__fixtureDropboxBody',(_source,target,bytes)=>uploadBodies.set(target,Buffer.from(bytes)));
+    await context.addInitScript(()=>{
+     const original=window.fetch;
+     window.fetch=async function(input,options){
+      if(String(input)==='https://content.dropboxapi.com/2/files/upload'&&options?.body instanceof Blob){
+       const target=JSON.parse(options.headers['Dropbox-API-Arg']).path;
+       await window.__fixtureDropboxBody(target,Array.from(new Uint8Array(await options.body.arrayBuffer())));
+      }
+      return original.apply(this,arguments);
+     };
+    });
     await context.addInitScript(({prefix})=>{
      localStorage.setItem(prefix+'.cloud.provider.v1','dropbox');
      localStorage.setItem(prefix+'.dropbox.connection.v1',JSON.stringify({uid:'alice',name:'Alice',appKey:'fixture-app',refreshToken:'fixture-refresh',accessToken:'fixture-access',expires:Date.now()+3600000}));
@@ -33,7 +47,8 @@ for(const offset of [0x3ffa,0x3ffc,0x3ffe]){rom[16+offset]=0;rom[16+offset+1]=0x
      const request=r.request(),route=new URL(request.url()).pathname,args=JSON.parse(request.headers()['dropbox-api-arg']||request.postData()),old=remote.get(args.path);
      if(route.endsWith('/files/upload')){
       if(args.mode['.tag']==='add'&&old||args.mode['.tag']==='update'&&args.mode.update!==old?.rev)return r.fulfill({status:409,json:{error_summary:'path/conflict/file/'}});
-      const next={body:request.postDataBuffer(),rev:(++revision).toString(16).padStart(9,'0')};remote.set(args.path,next);return r.fulfill({json:{rev:next.rev}});
+      const body=request.postDataBuffer()||uploadBodies.get(args.path);assert(Buffer.isBuffer(body),'uploaded ZIP bytes captured');
+      const next={body,rev:(++revision).toString(16).padStart(9,'0')};remote.set(args.path,next);return r.fulfill({json:{rev:next.rev}});
      }
      if(!old)return r.fulfill({status:409,json:{error_summary:'path/not_found/'}});
      if(route.endsWith('/files/get_metadata'))return r.fulfill({json:{rev:old.rev}});
