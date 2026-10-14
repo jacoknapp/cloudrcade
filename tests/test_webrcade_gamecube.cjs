@@ -127,6 +127,21 @@ function fake() {
   assert.equal(maps.bindGroups.size,0);assert.equal(maps.bindGroupSamplingMasks.size,0);
   assert.equal(releaseGpuResource(maps,2,7,{flush(){throw new Error('already released');}}),true);
 
+  // Long resource churn must not retain metadata for deleted GPU objects.
+  const metadata={_wgBgTex:{},_wgBgAll:{},_wgRT:{},_wgPassDiag:{},_wgFbDraws:{},_wgCopyTargets:new Set()};
+  for(let id=1;id<=10000;id++){
+    maps.bindGroups.set(id,{});maps.bindGroupSamplingMasks.set(id,1);
+    maps.textures.set(id,texture);
+    metadata._wgBgTex[id]=id;metadata._wgBgAll[id]='diagnostic';metadata._wgRT[id]=true;
+    metadata._wgPassDiag['fb'+id]=1;metadata._wgFbDraws['fb'+id]={d:1};metadata._wgCopyTargets.add(id);
+    assert.equal(releaseGpuResource(maps,2,id,{metadata,flush:()=>false}),false);
+    assert.equal(metadata._wgRT[id],true,'failed submission must preserve resource metadata');
+    releaseGpuResource(maps,3,id,{metadata,flush:()=>{throw Error('unexpected submit');}});
+    releaseGpuResource(maps,2,id,{metadata,flush:()=>true});
+  }
+  for(const value of Object.values(metadata))assert.equal(value instanceof Set?value.size:Object.keys(value).length,0);
+  assert.equal(maps.textures.size+maps.bindGroups.size+maps.bindGroupSamplingMasks.size,0);
+
   const stalledAdapter=fake(),faults=[];
   const stalledSession=new GameCubeSession({...options,timeoutMs:10,createAdapter:async()=>stalledAdapter,
     onFatal:error=>faults.push(error.message)});

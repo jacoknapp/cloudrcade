@@ -40,6 +40,13 @@ def patch_runtime(app, native_core_sha=None):
     # uploads and mapped staging keep their independent lifetime/ownership.
     replace('uploadPayload = heapCopy(src, uploadBytes);',
             'uploadPayload = borrowTextureUpload(heap, src, uploadBytes, copyImmediateWgpuBufferUpload);')
+    replace('  const flushPassDiag = () => {\n    if (passFbId < 0) return;',
+            '  const flushPassDiag = () => {\n    if (passFbId < 0) return;\n'
+            '    if (wgpuDiagnosticQuiet) {\n'
+            '      passFbId = -1;\n'
+            '      pd = { pipeOk: 0, pipeMiss: 0, bgOk: 0, bgMiss: 0, draw: 0, drawIdx: 0 };\n'
+            '      return;\n'
+            '    }')
     replace('  const attrCount = u[25];',
             '  const attrCount = u[25];\n  const destinationAlpha = destinationAlphaConfig(u, webGpuObjects.shaders);')
     replace('desc, target, depthBase, s28dbg, fsId, vsId });',
@@ -99,6 +106,7 @@ def patch_runtime(app, native_core_sha=None):
     text = text[:start] + '''        case WGPU_CMD_OP_DESTROY: {
           const tag = u32[recWord + 1], id = u32[recWord + 2];
           const released = releaseGpuResource(webGpuObjects, tag, id, {
+            metadata: self,
             flush: () => {
               if (pass) {
                 markWgpuReplayFatal("destroy-order", "resource destroyed inside a render pass");

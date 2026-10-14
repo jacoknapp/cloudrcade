@@ -9,6 +9,8 @@ import {createPauseMenu} from './pause-ui.mjs';
 import {createBackgroundPause} from './lifecycle.mjs';
 
 const get=id=>document.getElementById(id);
+const recovery=window.WrcadGameCubeRecovery;
+let coreIdentity=null;
 let canvas=get('screen'), session=null, selected=null, busy=false, animation=null, generation=0;
 let selectionAbort=null, saves=null, exiting=false, sound=false, audio=null;
 let perf=null, pauseMenu=null, pausing=null, escapeOpen=false,disposeSaveFeedback=null;
@@ -24,6 +26,7 @@ if(props?.rom) { document.body.classList.add('library');get('title').textContent
 let statusText='',menuVisible=false,controllerMenuVisible=false;
 function status(text){statusText=text;get('status').textContent=text;}
 function runtimeFailure(error){
+ recovery?.phase('failed');
  dispose();exiting=false;pausing=null;status(error.message);get('gamecube-failure-detail').textContent=error.message;
  get('restartGame').hidden=!selected;get('gamecube-failure').hidden=false;
 }
@@ -59,7 +62,7 @@ function dispose(){
  controls();
 }
 async function close({leave=false}={}){
- if(exiting)return;exiting=true;
+ if(exiting)return;exiting=true;recovery?.phase('closing');
  try {
   selectionAbort?.abort();
   if(session?.booted&&!session.closed){
@@ -68,13 +71,13 @@ async function close({leave=false}={}){
    await saves?.cards(session.adapter,{refresh:true});
   }
  }catch(error){status(error.message);if(!session?.closed){exiting=false;controls();throw error;}}
- dispose();exiting=false;status('Core is stopped.');
+ dispose();recovery?.clear();exiting=false;status('Core is stopped.');
  if(leave&&embedded)parent.postMessage('appExiting',location.origin);
  else if(leave)location.href='/play/';
 }
 async function perform(action){
  if(busy||exiting)return;busy=true;
- if(!session){const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation)perf?.sample(frame);},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
+ if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
  const owned=session,current=generation;controls();
  try{await action(owned);}
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}
@@ -99,6 +102,7 @@ async function boot(){
   if(session!==owned)return;
   perf=perfEnabled()?createPerfReadout():new GameCubePerf({});
   perf.setGameId(metadata.gameId);
+  recovery?.identify(metadata.gameId,coreIdentity);recovery?.phase('playing');
   audio=new AudioController();audio.requestedTransport='worklet';
   audio.setSource(frames=>owned.adapter?.mixAudio(frames));audio.setTransportBridge(config=>owned.adapter?.configureAudioWorklet(config));
   status(`Running ${metadata.title||metadata.gameId}.`);document.body.classList.add('running');canvas.tabIndex=0;canvas.focus();fitCanvas();startFrames();
@@ -112,7 +116,7 @@ async function pause(){
  pressed.clear();if(pausing)return pausing;if(!session?.booted||session.paused)return;
  stopFrames();const owned=session;
  pausing=(async()=>{
-  try{await owned.pause();if(session!==owned||owned.closed)return;perf?.reset(true);
+  try{await owned.pause();if(session!==owned||owned.closed)return;perf?.reset(true);recovery?.phase('paused');
    const ownedAudio=audio;
    // Browser audio and cloud networking may remain pending while an installed
    // app is suspended. Neither may own the CPU pause/resume transition.
@@ -140,7 +144,7 @@ async function resume(){
  // away. CPU resume does not depend on browser permission to restart audio.
  await owned.resume();
  if(session!==owned||owned.closed)return;
- perf?.reset();startFrames();controls();
+ recovery?.phase('playing');perf?.reset();startFrames();controls();
  if(sound)void resumeAudio().then(async()=>{
   if(session===owned&&!owned.closed&&!owned.paused&&sound)await audio?.setMuted(false);
  }).catch(error=>{if(session===owned)status(error.message);});
@@ -172,6 +176,7 @@ async function toggleAudio(){
 async function stateAction(load,slot){
  if(busy||!session?.booted)return;busy=true;controls();const owned=session,wasPaused=owned.paused;
  try{
+  recovery?.phase(load?'loading state':'saving state');
   status(load?'Loading state…':'Saving state…');await audio?.setMuted(true);
   // Dolphin file state functions marshal onto its CPU thread and work while paused.
   await owned.pause();stopFrames();
@@ -179,7 +184,7 @@ async function stateAction(load,slot){
   await (load?saves.loadState(owned.adapter,slot):saves.saveState(owned.adapter,slot));
   status(load?'State loaded.':'State saved.');
  }catch(error){status(error.message);throw error;}
- finally{if(session===owned&&!owned.closed){if(!wasPaused){await resume();}busy=false;controls();backgroundPause.update();}}
+ finally{if(session===owned&&!owned.closed){if(!wasPaused){await resume();}recovery?.phase(owned.paused?'paused':'playing');busy=false;controls();backgroundPause.update();}}
 }
 
 get('backLibrary').onclick=event=>{event.preventDefault();void close({leave:true}).catch(error=>status(error.message));};
@@ -225,7 +230,7 @@ window.WrcadGameCube={get ready(){return !!session?.booted&&!session.closed;},ge
  togglePause,toggleAudio,fitCanvas,showPauseMenu,saveState:slot=>stateAction(false,slot),loadState:slot=>stateAction(true,slot),exit:()=>close({leave:true}),menuOpen(open){controllerMenuVisible=!!open;pressed.clear();fitCanvas();if(open&&!sound)void toggleAudio().catch(error=>status(error.message));if(open)session?.setInput({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:0,triggerRight:0,analogA:0,analogB:0});},
 };
 addEventListener('resize',fitCanvas);visualViewport?.addEventListener('resize',fitCanvas);
-fetch('core-info.json').then(r=>r.json()).then(info=>{get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
+fetch('core-info.json').then(r=>r.json()).then(info=>{coreIdentity=info.artifacts?.['dolphin-core-upstream.wasm'];recovery?.identify(null,coreIdentity);get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
 controls();
 if(document.hidden)backgroundPause.background();
 if(props?.rom){await select(signal=>remoteDisc(props.rom,{signal}));if(selected)await boot();}
