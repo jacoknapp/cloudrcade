@@ -36,19 +36,19 @@ The root Compose file reads `.env`. URL, branding, cloud and scanner settings ar
 | Group | Variables and purpose |
 | --- | --- |
 | Image/listener | `WEBRCADE_IMAGE` chooses an image; `WEBRCADE_BIND_ADDRESS` and `WEBRCADE_HTTPS_PORT` publish container HTTPS |
-| Host mounts | `WEBRCADE_HOST_PATH` mounts the config folder at `/config`; `WEBRCADE_ROM_PATH` mounts games at `/roms` read-only. Config contains `data/`, `tls/` and optional `metadata.json`; managed games are under `roms/managed`, keys under `roms/3DS/bios`. A metadata database socket can be a third mount |
+| Host mounts | `WEBRCADE_HOST_PATH` mounts the config folder at `/config`; `WEBRCADE_ROM_PATH` mounts games at `/roms` read-only. Config contains `data/`, `tls/` and optional `metadata.json`; managed games are under `roms/managed`, keys under `roms/3DS/bios`. |
 | Public URLs | `WEBRCADE_PUBLIC_URL` is the public HTTPS origin; `WEBRCADE_FEED_URL` selects the initial feed; `WEBRCADE_CONTENT_URL` prefixes generated asset URLs |
 | Branding | `WEBRCADE_APP_NAME`, `WEBRCADE_FEED_TITLE`, `WEBRCADE_FEED_DESCRIPTION` set visible names/text |
 | Persistent identities | `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`; preserve these to keep selecting existing data |
 | Scanner | `WEBRCADE_SCAN_ENABLED`, `WEBRCADE_SCAN_INTERVAL_SECONDS`, `WEBRCADE_ROM_ROOT`, `WEBRCADE_STATE_PATH`, `WEBRCADE_MANAGED_ROOT` |
 | Share validation | `WEBRCADE_REQUIRE_ROM_MOUNT`, `WEBRCADE_REQUIRED_ROM_DIR` |
-| Metadata | `WEBRCADE_METADATA_ENABLED`, `WEBRCADE_METADATA_CONFIG`, `WEBRCADE_METADATA_DB_HOST`, `WEBRCADE_METADATA_DB_PORT`, `WEBRCADE_METADATA_DB_SOCKET`, `WEBRCADE_METADATA_PATH_PREFIX`; see [metadata guide](library-administration.md#optional-gaseous-metadata) |
+| Metadata | `WEBRCADE_METADATA_ENABLED`, `WEBRCADE_METADATA_CONFIG`, `WEBRCADE_METADATA_PATH_PREFIX`; see [metadata guide](library-administration.md#optional-direct-metadata) |
 | 3DS | `WEBRCADE_ENABLE_3DS`, `WEBRCADE_3DS_KEYS_FILE`, `WEBRCADE_3DS_SKIP_DIRS`, `WEBRCADE_3DS_SKIP_NAMES` |
 | Nextcloud | `NEXTCLOUD_URL`, `NEXTCLOUD_ENABLED`, `NEXTCLOUD_AUTO_REDIRECT`, `NEXTCLOUD_HANDOFF`, `NEXTCLOUD_CLIENT_NAME`, access-header pair and upgrade-only `NEXTCLOUD_LEGACY_URL`; see [access guide](nextcloud-and-access.md) |
 
 Host mount variables and scanner container variables are different. For example, `WEBRCADE_ROM_PATH=./roms` selects a host directory; `WEBRCADE_ROM_ROOT=/var/www/html/content` selects where the scanner reads it inside the container. Changing one does not automatically change every container path/Apache alias.
 
-The root Compose example leaves ROMs, managed content, derived content, external config and 3DS BIOS mounts read-only. `/data` is writable. Do not mount the Docker socket for integrated scanning. Optional shared database sockets or TLS certificates require your own explicit mount arrangement.
+The root Compose example uses exactly two mounts: config writable and ROMs read-only. TLS, derived files and metadata live inside config; BIOS keys and managed games live inside ROMs. No Docker or database socket is required.
 
 ## Back up before changing a deployment
 
