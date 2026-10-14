@@ -1,5 +1,6 @@
 /* Real pinned NES SaveManager/ZIP/state slots, using an original minimal ROM and fake Dropbox. */
 const assert=require('node:assert/strict');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const origin=process.env.WEBRCADE_TEST_ORIGIN;
 if(!origin)throw new Error('WEBRCADE_TEST_ORIGIN must point at an isolated image with current generated overlays/assets.');
@@ -12,10 +13,16 @@ for(const offset of [0x3ffa,0x3ffc,0x3ffe]){rom[16+offset]=0;rom[16+offset+1]=0x
 (async()=>{
  for(const engine of [chromium,webkit].filter(e=>!process.env.WEBRCADE_TEST_ENGINES||process.env.WEBRCADE_TEST_ENGINES.split(',').includes(e.name()))){
   const browser=await engine.launch({headless:true,...(engine===chromium?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']}:{})});
+  const profiles=[];
   try{
    const remote=new Map();let revision=0;
    async function launch(){
-    const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block'});
+    const options={ignoreHTTPSErrors:true,serviceWorkers:'block'};
+    let context;
+    if(engine===webkit){
+     const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cloudrcade-dropbox-webkit-'));profiles.push(profile);
+     context=await engine.launchPersistentContext(profile,{...options,headless:true});
+    }else context=await browser.newContext(options);
     await context.addInitScript(({prefix})=>{
      localStorage.setItem(prefix+'.cloud.provider.v1','dropbox');
      localStorage.setItem(prefix+'.dropbox.connection.v1',JSON.stringify({uid:'alice',name:'Alice',appKey:'fixture-app',refreshToken:'fixture-refresh',accessToken:'fixture-access',expires:Date.now()+3600000}));
@@ -44,6 +51,8 @@ for(const offset of [0x3ffa,0x3ffc,0x3ffe]){rom[16+offset]=0;rom[16+offset+1]=0x
    }
    const a=await launch(),b=await launch();
    assert.equal(await a.page.evaluate(async()=>{try{return await app.emulator.saveManager.save('/fixture/battery',[{name:'battery.sav',content:new Uint8Array([1,2,3])}]);}catch(e){throw new Error('Storage: '+e.type+' '+e.target?.error?.name+' '+e.target?.error?.message+' '+String(e));}}),true);
+   assert(remote.has('/fixture/battery.zip'),'default path is the Dropbox app-folder root');
+   assert(!remote.has('/CloudRcade/fixture/battery.zip'),'no redundant save subfolder');
    assert.deepEqual(await b.page.evaluate(async()=>Array.from((await app.emulator.saveManager.load('/fixture/battery')).find(f=>f.name==='battery.sav').content)),[1,2,3]);
    assert.equal(await a.page.evaluate(()=>app.emulator.saveManager.save('/fixture/battery',[{name:'battery.sav',content:new Uint8Array([4,5,6])}])),true);
    assert.equal(await b.page.evaluate(()=>app.emulator.saveManager.save('/fixture/battery',[{name:'battery.sav',content:new Uint8Array([9,9,9])}])),false);
@@ -56,6 +65,6 @@ for(const offset of [0x3ffa,0x3ffc,0x3ffe]){rom[16+offset]=0;rom[16+offset+1]=0x
      assert.deepEqual(a.errors,[]);assert.deepEqual(b.errors,[]);
    await a.context.close();await b.context.close();
    console.log('PASS '+engine.name()+' real NES SaveManager ZIPs, second-browser restore, stale-write preservation, native state listing and load through Dropbox');
-  }finally{await browser.close();}
+  }finally{await browser.close();for(const profile of profiles)fs.rmSync(profile,{recursive:true,force:true});}
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});
