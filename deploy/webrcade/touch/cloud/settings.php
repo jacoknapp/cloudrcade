@@ -30,8 +30,8 @@ function cloudConfig(): array {
     if (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $folder) || in_array($folder, ['.', '..'], true)) $folder = 'CloudRcade';
     $dropboxKey = trim((string)getenv('DROPBOX_APP_KEY'));
     if (!preg_match('/^[A-Za-z0-9_-]{3,128}$/D', $dropboxKey)) $dropboxKey = '';
-    $dropboxFolder = trim((string)getenv('DROPBOX_SAVE_FOLDER')) ?: 'CloudRcade';
-    if (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $dropboxFolder) || in_array($dropboxFolder, ['.', '..'], true)) $dropboxFolder = 'CloudRcade';
+    $dropboxFolder = trim((string)getenv('DROPBOX_SAVE_FOLDER'));
+    if ($dropboxFolder !== '' && (!preg_match('/^[A-Za-z0-9 _.-]{1,128}$/D', $dropboxFolder) || in_array($dropboxFolder, ['.', '..'], true))) $dropboxFolder = '';
     $dropboxEnabled = cloudBool('DROPBOX_ENABLED') && $dropboxKey !== '' && cloudUrl('WEBRCADE_PUBLIC_URL', true) !== '';
     $feed = trim((string)getenv('WEBRCADE_FEED_URL')) ?: '/content/feeds/combined.json';
     if (!preg_match('~^/(?!/)[^\s\\\\]*$~D', $feed) && !validFeedUrl($feed)) $feed = '/content/feeds/combined.json';

@@ -4,7 +4,7 @@ const {chromium, webkit} = require('playwright');
 const root = path.join(__dirname,'../deploy/webrcade/touch/cloud');
 const origin = 'https://arcade.example.test', prefix = 'dropbox-fixture';
 const config = {storagePrefix:prefix,appName:'CloudRcade',enabled:true,autoRedirect:false,accessAllowed:true,server:'https://cloud.example.test',saveFolder:'CloudRcade',
- dropbox:{enabled:true,appKey:'fixture-app',saveFolder:'CloudRcade'}};
+ dropbox:{enabled:true,appKey:'fixture-app',saveFolder:''}};
 (async()=>{
  for(const engine of [chromium,webkit]) {
   const browser = await engine.launch({headless:true,...(engine===chromium?{args:['--no-sandbox'],...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})}:{})});
