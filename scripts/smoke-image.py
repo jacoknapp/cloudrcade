@@ -7,6 +7,7 @@ Usage: python3 scripts/smoke-image.py cloudrcade:test [linux/amd64|linux/arm64] 
 import hashlib
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import re
 import runpy
@@ -232,3 +233,13 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         raise
     finally:
         subprocess.run(['docker', 'rm', '-f', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # The app creates root-owned TLS and www-data-owned metadata folders.
+        # Restore only this synthetic fixture to its invoking user for cleanup.
+        cleanup = ('import os; from pathlib import Path; root=Path("/fixture"); '
+                   'paths=list(root.rglob("*"))+[root]; '
+                   f'[(os.chown(p,{os.getuid()},{os.getgid()}), '
+                   'p.chmod(p.stat().st_mode | (0o700 if p.is_dir() else 0o600))) '
+                   'for p in paths if not p.is_symlink()]')
+        subprocess.run(['docker', 'run', '--rm', '--user', '0', '--entrypoint', 'python3',
+                        '--mount', f'type=bind,src={config_root},dst=/fixture',
+                        image, '-c', cleanup], check=True)
