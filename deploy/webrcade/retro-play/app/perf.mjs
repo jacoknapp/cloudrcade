@@ -21,7 +21,7 @@ export class FrameTimings {
  }
  take(){
   const intervals=this.count?Array.from(this.intervals.subarray(0,Math.min(this.count,240))).sort((a,b)=>a-b):[];
-  const result={...this.sums,calls:this.calls,frames:this.frames,last:this.last,max:this.maximum,p95:intervals.length?intervals[Math.ceil(intervals.length*.95)-1]:null};
+  const result={...this.sums,calls:this.calls,frames:this.frames,last:this.last,max:intervals.length?this.maximum:null,p95:intervals.length?intervals[Math.ceil(intervals.length*.95)-1]:null};
   this.clear();return result;
  }
 }

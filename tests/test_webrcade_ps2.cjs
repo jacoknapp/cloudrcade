@@ -67,7 +67,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  metrics.setEnabled(true);const epoch=metrics.epoch,start=metrics.begin();clock=2;metrics.record('gpuSubmit',start,epoch);metrics.gpuCall(epoch);metrics.present(epoch);
  clock=18;metrics.present(epoch);clock=50;metrics.present(epoch);
  const measured=metrics.take();assert.equal(measured.gpuSubmit,2);assert.equal(measured.calls,1);assert.equal(measured.frames,3);assert.equal(measured.last,32);assert.equal(measured.p95,32);assert.equal(measured.max,32);
- assert.equal(metrics.take().frames,0,'sampling consumes window totals');
+ const emptyWindow=metrics.take();assert.equal(emptyWindow.frames,0,'sampling consumes window totals');assert.equal(emptyWindow.max,null,'empty interval windows remain unmeasured');
  const stale=metrics.begin();metrics.reset();clock+=1000;metrics.record('disc',stale,epoch);metrics.present(epoch);metrics.gpuCall(epoch);
  assert.equal(metrics.take().disc,0);assert.equal(metrics.take().frames,0,'pause/state resets reject in-flight timings');
  for(let i=1;i<=400;i++){clock+=i;metrics.present(metrics.epoch);}const bounded=metrics.take();assert.equal(metrics.intervals.length,240);assert.equal(bounded.max,400);assert.equal(bounded.p95,388);
