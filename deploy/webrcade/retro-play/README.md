@@ -33,6 +33,14 @@ Files are read in slices. ELF executables have a128MiB limit. Remote discs
 require connectivity throughout play; partial cached bytes are not an offline
 download. No ROM is copied into MEMFS for disc launches.
 
+Consecutive sector reads start two chunks of read-ahead, overlapping downloads
+with emulation instead of waiting at every2MiB boundary. Pending buffers share
+the same16MiB cache budget; demand joins a pending download. Seeks cancel
+unrelated speculation, isolated metadata reads do not trigger it, and failed
+read-ahead is retried on demand with the same strict response validation.
+Transient transport failures retry once within the original request timeout;
+cancelled requests and invalid or changed disc responses still fail closed.
+
 Keyboard, two standard gamepads and touch input support both analog sticks,
 the D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu. PS2 keeps
 its own saved touch-layout key. Mobile portrait reserves the default controller
@@ -59,6 +67,7 @@ acknowledges pause and saves before terminating workers, disc reads and audio.
 ```sh
 python3 deploy/webrcade/retro-play/prepare.py
 node tests/test_webrcade_ps2.cjs
+node tests/test_webrcade_ps2_stream.cjs
 python3 tests/fixtures/ps2_homebrew.py /tmp/ps2-homebrew
 ```
 

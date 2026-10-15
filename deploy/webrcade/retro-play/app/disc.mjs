@@ -18,15 +18,39 @@ export async function remoteDisc(value, {signal} = {}) {
  finally{clearTimeout(headTimer);}
  const etag = head.headers.get('ETag');
  const validator = etag && !etag.startsWith('W/') ? etag : head.headers.get('Last-Modified');
- const cache = new Map(); let disposed = false, transferred = 0;
- async function chunk(index) {
-  if (disposed) throw new Error('PS2 disc is closed.');
-  if (cache.has(index)) { const bytes = cache.get(index); cache.delete(index); cache.set(index, bytes); return bytes; }
+ // Pending buffers share the LRU budget with ready data. Aborted requests keep
+ // their slot until the reader settles, so seeks cannot multiply memory use.
+ const cache = new Map(); let disposed = false, transferred = 0, previousEnd = -1, aheadFrom = -1;
+ function discard(index,entry) {
+  entry.abort.abort();
+  if(entry.ready)cache.delete(index);
+ }
+ function cancelAhead(index) {
+  const pending=[];
+  for(const [at,entry]of cache)if(entry.speculative&&(at<index||at>index+2)) {
+   discard(at,entry);pending.push(entry.promise.catch(()=>{}));
+  }
+  return pending;
+ }
+ function entryFor(index,speculative) {
+  if(disposed||index*CHUNK>=size)return null;
+  const existing=cache.get(index);
+  if(existing)return existing.abort.signal.aborted?null:existing;
+  if(cache.size>=LIMIT) {
+   const victim=[...cache].find(([,entry])=>entry.ready);
+   if(!victim)return null;
+   discard(...victim);
+  }
   const start=index*CHUNK, end=Math.min(size-1,start+CHUNK-1);
+  const entry={bytes:new Uint8Array(end-start+1),abort:new AbortController(),ready:false,speculative};
+  cache.set(index,entry);
+  const cancelEntry=()=>entry.abort.abort();
+  abort.signal.addEventListener('abort',cancelEntry,{once:true});
+  if(abort.signal.aborted)cancelEntry();
+  const timer=setTimeout(cancelEntry,30000);
   const headers={Range:`bytes=${start}-${end}`}; if(validator)headers['If-Range']=validator;
-  const timer=setTimeout(cancel,30000);
-  try{
-  const response=await fetch(url.href,{headers,signal:abort.signal,credentials:'same-origin'});
+  const fetchChunk=async()=>{
+  const response=await fetch(url.href,{headers,signal:entry.abort.signal,credentials:'same-origin'});
   if(response.status!==206 || response.headers.get('Content-Range')!==`bytes ${start}-${end}/${size}`) {
    await response.body?.cancel(); throw new Error('PS2 disc server must return exact HTTP byte ranges.');
   }
@@ -34,20 +58,58 @@ export async function remoteDisc(value, {signal} = {}) {
    await response.body?.cancel(); throw new Error('PS2 disc changed during play.');
   }
   // Read a strict byte budget even when an external server lies about length.
-  const expected=end-start+1, bytes=new Uint8Array(expected), reader=response.body.getReader();let length=0;
+  const expected=end-start+1, bytes=entry.bytes, reader=response.body.getReader();let length=0;
   try { for(;;) { const {value,done}=await reader.read();if(done)break;
    if(length+value.length>expected)throw new Error('Oversized PS2 disc range.');
    bytes.set(value,length);length+=value.length;
   }} finally { await reader.cancel().catch(()=>{}); }
   if(length!==expected)throw new Error('Incomplete PS2 disc range.');
-  if(disposed)throw new Error('PS2 disc is closed.');
+  return length;
+  };
+  entry.promise=(async()=>{
+  try{
+  const length=await fetchChunk().catch(error=>{
+   // HTTP/2 resets and interrupted bodies are transport TypeErrors. Retry once
+   // within the original timeout; never retry cancellation or invalid data.
+   if(entry.abort.signal.aborted||!(error instanceof TypeError))throw error;
+   return fetchChunk();
+  });
+  if(disposed||entry.abort.signal.aborted)throw new Error('PS2 disc read cancelled.');
   transferred+=length;
-  while(cache.size>=LIMIT)cache.delete(cache.keys().next().value);
-  cache.set(index,bytes);return bytes;
-  }finally{clearTimeout(timer);}
+  entry.ready=true;return entry.bytes;
+  }catch(error){if(cache.get(index)===entry)cache.delete(index);throw error;}
+  finally{clearTimeout(timer);abort.signal.removeEventListener('abort',cancelEntry);}
+  })();
+  // Failed speculation is retried on demand, never an unhandled fatal error.
+  entry.promise.catch(()=>{});
+  return entry;
+ }
+ async function chunk(index) {
+  if(disposed)throw new Error('PS2 disc is closed.');
+  const cancelled=cancelAhead(index);
+  if(cancelled.length)await Promise.all(cancelled);
+  if(disposed)throw new Error('PS2 disc is closed.');
+  let entry=entryFor(index,false);
+  if(!entry) {
+   await Promise.all([...cache.values()].filter(e=>e.abort.signal.aborted).map(e=>e.promise.catch(()=>{})));
+   entry=entryFor(index,false);
+  }
+  if(!entry)throw new Error('PS2 disc cache has no demand slot.');
+  entry.speculative=false;cache.delete(index);cache.set(index,entry);
+  return entry.promise;
+ }
+ function consumed(offset,end) {
+  if(end<=offset)return;
+  const index=Math.floor((end-1)/CHUNK),sequential=previousEnd===offset;
+  if(!sequential||Math.floor((previousEnd-1)/CHUNK)!==index)cancelAhead(index);
+  previousEnd=end;
+  // Detect consecutive native sector reads before fetching future chunks. Disc
+  // metadata seeks/probing alone should not download another 4MiB each time.
+  if(!sequential)aheadFrom=-1;
+  if(sequential&&aheadFrom!==index){aheadFrom=index;for(let ahead=1;ahead<=2;ahead++)entryFor(index+ahead,true);}
  }
  const disc={name:decodeURIComponent(url.pathname.split('/').pop()),size,url:url.href,streamed:true,
-  get cachedBytes(){return [...cache.values()].reduce((total,bytes)=>total+bytes.length,0);},
+  get cachedBytes(){return [...cache.values()].reduce((total,entry)=>total+entry.bytes.length,0);},
   get transferred(){return transferred;},
   // Copy cached sectors directly into the current native heap. Check the whole
   // range first so a miss never leaves a partially copied result.
@@ -55,15 +117,17 @@ export async function remoteDisc(value, {signal} = {}) {
    if(disposed)throw new Error('PS2 disc is closed.');
    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>CHUNK)throw new Error('Invalid PS2 disc read.');
    const end=Math.min(size,offset+length);
-   for(let cursor=offset;cursor<end;cursor=(Math.floor(cursor/CHUNK)+1)*CHUNK)if(!cache.has(Math.floor(cursor/CHUNK)))return null;
-   for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),bytes=cache.get(index),from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);heap.set(bytes.subarray(from,from+count),pointer+cursor-offset);cache.delete(index);cache.set(index,bytes);cursor+=count;}
+   for(let cursor=offset;cursor<end;cursor=(Math.floor(cursor/CHUNK)+1)*CHUNK)if(!cache.get(Math.floor(cursor/CHUNK))?.ready)return null;
+   for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),entry=cache.get(index),bytes=entry.bytes,from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);heap.set(bytes.subarray(from,from+count),pointer+cursor-offset);entry.speculative=false;cache.delete(index);cache.set(index,entry);cursor+=count;}
+   consumed(offset,end);
    return Math.max(0,end-offset);
   },
   async read(offset,length){
+   if(disposed)throw new Error('PS2 disc is closed.');
    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>CHUNK)throw new Error('Invalid PS2 disc read.');
    const end=Math.min(size,offset+length),out=new Uint8Array(Math.max(0,end-offset));
    for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),bytes=await chunk(index),from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);out.set(bytes.subarray(from,from+count),cursor-offset);cursor+=count;}
-   return out;
+   consumed(offset,end);return out;
   },
   close(){disposed=true;abort.abort();cache.clear();signal?.removeEventListener('abort',cancel);},
  };
