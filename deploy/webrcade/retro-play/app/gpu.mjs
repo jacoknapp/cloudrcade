@@ -28,8 +28,12 @@ export class Ps2Gpu {
  }
  nativeCall(op,pointer,size,output,ack){
   if(this.closed||!this.core)return; // A terminated GS worker may have a queued proxy call.
+  const timing=this.core.cloudTimings,epoch=timing?.epoch;
+  const copyStart=timing?.begin()??null;
   // Copy before the Emscripten proxy returns, including across memory growth.
   const bytes=size?this.core.HEAPU8.slice(pointer,pointer+size):null;
+  if(copyStart!==null)timing.record('gpuSubmit',copyStart,epoch);
+  const queued=timing?.begin()??null;
   const finish=value=>{
    // Memory growth replaces the shared buffer; refresh before acknowledging.
    const buffer=this.core.HEAPU8.buffer;
@@ -38,26 +42,39 @@ export class Ps2Gpu {
   };
   this.chain=this.chain.then(async()=>{
    if(this.closed||this.error)throw this.error||new Error('PS2 graphics has closed.');
+   if(queued!==null){timing.record('bridge',queued,epoch);timing.gpuCall(epoch);}
+   const submitStart=timing?.begin()??null;
    const m=this.module,buffer=this.reserve(Math.max(size,op===7?4*1024*1024:0));
    if(bytes)m.HEAPU8.set(bytes,buffer);
-   let result=1;
+   let result=1,display=false;
    switch(op){
     case 1:m._gpu_write(buffer,size/4);break;
     case 2:m._gpu_image(buffer,size);break;
-    case 3:result=1+m._gpu_present(buffer);await m.ccall('gpu_wait',null,[],[],{async:true});break;
+    case 3:result=1+m._gpu_present(buffer);display=true;break;
     case 4:{const length=m._gpu_state_size();if(length>8*1024*1024)throw new Error('Invalid PS2 graphics state size.');const address=await m.ccall('gpu_save','number',[],[],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(address,address+length),output);result=length+1;break;}
     case 5:await m.ccall('gpu_load',null,['number','number'],[buffer,size],{async:true});break;
     case 6:await m.ccall('gpu_reset',null,[],[],{async:true});break;
     case 8:{
      const flags=m._gpu_batch(buffer,size);
      result=1+((flags&4)?1:0);
-     if(flags&2)await m.ccall('gpu_wait',null,[],[],{async:true});
+     display=!!(flags&2);
      break;
     }
     case 7:await m.ccall('gpu_download',null,['number'],[buffer],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(buffer,buffer+4*1024*1024),output);break;
     default:throw new Error('Invalid PS2 graphics command.');
    }
-   if(this.error)throw this.error;finish(result);
+   if(submitStart!==null){
+    if(op===1||op===2||op===3||op===8)timing.record('gpuSubmit',submitStart,epoch);
+    else if(op===7)timing.record('gpuWait',submitStart,epoch);
+   }
+   if(display){
+    const waitStart=timing?.begin()??null;
+    await m.ccall('gpu_wait',null,[],[],{async:true});
+    if(waitStart!==null)timing.record('gpuWait',waitStart,epoch);
+   }
+   if(this.error)throw this.error;
+   if(display&&result===2)timing?.present(epoch);
+   finish(result);
   }).catch(error=>{this.fail(error);finish(-1);});
  }
  dispose(){

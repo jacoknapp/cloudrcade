@@ -96,3 +96,13 @@ drain pending commands; reset/load discard them before restoring graphics. Large
 individual transfers retain the direct protocol. GPU completion is still awaited
 for every display, and the worker uses shared-memory notification while waiting.
 Guest timing, rendering resolution, WebGPU compute and state format are preserved.
+
+When the experimental performance readout is enabled, its overlay shows last,
+average and p95 presentation intervals, GPU command submission CPU time, GPU
+completion/readback wait, disc service time, input/layout work and bridge queue
+delay/call rate. Stage values are one-second averages per completed rendered
+frame and can overlap across threads; they are not additive or a measurement of
+native emulation CPU/device GPU execution time. The pause menu's performance
+details explain the counters. Timing clocks are inactive with the readout off;
+pause/resume/state changes discard old samples and bounded interval storage
+avoids growing memory during play. Native binaries and guest timing are unchanged.

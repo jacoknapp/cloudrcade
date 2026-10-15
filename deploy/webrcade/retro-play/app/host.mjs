@@ -33,10 +33,11 @@ async function resumeAudio(){const context=module?.cloudAudio?.();if(context&&co
 function neutral(){keys.clear();if(failed)return;for(let pad=0;pad<2;pad++)writeInput(pad,[0,128,128,128,128],true);}
 function frame(){
  animation=0;if(!started||paused||failed)return;
+ const timing=module?.cloudTimings,epoch=timing?.epoch,start=timing?.begin()??null;
  if(!drawerOpen&&!menuVisible){const pads=navigator.getGamepads?.()||[],standard=[...pads].filter(pad=>pad?.connected&&pad.mapping==='standard');
   for(let pad=0;pad<2;pad++)writeInput(pad,inputState(pad===0?keys:emptyKeys,standard[pad],pad===0?touch:null));
  }
- fitCanvas(false);animation=requestAnimationFrame(frame);
+ fitCanvas(false);if(start!==null)timing.record('host',start,epoch);animation=requestAnimationFrame(frame);
 }
 function startFrames(){if(!animation&&started&&!paused&&!failed)animation=requestAnimationFrame(frame);}
 async function pause(){

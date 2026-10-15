@@ -84,6 +84,7 @@ export class DiscDevice {
  result(){return this.count;}
  read(pointer,offset,length){
   this.done=false;this.count=0;
+  const timing=this.module.cloudTimings,epoch=timing?.epoch,start=timing?.begin()??null;
   // Native requests can exceed a chunk; retain only the bounded chunk cache and
   // copy each requested subsection straight into the current WASM heap view.
   (async()=>{
@@ -98,7 +99,7 @@ export class DiscDevice {
     this.module.HEAPU8.set(bytes,pointer+count);count+=bytes.length;
    }
    this.count=count;
-  })().catch(error=>{this.count=-1;if(!this.closed)this.onError(error);}).finally(()=>{this.done=true;});
+  })().catch(error=>{this.count=-1;if(!this.closed)this.onError(error);}).finally(()=>{if(start!==null)timing.record('disc',start,epoch);this.done=true;});
  }
  close(){this.closed=true;this.disc.close();this.count=-1;this.done=true;}
 }
