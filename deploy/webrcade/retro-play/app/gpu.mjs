@@ -47,7 +47,7 @@ export class Ps2Gpu {
     default:throw new Error('Invalid PS2 graphics command.');
    }
    if(this.error)throw this.error;finish(result);
-  }).catch(error=>{finish(-1);this.fail(error);});
+  }).catch(error=>{this.fail(error);finish(-1);});
  }
  dispose(){
   if(this.closePromise)return this.closePromise;this.closed=true;

@@ -121,6 +121,11 @@ async function boot(selected){
  });
  if(ownedGeneration!==generation||closing||failed){created.PThread?.terminateAllThreads();return;}
  module=created;window.Module=module;
+ for(const worker of [...module.PThread.unusedWorkers,...module.PThread.runningWorkers])worker.onerror=event=>{
+  event.preventDefault();
+  if(module!==created||closing||failed)return;
+  failure(new Error('PS2 native worker stopped: '+(event.message||'unexpected worker error')));
+ };
  for(const path of ['/cloudrcade/cards/mc0','/cloudrcade/cards/mc1'])module.FS.mkdirTree(path);
  const identity=props.uid||props.rom||`${disc.name}:${disc.size}`;
  const id=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
