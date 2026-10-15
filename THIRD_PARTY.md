@@ -46,11 +46,13 @@ lockfiles at `/licenses/sources/psp-source.tar.gz`. Its build script pins the
 core, RetroArch, wrapper, scaffold, filesystem dependency and Emscripten.
 No PSP games or BIOS dumps are bundled.
 
-Beta GameCube uses GPL-2.0-or-later Dolphin through the pinned wasm-dolphin
-runtime. Its matching source archive, modified host/save SDK source and core
+GameCube uses GPL-2.0-or-later Dolphin, built from pinned sources with the
+wasm-dolphin integration and CloudRcade patches. It is enabled by default;
+the historical `/experimental/gamecube/` asset path is retained. Its matching
+source archive, modified host/save SDK source and core
 license ship at `/experimental/gamecube/`. The replacement GameCube fonts are
 Droid Sans derivatives under Apache-2.0; their full notice ships in `sys/GC`.
-The save SDK uses the same MIT-licensed webRcade common source as existing
+The save SDK uses the same Apache-2.0-licensed webRcade common source as existing
 cores and pinned npm packages recorded in its lockfile. Their license notices
 ship in `sdk-licenses/` and the generated bundle's legal notices. See
 `deploy/webrcade/retro-dolphin/README.md` for pins and build limits.

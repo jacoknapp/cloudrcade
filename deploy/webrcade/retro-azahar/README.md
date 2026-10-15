@@ -3,8 +3,8 @@
 A webЯcade app for the Nintendo 3DS, built locally because the pinned webЯcade image has none.
 It appears in the library as type `3ds` (alias of `retro-azahar`).
 
-**Streamed 3DS ROMs require an active internet connection during play.** ROMs
-larger than512MiB stream on demand; a partially streamed file is not a complete
+**Streamed 3DS ROMs require a connection to the ROM server during play.** ROMs
+larger than 512 MiB stream on demand; a partially streamed file is not a complete
 offline game. Runtime decryption keys are fetched separately and never cached.
 
 **Shaders are cached as they are created.** The first encounter with a shader,
@@ -37,7 +37,7 @@ The cache reduces repeated work; first-time shader compilation can still pause.
   `RetroAppWrapper` (module loading, input, pause, saves, save states); `lazyrom.js` streams
   games larger than 512 MiB with HTTP range requests instead of downloading them.
 - `app/public/images/` — library tile and background art, drawn from the SVG sources in `art/`.
-- `build.sh` — reproducible build of core and app into `dist/` (ignored by git).
+- `build.sh` — pinned-source build of core and app into `dist/` (ignored by git).
 
 ## Integration with the rest of this directory
 
@@ -58,17 +58,19 @@ constant remains emulation code, as in Citra; no preset key slots are compiled i
 Custom standalone source deployments can build this app separately; neither
 installation bundles runtime keys.
 
-Set these Docker environment variables (see `../.env.example`):
+Use the root Compose two-mount layout (see [`.env.example`](../../../.env.example)):
+put your file at `./roms/3DS/bios/aes_keys.txt` under `WEBRCADE_ROM_PATH`, then
+keep these environment settings:
 
 ```dotenv
 WEBRCADE_ENABLE_3DS=true
-WEBRCADE_3DS_BIOS_PATH=./roms/3DS/bios
-WEBRCADE_3DS_KEYS_FILE=/run/webrcade/3ds/aes_keys.txt
+WEBRCADE_3DS_KEYS_FILE=/run/cloudrcade/3ds/aes_keys.txt
 ```
 
-Put the file inside the host BIOS directory, outside tracked source. Compose
-mounts that directory read-only at `/run/webrcade/3ds`. The path variable selects
-one file inside the container; no file path is accepted from browser requests.
+The ROM mount is read-only at `/roms`; startup aliases `/run/cloudrcade/3ds` to
+`/roms/3DS/bios`. No separate BIOS bind mount is needed. Keep the file outside
+tracked source. The path variable selects one file inside the container; no file
+path is accepted from browser requests.
 Missing/unreadable files disable key loading, without selecting bundled keys.
 Use your own compatible file; this project does not download or distribute keys.
 
@@ -97,65 +99,52 @@ They use fresh profiles, rewrite test content URLs to the selected test origin,
 and disable real cloud-account interaction. They check runtime memory/files,
 ordinary save ZIP exclusion and encrypted-content key errors.
 
-## Deploy
+## Build and deployment
 
-The SSH Deploy workflow syncs an exact copy of these sources, including deletions,
-then calls `deploy.py` through `gaseous/local-catalog/prepare-overlays.sh` before
-Compose starts/recreates containers. A normal deployment now builds and publishes
-the 3DS core/app automatically when its source inputs change or its output is
-missing. The first build can take several minutes; the SSH step allows 90 minutes.
-The host needs Docker, Git, Python 3.9+, rsync and network access to the pinned
-upstream source revisions and container images.
+The root release image already includes this app. Deploy that image with the
+root [`compose.yaml`](../../../compose.yaml); the app container runs the feed
+scanner and reads its configuration at runtime. The repository's
+[Docker workflow](../../../.github/workflows/docker.yml) builds and verifies
+images, then publishes to GHCR. It does not SSH to a deployment host.
 
-`deploy.py` hashes `build.sh`, `app/`, and `patches/`, takes an isolated source
-snapshot, builds in staging, verifies the WASM/header/assets and generated
-Nextcloud/controller overlay, and only then switches the live entry points.
-Build failures leave the active app untouched. Unchanged deployments verify the
-recorded asset hashes and skip rebuilding. Controller/overlay changes regenerate
-the page without recompiling the core. Removed source files are deleted only in
-the dedicated source directory; live assets and runtime data are separate.
-
-Each build uses a new core URL; local-app cloud bundles also have hashed filenames.
-Old versioned assets remain available for open sessions. Removed, previously
-managed unversioned files are retired after activation and included in rollback
-backups. Shader cache stamps are
-independent of these asset URLs and are preserved. `dist/` and host-generated
-artifacts are not committed to Git.
-
-Host state is under `/opt/webrcade/.3ds-deploy/`: `deployment.json` records source
-and output hashes, `work/` is dedicated scratch build space, and `previous/`
-retains the previous raw/overlaid entry points and deployment manifest. Keep that
-directory outside source-sync deletion rules. The workflow also includes
-controller files and the 3DS raw entry point in its global overlay input hashes.
-
-To run the same deployment manually:
+From the repository root, prepare the app and corresponding source package with:
 
 ```sh
-python3 /opt/webrcade/retro-azahar/deploy.py
+python3 scripts/core-cache.py prepare 3ds
+# Force a source build instead of reusing a verified package:
+FORCE_CORE_REBUILD=true python3 scripts/core-cache.py prepare 3ds
 ```
 
-For staged validation before activation:
+The cache wrapper checks exact source inputs and every packaged file hash before
+reuse. On a cache miss it calls `scripts/prepare-core.py`, which downloads the
+checksum-pinned key-free package in `core-release.json` only when its source hash
+matches. Changed inputs or `FORCE_CORE_REBUILD=true` invoke `build.sh`, then
+package exact patched sources and submodules. Output is `release/3ds/app/` and
+`release/3ds/sources/3ds-source.tar.gz`; the root Docker build consumes both.
+Set `CLOUDRCADE_CORE_WORK` to choose the disposable source-build workspace
+(default `/tmp/cloudrcade-core-build`). Preparing a package replaces the existing
+`release/3ds` output when reuse is unavailable or bypassed.
+
+A source build requires Docker, Git, Python, rsync and network access. Use
+Python 3.12+ for release preparation, which uses safe archive extraction with
+the `tarfile` data filter (also available in patched older Python releases).
+Node/npm, Emscripten and the native compiler run in build containers. Source
+revisions are pinned in `build.sh`; some tool and npm dependencies resolve during
+the build, so byte-for-byte reproducibility is not asserted for 3DS. For a raw app
+build without the release/source package, run:
 
 ```sh
-python3 /opt/webrcade/retro-azahar/deploy.py --stage-only
-# Validate .3ds-deploy/candidate/app and candidate/overlay.
-python3 /opt/webrcade/retro-azahar/deploy.py --activate
+WORK=/tmp/retro-azahar-build OUT=/tmp/retro-azahar-app bash deploy/webrcade/retro-azahar/build.sh
 ```
 
-Activation rechecks the candidate's hashes and current source/overlay inputs;
-changed or stale candidates are refused. `--root` selects a staging deployment
-root containing the overlay scripts/controller assets; `--work` selects dedicated
-scratch space. These options do not change the source directory beside `deploy.py`.
-If entry-point activation fails, the old entry points and manifest are restored.
-For a later rollback, restore the files listed in `previous/paths.json`
-from the corresponding numbered files (entry points/manifest first, then any
-retired unversioned files); their referenced old versioned assets remain on disk.
-Do not run this concurrently with deployment. Prefer reverting source in Git and
-redeploying for a durable rollback.
-
-Regression checks: `python3 -m unittest discover -s tests -p test_webrcade_3ds_deploy.py`
-from the repository root. For a core/app-only update Apache need not restart;
-fresh-host and Apache configuration changes still use the normal Compose workflow.
+Both builders own their scratch directories and reset upstream checkouts there.
+The raw builder defaults to `deploy/webrcade/retro-azahar/dist/`. The loader keeps
+core JS/WASM under `js/<CORE_REVISION>/`; update `CORE_REVISION` when changing the
+native core. The release image packages generated controller/cloud entry points;
+configuration changes require container recreation, while source/overlay changes
+require a new image. Ordinary Compose deployment uses neither source bind mounts
+nor `/opt/webrcade/.3ds-deploy/` host state. The older `deploy.py` remains a helper
+for the former host-overlay layout; it is not called by the release workflow.
 
 ## Notes
 
@@ -196,7 +185,7 @@ After saving on exit, the app stops the core, terminates its workers and release
 ROM cache and audio context. The library has no touch-controller pullout; gameplay
 and layout editing do, while loading and native pause menus hide it.
 
-Run `node tests/test_webrcade_lazyrom.cjs` from the docker-ext repository. With
+Run `node tests/test_webrcade_lazyrom.cjs` from the CloudRcade repository root. With
 Playwright Chromium and WebKit installed, run
 `node tests/browser_webrcade_controller_visibility.cjs` (optional `CHROME` executable).
 The latter uses disposable browser contexts and a controller lifecycle harness.
@@ -307,9 +296,12 @@ and [pk3DS GARC reader](https://github.com/kwsch/pk3DS/blob/master/pk3DS.Core/CT
 
 ## GPU vertex shaders
 
-`patches/azahar-native-vertex.patch` re-enables Azahar's generated vertex shaders in the
-browser build for draws that need neither a PICA geometry shader nor fragment lighting
-(WebGL2 has no geometry shaders for the quaternion fix-up). Indices are rebased because
+`patches/azahar-native-vertex.patch` enables Azahar's generated vertex shaders in
+the browser build. `patches/azahar-webgl-lit-gpu.patch` also keeps lit draws on
+the GPU by adjusting the lighting path for WebGL2. Draws requiring a PICA
+geometry shader stay on the CPU; failed GPU programs can fall back as described
+below. **Settings → Core Settings → 3DS lighting on CPU (slower)** restores CPU
+processing for lit draws for device comparisons. Indices are rebased because
 WebGL2 has no base-vertex draws. `Module.nativeVertexStats` counts draws by path
 (`gpu`, `lit`, `geometry`, `failed`).
 
@@ -359,7 +351,7 @@ the normal GPU path; `WEBRCADE_TEST_SYNC_SHADERS=1` disables background linking.
 The scene state is read-only and cloud interaction is disabled in the test profile.
 
 Compiler reports persist under `/wrc/3ds-shader-failures/<game-id>` in browser
-storage and sync to `RetroArcade/wrc/retro-azahar/<game-id>/shader-failures.zip`
+storage and sync to `${NEXTCLOUD_SAVE_FOLDER}/wrc/retro-azahar/<game-id>/shader-failures.zip`
 through the existing cloud-save account. The ZIP contains `shader-failures.json`:
 core, game title, GPU/browser, compiler logs, shader sources, first/last occurrence,
 and per-session counts. Identical reports merge by SHA-256; retention is bounded
@@ -390,8 +382,8 @@ real compressed state creation. Headless results establish correctness, not phon
 
 ## Performance readout
 
-`../patch-player.py` adds an **Experimental Settings** page to the library's Settings dialog (the
-last page). Its **3DS performance readout** switch (`wrcad.3ds.perf.v1`) makes the
+`../patch-player.py` adds a **Core Settings** page to the library's Settings
+dialog. Its **3DS performance readout** switch (`wrcad.3ds.perf.v1`) makes the
 app draw a once-a-second readout over the game (`app/src/emulator/perf.js`), read at launch:
 
 | Line | Meaning |

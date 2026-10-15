@@ -1,5 +1,11 @@
 ## Change log
 
+This file preserves the upstream webRcade release history. CloudRcade player
+release notes are maintained in
+[`src/react/screens/releasenotes/notes.json`](src/react/screens/releasenotes/notes.json)
+and displayed in the application. See the [wiki](docs/wiki/README.md) for current
+CloudRcade behavior, including features added since this upstream history.
+
 ### 07/18/26 (0.2.3)
 
     - New Emulators

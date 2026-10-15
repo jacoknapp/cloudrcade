@@ -46,7 +46,7 @@ When changing the core, bump `CORE_BASE` in the adapter and its matching build
 output directory so previously cached/open games keep matching JS/WASM files.
 
 Validation uses `tests/test_webrcade_psp.cjs` for adapter boundaries,
-`tests/browser_webrcade_psp_settings.cjs` for native opt-in behavior, and
+`tests/browser_webrcade_psp_settings.cjs` for default availability and ignored legacy opt-in preferences, and
 `tests/browser_webrcade_psp.cjs` for the compiled core's lifecycle.
 `tests/browser_webrcade_psp_launch.cjs` verifies the mobile library's category,
 game details and Play flow in Chromium and WebKit, including the canonical

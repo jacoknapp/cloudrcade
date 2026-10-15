@@ -18,7 +18,7 @@ cloudЯcade is a website for playing an operator-supplied game library in your b
 | Set up local storage, Nextcloud, Dropbox or Drive; use state slots or recover progress | [Saves and storage](saves-and-storage.md) |
 | See Nextcloud status, Link, Manage, disconnect or reconnect | [Nextcloud and access](nextcloud-and-access.md) |
 | Add games/BIOS and understand the server's directories | [Library administration](library-administration.md) |
-| Prepare offline play or understand PlayStation/3DS streaming | [Streaming, offline and 3DS](streaming-offline-and-3ds.md) |
+| Prepare offline play or understand disc/3DS streaming | [Streaming, offline and 3DS](streaming-offline-and-3ds.md) |
 | Configure, back up, upgrade or fix the server | [Operations and troubleshooting](operations-and-troubleshooting.md) |
 | Understand stored data, runtime keys and license terms | [Privacy and licenses](privacy-and-licenses.md) |
 
@@ -41,11 +41,13 @@ cloudЯcade is a website for playing an operator-supplied game library in your b
 
 ## Who supplies what
 
-The release supplies the browser app, emulator integration and integrated scanner. The operator supplies Docker, HTTPS/access configuration, ROMs, BIOS/keys and any optional metadata or Nextcloud server. Players supply their own allowed cloud account and approve the connection when needed.
+The release supplies the browser app, emulator integration and integrated scanner. The operator supplies Docker, HTTPS/access configuration, ROMs, any required BIOS/keys and optional metadata or cloud-provider configuration. Players supply their own allowed cloud account and approve the connection when needed.
 
-[Cloud choices](saves-and-storage.md#choose-a-storage-option) explains the difference between progress synchronization and hosting source files. Nextcloud synchronizes supported progress, controller preferences and Recently Played. It does not copy the ROM library to your cloud account. Offline caching stores eligible files actually loaded by a browser; it does not download every game. Streaming needs access to uncached bytes during play.
+[Cloud choices](saves-and-storage.md#choose-a-storage-option) explains the difference between progress synchronization and hosting source files. Connected Nextcloud or Dropbox storage synchronizes supported progress, controller preferences and Recently Played. It does not copy the ROM library to your cloud account. Offline caching stores eligible files actually loaded by a browser; it does not download every game. Streaming needs access to uncached bytes during play.
 
 Desktop uses a carousel; phones and touch tablets use a compact full-viewport library. Games and controls vary by system. Speed and compatibility depend on the game, device and browser, particularly for 3DS. Test the game and its save behavior on the device you intend to use.
+
+GameCube requires hardware WebGPU on the player's device. On the PS2 beta, PlayStation 2 is separately enabled in **Settings → Experimental Settings** and starts off. See [device requirements and streaming](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta); beta availability does not establish game compatibility or phone performance.
 
 ## About these pages
 

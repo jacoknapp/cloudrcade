@@ -8,7 +8,7 @@ Nextcloud is optional cloud storage for your progress. It is visible in the arca
 
 1. Open the arcade and complete any website sign-in.
 2. Open **Settings** and move to **Cloud Storage**. On smaller screens, use the settings page arrows to reach it.
-3. Find **Nextcloud**. **Link** means this browser has no connection; choose it. If it says **Manage**, read the Status/account first: this browser already remembers a connection.
+3. Find **Nextcloud**. If the current row shows Dropbox, open **Choose storage**, select **Nextcloud** and link there, or choose **Use this storage** for an existing connection. **Link** means this browser has no connection; choose it. If it says **Manage**, read the Status/account first: this browser already remembers a connection.
 4. On the connection page, finish Nextcloud sign-in and approve access. The ordinary native flow opens a separate Nextcloud tab while the arcade page waits. If no tab opens, choose **Open Nextcloud sign-in ↗** on the page. **Use Nextcloud password instead ↗** is another visible option when an SSO route needs a manual fallback.
 5. After approval, return to the waiting arcade tab if necessary. It finishes the connection and returns to the original library/game URL.
 6. Open Cloud Storage again and check Status. It should read **Connected** (with your name when available) and **automatic saves**. Confirm the account before loading valuable progress.
@@ -38,7 +38,7 @@ With the ordinary native flow, Nextcloud shows its approval screen. An operator 
 
 ## Manage, disconnect and reconnect
 
-Choose **Manage** in Cloud Storage to open the connection page. It shows the account (when available), the configured folder, **Disconnect this browser** and **Back to games**. Choose Back to games to return without changing the connection.
+Choose **Manage** in Cloud Storage to open the connection page. It shows the account (when available), the configured folder, **Use this storage**, **Disconnect this browser** and **Back to games**. Choose Back to games to return without changing the connection. If you reached Nextcloud through **Choose storage** while Dropbox was active, choose **Use this storage** to make Nextcloud the active save destination; browsing a provider's status alone does not switch it or copy saves.
 
 Disconnect revokes the browser's Nextcloud app credential and removes its connection. Your existing remote save files remain in Nextcloud. It does not copy account-scoped progress into an unlinked or different-account profile. You can also revoke a credential through Nextcloud's account settings.
 
@@ -72,12 +72,12 @@ Manually Link with a disposable test account first. Confirm the account/status, 
 The repository includes the `retroarcade_login` Nextcloud app for an operator who wants same-tab automatic authorization for exact trusted clients. It is an optional integration with Nextcloud's native Login Flow v2, not an arcade-side replacement for Nextcloud authorization. Read the [integration guide](../../integrations/nextcloud/README.md) and its generic [environment example](../../integrations/nextcloud/handoff.env.example) before installation.
 
 1. Install/configure the handoff app on the intended Nextcloud server using the supplied installer and external operator environment file.
-2. Configure `RETROARCADE_TRUSTED_CLIENTS` with the arcade's exact HTTPS origin and fixed callback/back URLs. For this client, the callback is `https://arcade.example.com/cloud-saves/?resume=1`; the back URL returns to the arcade library.
+2. Configure `RETROARCADE_TRUSTED_CLIENTS` with the arcade's exact HTTPS origin and fixed callback/back URLs. For this client, the callback is `https://arcade.example.com/cloud-saves/?resume=1`; the example back URL is `https://arcade.example.com/cloud-saves/` so an interrupted handoff can return to the connection page.
 3. Set the trusted `client` to the effective client name followed by ` cloud saves`. The effective name is nonempty `NEXTCLOUD_CLIENT_NAME`, otherwise `WEBRCADE_APP_NAME`. This lets existing deployments retain a trusted login identity while changing visible branding.
 4. Select an existing SAML provider through `RETROARCADE_SAML_IDP` only if intended. An empty value uses Nextcloud's normal login route.
 5. Set `NEXTCLOUD_HANDOFF=true` in the arcade environment, recreate it, and verify with a disposable test account before player use.
 
-The app validates local native flow URLs, pending tokens, expiry, exact origin/client and session state. It uses configured callbacks rather than request-supplied URLs. Automatic start requires POST; foreign or sibling origins and automatic localhost consent are rejected. Native password confirmation, credential issuance and encryption remain owned by Nextcloud. Credentials do not travel in redirect URLs.
+The app validates local native flow URLs, pending tokens, expiry, exact origin/client and session state. It uses configured callbacks rather than request-supplied URLs. Automatic start requires POST; origins absent from the exact trusted-client map, including sibling origins, are rejected. Use native approval for local development rather than adding a development origin to the production trust map. Native password confirmation, credential issuance and encryption remain owned by Nextcloud. Credentials do not travel in redirect URLs.
 
 An existing Authentik/Nextcloud session can complete without another login, but SAML access policy, provisioning, password confirmation and MFA still apply. If automatic handling cannot finish, native/manual approval remains the fallback. Revalidate this integration when upgrading Nextcloud because it relies on version-specific Login Flow v2 interfaces.
 
@@ -116,6 +116,6 @@ BIOS keys remain protected.
 
 ## Credential boundaries
 
-The browser stores its app credential in site storage and supplies it per request to the same-origin PHP bridge. The bridge targets only the configured server and files under `NEXTCLOUD_SAVE_FOLDER`; it enforces TLS, session-bound CSRF, conditional writes and a 64 MB upload limit. PHP retains temporary login-flow state and a one-shot result until acknowledgement within the flow's lifetime; ordinary WebDAV credentials are request-only on the server.
+The browser stores its app credential in site storage and supplies it per request to the same-origin PHP bridge. The bridge targets only the configured server and files under `NEXTCLOUD_SAVE_FOLDER`; it enforces TLS, session-bound CSRF, conditional writes and a 64 MiB per-file upload limit. PHP retains temporary login-flow state and a one-shot result until acknowledgement within the flow's lifetime; ordinary WebDAV credentials are request-only on the server. `NEXTCLOUD_SAVE_FOLDER` names one top-level folder, not a slash-separated path; invalid values fall back to `CloudRcade`.
 
 The Nextcloud-issued credential itself has the account's standard file access. Folder restriction is enforced by this bridge; it is not a promise that the credential has a server-enforced folder-only scope. Protect the arcade origin and browser profile accordingly. Changing `NEXTCLOUD_URL` does not forward the old credential to another server. `NEXTCLOUD_LEGACY_URL` is an upgrade-only migration setting; leave it empty for new installations and do not change it alongside the current server URL.

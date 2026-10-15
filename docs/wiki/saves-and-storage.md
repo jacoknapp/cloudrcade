@@ -85,14 +85,14 @@ Names and subpaths for game files come from the emulator rather than the library
 | Controller layouts/preferences | Browser storage; active provider's `settings/touch-controller.v1.json` |
 | Recently Played | Browser storage; active provider's `settings/recently-played.v1.json` |
 | Offline emulator/ROM assets | Separate browser asset cache, subject to quota and eviction |
-| Scanner feeds, hashes and derived discs | Operator's writable `WEBRCADE_HOST_PATH` data directory |
+| Scanner feeds, hashes and derived discs | `data/` inside the operator's writable `WEBRCADE_HOST_PATH` config directory (`config/data/` by default) |
 
 A Docker data backup does not include saves that exist only in a player's browser or Nextcloud account. Likewise, clearing browser data can remove local progress even while the server's ROMs and feeds remain intact.
 
 ## Moving to another device
 
 1. On the first device, use the game's save action and exit normally. Allow upload work to finish and check for cloud errors.
-2. On the second device, open **Settings → Cloud Storage** and select/link the same provider and account **before** launching the game. For Nextcloud, use the same configured server; for Dropbox, use the same deployment app key and save folder.
+2. On the second device, open **Settings → Cloud Storage** and select/link the same provider and account **before** launching the game. For Nextcloud, use the same configured server and save folder; for Dropbox, use the same deployment app key and its app folder.
 3. Load the same game from a feed using its existing save identity. Confirm the expected progress.
 4. Stop playing on the first device while using the second. Avoid two devices writing the same save at once.
 
@@ -105,13 +105,13 @@ Uploads use conditional writes to detect changed remote versions. A conflict ret
 If you see a failed cloud save, keep the tab/browser profile and its data. Do not reinstall by clearing storage, delete the cloud folder or start saving from several devices while deciding which copy is newest.
 
 1. Restore the internet connection and any required website sign-in.
-2. Check Nextcloud status/account. If its credential was revoked or expired, [reconnect](nextcloud-and-access.md#manage-disconnect-and-reconnect).
+2. Check the selected provider and account. For Nextcloud, [reconnect](nextcloud-and-access.md#manage-disconnect-and-reconnect) if its credential was revoked or expired. For Dropbox, use **Choose storage → Dropbox** and the offered reconnect action.
 3. Reopen the game with the original account and browser/profile. Eligible pending regular saves can retry; watch for an error.
 4. If the error says the save changed on another device, stop and preserve both copies. Ask the operator for help deciding which progress to keep. The app does not provide a gameplay-progress merge or a universal one-click conflict resolver.
 
 Cloud transfers require a connection, but supported regular saves keep local backups. A failed upload records pending progress and the remote revision against which it was attempted. On restart, pending local progress loads first; upload proceeds only if the remote version still matches. An older cloud copy does not silently replace that pending progress.
 
-If an upload response is lost, recovery checks whether the attempted game data already reached Nextcloud. Recovery metadata stays in the local ZIP and is stripped from emulator/cloud save files. Browser Web Locks serialize related local operations where supported. Keep the same browser/profile and do not clear storage while diagnosing pending uploads.
+If an upload response is lost, recovery checks whether the attempted game data already reached the active provider. Recovery metadata stays in the local ZIP and is stripped from emulator/cloud save files. Browser Web Locks serialize related local operations where supported. Keep the same browser/profile and do not clear storage while diagnosing pending uploads.
 
 The app reports cloud errors; inspect them before assuming another device has the latest save. Reconnect or reload to retry eligible pending work. Repeated conflicts need a deliberate choice of progress, not repeated save attempts on multiple devices.
 
@@ -127,7 +127,7 @@ Operators should keep `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`, `DROPB
 
 Recently Played merges each game's latest timestamp across connected devices and keeps the newest 20 matching entries. Local history imports on first connection; account changes do not import another account's history. Reconnection, reload and returning to the tab refresh history.
 
-On startup, the app restores the connected account's cached history immediately and loads its Nextcloud history automatically. Cached entries remain available when that request fails or you are offline; matching games appear as soon as the feed is ready.
+On startup, the app restores the connected account's cached history immediately and loads history from the active cloud provider automatically. Cached entries remain available when that request fails or you are offline; matching games appear as soon as the feed is ready.
 
 Controller settings merge preferences and per-platform/orientation layouts independently. Explicit later edits win for the same setting/layout. Save publishes a layout; Cancel does not. Arriving cloud preferences do not discard unsaved layout drags. Offline edits retry for the account to which they belong.
 
