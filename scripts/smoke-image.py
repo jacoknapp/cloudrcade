@@ -116,6 +116,8 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         until(lambda: bool(list((state / 'derived').glob('*.chd'))))
         response = until(lambda: get('/cloud-saves/api.php?action=status'))
         config = json.load(response)['config']
+        # Check requests over negotiated HTTP/2, not merely an advertised ALPN.
+        subprocess.run(['node', 'tests/check_webrcade_http2.cjs', origin], check=True)
         assert config['appName'] == 'Release Test Arcade' and config['storagePrefix'] == 'release_test'
         assert not config['enabled'] and not config['autoRedirect']
         assert config['gamecubeUrl'] == ('/experimental/gamecube/' if gamecube else '')
@@ -233,7 +235,21 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         docker('exec', name, 'python3', '/usr/local/share/cloudrcade/service.py', 'scan')
         docker('stop', '--time', '12', name)
         assert json.loads(docker('inspect', name))[0]['State']['ExitCode'] == 0
-        print('PASS ' + (platform or 'host platform') + ' one app: HTTP/3DS overlays, env branding, mounted key isolation, real CHD conversion, scheduled discovery, failed-scan preservation and graceful shutdown')
+        # A dead PHP worker supervisor must stop the app so its restart policy
+        # can recover it, rather than leaving static pages masking broken APIs.
+        docker('start', name)
+        restarted = json.loads(docker('inspect', name))[0]
+        port = restarted['NetworkSettings']['Ports']['443/tcp'][0]['HostPort']
+        origin = 'https://127.0.0.1:' + port
+        until(lambda: get('/cloud-saves/api.php?action=status'))
+        docker('exec', name, 'python3', '-c',
+               'import os,signal; from pathlib import Path; '
+               'pids=[int(p.parent.name) for p in Path("/proc").glob("[0-9]*/cmdline") '
+               'if p.read_bytes().startswith(b"php-fpm: master process")]; '
+               'assert len(pids)==1; os.kill(pids[0],signal.SIGTERM)')
+        until(lambda: json.loads(docker('inspect', name))[0]['State']['Status'] == 'exited')
+        assert json.loads(docker('inspect', name))[0]['State']['ExitCode'] != 0
+        print('PASS ' + (platform or 'host platform') + ' one app: HTTP/2/PHP sessions, overlays, env branding, mounted key isolation, real CHD conversion, scheduled discovery, failed-scan preservation, graceful shutdown and PHP failure recovery')
     except Exception:
         print(docker('logs', name, stderr=subprocess.STDOUT)[-6000:], file=sys.stderr)
         raise

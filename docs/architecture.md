@@ -67,9 +67,9 @@ GameCube launch URL remains compatible with existing links. The transition
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 
-The main image includes Python, chdman and the feed builder. `service.py` supervises Apache, the CORS helper and the scheduled scanner. Scanner failures retain the last complete feed and retry; a web-process failure exits so Docker can restart the app. Scan enablement and interval are runtime environment variables.
+The main image includes Python, chdman and the feed builder. `service.py` supervises Apache, PHP-FPM, the CORS helper and the scheduled scanner. Scanner failures retain the last complete feed and retry; a web-process failure exits so Docker can restart the app. Scan enablement and interval are runtime environment variables.
 
-The HTTP runtime uses PHP8.3/Apache on Debian Bookworm with Python/chdman for the integrated scanner; it copies tested frontend/core assets from the pinned upstream image.
+The HTTP runtime uses Apache event MPM with HTTP/2 over TLS and PHP8.3-FPM on Debian Bookworm, with Python/chdman for the integrated scanner. PHP uses a container-local FastCGI listener on127.0.0.1:9000; it inherits runtime environment variables and keeps PHP sessions and API request guards. Static assets and ROM ranges can share an HTTP/2 connection with PHP API requests. HTTP/1.1 remains available for existing reverse proxies. The image copies tested frontend/core assets from the pinned upstream image.
 
 Feeds are served through an Apache alias from the state mount. No nested feed mount or writable directory inside the operator ROM share is required.
 

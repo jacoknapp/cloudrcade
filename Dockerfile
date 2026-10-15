@@ -14,13 +14,22 @@ COPY release/psp/app/ /extra/retro-ppsspp/
 RUN WEBRCADE_SOURCE_ROOT=/source WEBRCADE_PLAYER_OUTPUT=/out-player.js python3 patch-player.py \
  && WEBRCADE_SOURCE_ROOT=/source WEBRCADE_EXTRA_APPS=/extra WEBRCADE_TOUCH_ROOT=/out-pages python3 prepare-touch.py
 
+FROM php:8.3-fpm-bookworm AS php-fpm
+
 FROM php:8.3-apache-bookworm AS web
 RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-tools nodejs npm openssl \
  && npm install -g miniflare@2.12.1 \
- && a2enmod headers proxy_http ssl \
+ && a2dismod php mpm_prefork \
+ && a2enmod mpm_event headers proxy_http proxy_fcgi setenvif ssl http2 \
  && mkdir -p /usr/local/apache2/conf/ssl \
  && printf '\nEnableMMAP off\nEnableSendfile off\n' >> /etc/apache2/apache2.conf \
  && rm -rf /var/lib/apt/lists/*
+COPY --from=php-fpm /usr/local/sbin/php-fpm /usr/local/sbin/php-fpm
+COPY --from=php-fpm /usr/local/etc/php-fpm.conf /usr/local/etc/php-fpm.conf
+COPY --from=php-fpm /usr/local/etc/php-fpm.d/ /usr/local/etc/php-fpm.d/
+COPY deploy/webrcade/php-fpm.conf /usr/local/etc/php-fpm.d/zz-cloudrcade.conf
+COPY deploy/webrcade/php-fpm-apache.conf /etc/apache2/conf-enabled/php-fpm.conf
+RUN php-fpm --test
 COPY --from=upstream /var/www/html/ /var/www/html/
 COPY --from=upstream /var/www/cors.js /var/www/cors.js
 COPY --from=upstream /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf

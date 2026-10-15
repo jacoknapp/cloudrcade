@@ -72,12 +72,13 @@ try:
     subprocess.run(['/usr/local/bin/setup-https.sh'], check=True,
                    env={**os.environ, 'APACHE_LOG_DIR': os.getenv('APACHE_LOG_DIR') or '/var/log/apache2'})
     cors = spawn(['miniflare', '/var/www/cors.js'])
+    php = spawn(['php-fpm', '--nodaemonize', '--force-stderr'])
     apache = spawn(['apache2-foreground'])
     if enabled:
         worker = threading.Thread(target=scans, name='feed-builder')
         worker.start()
     while not stop.wait(0.5):
-        for child in (cors, apache):
+        for child in (cors, php, apache):
             code = child.poll()
             if code is not None:
                 print(f'Web process exited ({code}); restarting the app is required.', flush=True)
