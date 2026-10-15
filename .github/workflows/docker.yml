@@ -26,6 +26,7 @@ jobs:
     env:
       FORCE_CORE_REBUILD: ${{ inputs.rebuild_cores == true && 'true' || 'false' }}
     permissions:
+      actions: read
       contents: read
       packages: write
     steps:
@@ -77,16 +78,25 @@ jobs:
         with:
           path: release/ps2
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2'] }}
+      - name: Restore ps2-native build
+        id: cache_ps2_native
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/ps2-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2-native'] }}
       - name: Bootstrap unchanged cores from a qualified release
         if: env.FORCE_CORE_REBUILD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/restore-qualified-cores.py
-      - name: Prepare GameCube and corresponding source
+      - name: Prepare GameCube (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare gamecube
-      - name: Prepare key-free 3DS app and corresponding source
+      - name: Prepare 3DS (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare 3ds
-      - name: Build PSP app and corresponding source
+      - name: Prepare PSP (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare psp
-      - name: Build PS2 app and corresponding source
+      - name: Prepare PS2 (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare ps2
       - uses: docker/setup-qemu-action@v3
         if: "!startsWith(github.ref, 'refs/heads/beta/')"
@@ -185,3 +195,9 @@ jobs:
         with:
           path: release/ps2
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2'] }}
+      - name: Cache verified ps2-native build
+        if: github.event_name != 'pull_request' && steps.cache_ps2_native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/ps2-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2-native'] }}

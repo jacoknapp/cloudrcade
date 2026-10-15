@@ -85,6 +85,18 @@ def prepare(work, out):
     artifacts = source / 'build_cmake/build/wasm-ninja/Source/ui_js/Release'
     receipt = work / 'native-receipt.json'
     names = ['Play.js', 'Play.wasm', 'Gpu.js', 'Gpu.wasm']
+    native_lock=json.loads((HERE / 'native-build.json').read_text())
+    cached_native=os.environ.get('PS2_NATIVE_CACHE')
+    if cached_native and os.environ.get('FORCE_CORE_REBUILD') != 'true':
+        cached_path=Path(cached_native).resolve()
+        if native_lock['nativeInputSha256'] != native_key() or any(
+                not (cached_path/name).is_file() or (cached_path/name).is_symlink() or
+                sha(cached_path/name) != native_lock['artifacts'][name] for name in names):
+            raise ValueError('PS2 native cache does not match current source/artifact locks')
+        artifacts.mkdir(parents=True,exist_ok=True)
+        for name in names:shutil.copy2(cached_path/name,artifacts/name)
+        receipt.write_text(json.dumps({'key':native_key(),'artifacts':native_lock['artifacts']}))
+        print('Reusing verified PS2 native JS/WASM; preparing current app and corresponding source')
     try:
         cached = json.loads(receipt.read_text())
         reusable = cached['key'] == native_key() and all(sha(artifacts / name) == cached['artifacts'][name] for name in names)
@@ -98,7 +110,6 @@ def prepare(work, out):
             '-v', str(HERE / 'build-linux.sh') + ':/build.sh:ro',
             sdk_image, 'bash', '/build.sh')
         receipt.write_text(json.dumps({'key': native_key(), 'artifacts': {name: sha(artifacts / name) for name in names}}))
-    native_lock=json.loads((HERE / 'native-build.json').read_text())
     actual={'nativeInputSha256':native_key(),'artifacts':{name:sha(artifacts/name) for name in names}}
     if actual != native_lock:
         raise ValueError('PS2 native build differs from the reviewed lock: '+json.dumps(actual,sort_keys=True))

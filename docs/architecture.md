@@ -105,21 +105,26 @@ No operator files, ROMs or build workspaces are cached.
 Changes to ordinary library, save bridge or image code reuse all unchanged core
 packages. A shared lazy disc reader change invalidates GameCube, 3DS and PSP
 packages. GameCube and PS2 package keys also cover their shared save SDK and
-controller assets, so those changes refresh the affected packages. Workflow
-changes conservatively invalidate all packages,
-including changes to runner/Node versions. Build-script toolchain versions and
-native locks participate in the keys; mutable remote dependency changes alone
-are not polled by the cache. Existing pinned dependencies remain the build inputs.
+controller assets, so those changes refresh the affected packages. Keys cover
+each core's compiler command, effective build environment, and toolchain inputs.
+Host runner changes refresh full packages; the Node setup version affects the
+GameCube and PS2 packages that use it. 3DS and PSP use their Docker recipes'
+Node versions. Cache actions, step labels, release scheduling, generic cache
+helpers and unused operator guides do not trigger core builds. Put compiler
+options in tracked recipes or global/job/preparation-step environment variables;
+the workflow fingerprint reads the build job's ordinary block-form steps.
+Mutable remote dependencies are not polled; tracked pins remain the build inputs.
 
-GameCube also has a separate native-artifact cache. Browser adapter and SDK
-changes can regenerate the app and corresponding source without compiling
-Dolphin again. Restored native JS/WASM must match the committed artifact locks;
-source-tree, patches and recipe checks still run when preparing the package.
-3DS and PSP currently cache their complete core/app packages as one unit.
+GameCube and PS2 also have separate native-artifact caches. Browser adapter and
+SDK changes can regenerate the app and corresponding source without compiling
+Dolphin, Play or the PS2 WebGPU worker again. Restored native JS/WASM must match
+the committed artifact locks; current native source, patch and recipe checks
+still run when preparing the package. PS2 additionally requires its native input
+hash to match the committed lock. 3DS and PSP cache complete packages as one unit.
 
 Source/privacy checks, portable regression tests, Docker overlay generation,
-image builds and architecture smoke tests still run on every release. The first
-run for an input key (or an evicted cache) is a cold build. Choose **Rebuild all
+image builds and architecture smoke tests still run on every release. Changed
+inputs compile when no matching verified artifacts are available. Choose **Rebuild all
 cores from source, bypassing caches** in the manual Docker release workflow to
 verify an independent rebuild. Locally, the equivalent is:
 
@@ -131,10 +136,11 @@ Cache keys are immutable. If a stored cache is damaged, the wrapper rebuilds for
 that run; delete that core's cache in Actions to allow a replacement on the next
 successful run. Cache eviction never prevents a release build.
 
-When a branch transition loses Actions caches, the workflow can bootstrap
-unchanged core packages from a pinned, previously qualified release image.
-It compares every actual core build input against that release source commit,
-and rejects changes to build tools, environment or prepare/validation logic.
-GameCube native bytes must also match the current committed artifact hashes.
-Changed inputs compile normally; forced source rebuilds bypass bootstrapping.
-Exact inventories and all current source/image checks still run before publishing.
+When Actions caches are missing or invalid, the workflow can restore unchanged
+packages from the branch's last successful published CI release. It requires an
+ancestor commit, exact repository/revision provenance, and an immutable OCI
+digest; a pinned qualified release provides a fallback. Every effective input
+must match that source commit before extraction and sealing. Native-only caches
+can also be recovered when just the wrapper changed. Current native locks,
+complete inventories, source checks and image checks still apply. Changed inputs
+compile normally; forced source rebuilds bypass all restore paths.
