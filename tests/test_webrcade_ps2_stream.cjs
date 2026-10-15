@@ -33,7 +33,11 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  assert.equal(requests.length,2,'single metadata read must not speculate');
  const heap=new Uint8Array(4096);
  assert.equal(disc.copyCached(10*CHUNK+2048,2048,heap,0),2048);
- assert.deepEqual([...pending].map(r=>r.index),[11,12],'consecutive sectors start two future ranges before a boundary');
+ assert.equal(requests.length,2,'a few adjacent metadata sectors must not trigger read-ahead');
+ await disc.read(10*CHUNK+4096,256*1024-4096);
+ assert.deepEqual([...pending].map(r=>r.index),[11],'256KiB of demand starts one future chunk');
+ await disc.read(10*CHUNK+256*1024,CHUNK-256*1024);
+ assert.deepEqual([...pending].map(r=>r.index),[11,12],'a sustained stream starts two future ranges before a boundary');
  assert.equal(disc.cachedBytes,4*CHUNK,'pending read-ahead buffers count inside the cache budget');
  // Demand joins an in-flight read-ahead instead of fetching it twice.
  read=disc.read(11*CHUNK,2048);let completed=false;read.then(()=>completed=true);
@@ -43,11 +47,11 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  const before=requests.length;assert.equal(disc.copyCached(12*CHUNK,2048,heap,0),2048);
  assert.equal(heap[0],12);assert.equal(requests.length,before,'ready read-ahead removes the next boundary network wait');
  // A new contiguous sector extends the horizon, then a seek aborts it.
- disc.copyCached(12*CHUNK+2048,2048,heap,0);assert(next(13));assert(next(14));
+ disc.copyCached(12*CHUNK+2048,2048,heap,0);await disc.read(12*CHUNK+4096,CHUNK-4096);assert(next(13));assert(next(14));
  read=disc.read(30*CHUNK,2048);await tick();assert(requests.find(r=>r.index===13).aborted);assert(requests.find(r=>r.index===14).aborted);
  next(30).release();await read;
  // Failed speculation is silent; demand retries with all range checks intact.
- disc.copyCached(30*CHUNK+2048,2048,heap,0);next(31).release('short');next(32).release('transport');await tick();
+ await disc.read(30*CHUNK+2048,CHUNK-2048);next(31).release('short');next(32).release('transport');await tick();
  next(32).release('transport');await tick();
  read=disc.read(31*CHUNK,2048);await tick();next(31).release();assert.equal((await read)[0],31);
  assert.equal(requests.filter(r=>r.index===31).length,2);
@@ -69,7 +73,7 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  assert(peak<=CHUNK*LIMIT,'ready plus pending allocations stay at most16MiB');
  // EOF read-ahead stops at the disc boundary; close aborts every pending fetch.
  read=disc.read(39*CHUNK,2048);await tick();next(39).release();await read;
- disc.copyCached(39*CHUNK+2048,2048,heap,0);assert.equal(next(40).last,size-1);
+ await disc.read(39*CHUNK+2048,CHUNK-2048);assert.equal(next(40).last,size-1);
  assert(!requests.some(r=>r.index>40));
  const last=disc.read(40*CHUNK,123);await tick();disc.close();await assert.rejects(last,/cancel|closed/i);
  await tick();assert.equal(pending.size,0);assert.equal(disc.cachedBytes,0);

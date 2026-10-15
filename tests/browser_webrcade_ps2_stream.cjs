@@ -24,11 +24,12 @@ const origin=process.env.WEBRCADE_TEST_ORIGIN||'https://localhost:8443';
     const heap=new Uint8Array(2048);let aborted=0;
     const original=AbortController.prototype.abort;AbortController.prototype.abort=function(...args){aborted++;return original.apply(this,args);};
     try{
-     await disc.read(0,2048);disc.copyCached(2048,2048,heap,0);
+     await disc.read(0,256*1024);disc.copyCached(256*1024,2048,heap,0);
+     await disc.read(256*1024+2048,CHUNK-256*1024-2048);
      await new Promise(resolve=>setTimeout(resolve,50));
      const pendingBytes=disc.cachedBytes,start=performance.now();
      const bytes=await disc.read(30*CHUNK,2048),seekMs=performance.now()-start;
-     disc.copyCached(30*CHUNK+2048,2048,heap,0);
+     await disc.read(30*CHUNK+2048,CHUNK-2048);
      disc.close();await new Promise(resolve=>setTimeout(resolve,50));
      return{pendingBytes,seekMs,byte:bytes[0],aborted,cachedAfterClose:disc.cachedBytes};
     }finally{disc.close();AbortController.prototype.abort=original;}

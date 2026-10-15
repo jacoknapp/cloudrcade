@@ -20,7 +20,7 @@ export async function remoteDisc(value, {signal} = {}) {
  const validator = etag && !etag.startsWith('W/') ? etag : head.headers.get('Last-Modified');
  // Pending buffers share the LRU budget with ready data. Aborted requests keep
  // their slot until the reader settles, so seeks cannot multiply memory use.
- const cache = new Map(); let disposed = false, transferred = 0, previousEnd = -1, aheadFrom = -1;
+ const cache = new Map(); let disposed = false, transferred = 0, previousEnd = -1, aheadFrom = -1, aheadDepth = 0, sequentialBytes = 0;
  function discard(index,entry) {
   entry.abort.abort();
   if(entry.ready)cache.delete(index);
@@ -102,11 +102,16 @@ export async function remoteDisc(value, {signal} = {}) {
   if(end<=offset)return;
   const index=Math.floor((end-1)/CHUNK),sequential=previousEnd===offset;
   if(!sequential||Math.floor((previousEnd-1)/CHUNK)!==index)cancelAhead(index);
+  sequentialBytes=sequential?sequentialBytes+end-offset:end-offset;
   previousEnd=end;
-  // Detect consecutive native sector reads before fetching future chunks. Disc
-  // metadata seeks/probing alone should not download another 4MiB each time.
-  if(!sequential)aheadFrom=-1;
-  if(sequential&&aheadFrom!==index){aheadFrom=index;for(let ahead=1;ahead<=2;ahead++)entryFor(index+ahead,true);}
+  // Small metadata/file reads often consist of adjacent sectors too. Require a
+  // sustained 256KiB stream before one chunk of look-ahead, and a full chunk of
+  // sequential demand before two. This avoids amplifying startup downloads.
+  if(!sequential){aheadFrom=-1;aheadDepth=0;}
+  const depth=sequentialBytes>=CHUNK?2:1;
+  if(sequential&&sequentialBytes>=256*1024&&(aheadFrom!==index||aheadDepth<depth)){
+   aheadFrom=index;aheadDepth=depth;for(let ahead=1;ahead<=depth;ahead++)entryFor(index+ahead,true);
+  }
  }
  const disc={name:decodeURIComponent(url.pathname.split('/').pop()),size,url:url.href,streamed:true,
   get cachedBytes(){return [...cache.values()].reduce((total,entry)=>total+entry.bytes.length,0);},

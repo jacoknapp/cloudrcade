@@ -33,8 +33,9 @@ Files are read in slices. ELF executables have a128MiB limit. Remote discs
 require connectivity throughout play; partial cached bytes are not an offline
 download. No ROM is copied into MEMFS for disc launches.
 
-Consecutive sector reads start two chunks of read-ahead, overlapping downloads
-with emulation instead of waiting at every2MiB boundary. Pending buffers share
+Sustained sequential reads start read-ahead, overlapping downloads
+with emulation instead of waiting at every2MiB boundary: one future chunk after
+256KiB of contiguous demand, two after2MiB. Pending buffers share
 the same16MiB cache budget; demand joins a pending download. Seeks cancel
 unrelated speculation, isolated metadata reads do not trigger it, and failed
 read-ahead is retried on demand with the same strict response validation.
