@@ -36,6 +36,7 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
   assert(geometry.bottom<geometry.padTop,'portrait picture clears the default controls');
   await page.locator('#ps2-performance').waitFor({state:'visible'});await page.waitForFunction(()=>document.getElementById('ps2-performance').textContent.includes('FPS'));
   await page.setViewportSize({width:844,height:390});await page.waitForTimeout(250);await page.setViewportSize({width:390,height:844});
+  await page.locator('.kt-analog-right').waitFor({state:'visible'});await page.waitForTimeout(400);
   await page.evaluate(()=>{window.ps2Inputs=[];const original=WrcadPS2.module.setInput;WrcadPS2.module.setInput=(...args)=>{ps2Inputs.push(args);original(...args);};});
   const stick=await page.locator('.kt-analog-right').boundingBox();await page.mouse.move(stick.x+stick.width*.8,stick.y+stick.height*.5);await page.mouse.down();try{await page.waitForFunction(()=>ps2Inputs.some(input=>input[4]>180),null,{timeout:10000});}finally{await page.mouse.up();}
   assert(await page.evaluate(()=>ps2Inputs.some(input=>input[4]>180)),'right stick reaches native input');

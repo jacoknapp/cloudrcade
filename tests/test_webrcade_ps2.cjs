@@ -69,5 +69,6 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  gpu.nativeCall(3,16,32,0,128);await gpu.chain;assert.equal(presented,1);assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),2);
  gpu.nativeCall(99,0,0,0,128);await gpu.chain;assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),-1);assert.match(gpuErrors[0],/Invalid PS2 graphics command/);
  await gpu.dispose();assert.equal(gpu.module,null);assert.doesNotThrow(()=>gpu.nativeCall(1,0,12,0,128));
+ const nativeFailure=new Ps2Gpu(core,error=>assert.match(error.message,/WebGPU operation failed/));nativeFailure.fail(17);await nativeFailure.dispose();
  console.log('PASS PS2 strict range reads, >4GiB offsets, LRU budget, cleanup, DualShock input and save path isolation');
 })().catch(error=>{console.error(error);process.exitCode=1;});
