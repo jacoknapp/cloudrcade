@@ -32,6 +32,10 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  const device=new DiscDevice(module,disc,error=>errors.push(error));device.read(0,CHUNK-8,CHUNK+32);
  while(!device.isDone())await new Promise(resolve=>setTimeout(resolve,1));assert.equal(device.result(),CHUNK+32);
  assert.equal(module.HEAPU8[0],(CHUNK-8)%251);assert.deepEqual(errors,[]);
+ // A native caller's next poll happens before Promise microtasks drain. Ready
+ // sectors must report completion in that same task, without another yield.
+ device.read(0,CHUNK,2048);assert(device.isDone(),'cached read completes before the next native poll');assert.equal(device.result(),2048);
+ assert.equal(module.HEAPU8[0],CHUNK%251);
  device.close();assert.equal(disc.cachedBytes,0);await assert.rejects(disc.read(0,1),/closed/);
  assert.throws(()=>disc.copyCached(0,1,direct,0),/closed/);
  // An outstanding asynchronous miss must use a grown heap, and must never

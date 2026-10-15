@@ -154,6 +154,15 @@ export class DiscDevice {
  read(pointer,offset,length){
   this.done=false;this.count=0;
   const timing=this.module.cloudTimings,epoch=timing?.epoch,start=timing?.begin()??null;
+  // Native code polls immediately after this main-thread callback returns.
+  // Ready data must finish synchronously: a Promise.finally would otherwise
+  // make the worker poll/yield while the requested bytes are already in RAM.
+  try{
+   if(!this.closed&&length<=CHUNK){
+    const cached=this.disc.copyCached?.(offset,length,this.module.HEAPU8,pointer);
+    if(cached!=null){this.count=cached;this.done=true;if(start!==null)timing.record('disc',start,epoch);return;}
+   }
+  }catch(error){this.count=-1;this.done=true;if(start!==null)timing.record('disc',start,epoch);if(!this.closed)this.onError(error);return;}
   // Native requests can exceed a chunk; retain only the bounded chunk cache and
   // copy each requested subsection straight into the current WASM heap view.
   (async()=>{
