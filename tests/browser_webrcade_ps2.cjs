@@ -23,7 +23,7 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
   await page.waitForFunction(minimum=>WrcadPS2.module.getFrames()>minimum,Number(process.env.PS2_TEST_MIN_FRAMES||30),{timeout:120000});
  }
  try{
-  await page.goto(url);await loaded();await page.locator('.kt-pad').waitFor({state:'visible'});
+  await page.goto(url);await loaded();assert(await page.evaluate(()=>!window.WrcadCoreCrash||JSON.parse(sessionStorage.getItem('wrcad.core.active.v1')).phase==='playing'),'crash journal tracks an active game');await page.locator('.kt-pad').waitFor({state:'visible'});
   if(process.env.PS2_TEST_WARMUP_MS)await page.waitForTimeout(Number(process.env.PS2_TEST_WARMUP_MS));
   const before=await page.locator('#outputCanvas').screenshot();await page.waitForTimeout(800);const after=await page.locator('#outputCanvas').screenshot();
   if(!process.env.PS2_TEST_SKIP_PIXEL_CHANGE)assert(!before.equals(after),'native homebrew pixels advance, not just a frame counter');
@@ -52,6 +52,7 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
   await page.evaluate(async()=>{window.ownedPs2Module=WrcadPS2.module;window.ownedPs2Audio=ownedPs2Module.cloudAudio();await WrcadPS2.exit({leave:false});});
   assert(await page.evaluate(()=>!WrcadPS2.ready&&ownedPs2Module.PThread.runningWorkers.length===0&&ownedPs2Module.PThread.unusedWorkers.length===0));
   assert.equal(await page.evaluate(()=>ownedPs2Audio.state),'closed');
+  assert(await page.evaluate(()=>!sessionStorage.getItem('wrcad.core.active.v1')&&!localStorage.getItem('wrcad.core.active.v1.persistent')),'normal exit clears the crash journal');
   await page.goto(url);await loaded();assert.deepEqual(await page.evaluate(()=>Array.from(WrcadPS2.module.FS.readFile('/cloudrcade/cards/mc0/qualification/marker.bin'))),[12,34,56]);
   await page.evaluate(()=>WrcadPS2.exit({leave:false}));assert.deepEqual(errors,[]);
   console.log('PASS PS2 '+engine.name()+' real native rendered pixels, streamed disc, DualShock, rotation, pause/resume, state roundtrip, card reload, background and disposal',JSON.stringify(resources));

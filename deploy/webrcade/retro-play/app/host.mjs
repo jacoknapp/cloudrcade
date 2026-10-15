@@ -12,7 +12,8 @@ let module=null,device=null,saves=null,menu=null,disc=null,props={},started=fals
 let animation=0,backgroundOwned=false,drawerOpen=false,operation=Promise.resolve(),stateBusy=false;
 let performanceReadout=null,gpu=null;
 let generation=0,backgroundSync=Promise.resolve();
-let closePromise=null;
+let closePromise=null,journalStarted=false;
+window.WrcadCoreCrash?.clear();
 const launchAbort=new AbortController();
 const keys=new Set(),touch={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
 const status=text=>{get('status').textContent=text;};
@@ -38,6 +39,7 @@ async function pause(){
  if(paused)return operation;
  paused=true;
  try{await command(()=>module.pauseVm());}catch(error){failure(error);throw error;}
+ window.WrcadCoreCrash?.phase(closing?'closing':'paused');
  performanceReadout?.reset(true);
  void module.cloudAudio?.()?.suspend().catch(()=>{});
 }
@@ -45,6 +47,7 @@ async function resume(){
  if(!started||failed||closing||menuVisible||document.hidden)return;
  await operation;if(!paused)return;
  try{await command(()=>module.resumeVm());}catch(error){failure(error);throw error;}
+ window.WrcadCoreCrash?.phase('playing');
  paused=false;performanceReadout?.reset();startFrames();void resumeAudio().catch(()=>{});
 }
 async function syncPause(){await pause();if(saves)await saves.cards();}
@@ -71,6 +74,7 @@ async function stateAction(load,slot){
  finally{try{module?.FS.unlink(path);}catch{}stateBusy=false;}
 }
 async function dispose(){
+ journalStarted=false;window.WrcadCoreCrash?.clear();
  generation++;launchAbort.abort();
  started=false;cancelAnimationFrame(animation);animation=0;neutral();menu?.dispose();menu=null;
  performanceReadout?.dispose();performanceReadout=null;
@@ -97,7 +101,7 @@ async function exit({leave=true}={}){
  }catch(error){closing=false;closePromise=null;get('retry-save').hidden=false;get('failure-detail').textContent=error.message;get('failure').hidden=false;throw error;}
 }
 function failure(error){
- if(failed)return;failed=true;status(error.message);get('failure-detail').textContent=error.message;get('failure').hidden=false;
+ if(failed)return;failed=true;if(journalStarted)window.WrcadCoreCrash?.fail(error);status(error.message);get('failure-detail').textContent=error.message;get('failure').hidden=false;
  console.error('PlayStation 2 core:',error);
  void dispose();
 }
@@ -109,6 +113,7 @@ function fitCanvas(){
 }
 async function boot(selected){
  if(!enabled())throw new Error('Enable PlayStation 2 in Settings → Experimental Settings before launching.');
+ window.WrcadCoreCrash?.begin();journalStarted=true;
  const ownedGeneration=++generation;
  disc=selected;status('Loading PlayStation 2 core…');get('file').disabled=true;
  if(!crossOriginIsolated||typeof SharedArrayBuffer!=='function')throw new Error('PS2 requires HTTPS and cross-origin isolation.');
@@ -145,6 +150,7 @@ async function boot(selected){
   if(bytes[0]!==127||bytes[1]!==69||bytes[2]!==76||bytes[3]!==70)throw new Error('Invalid PS2 ELF file.');
   module.FS.writeFile('/cloudrcade/game.elf',bytes);await command(()=>module.bootElf('/cloudrcade/game.elf'));
  }else{device=new DiscDevice(module,disc,error=>failure(error));module.discImageDevice=device;await command(()=>module.bootDiscImage('game.'+extension));}
+ window.WrcadCoreCrash?.phase('playing');
  started=true;paused=false;document.body.classList.add('running');canvas.focus();fitCanvas();
  performanceReadout=new Ps2Performance(module,disc);
  menu=createPauseMenu({root:get('ps2-menu'),appProps:{...props,title:props.title||disc.name,app:'PlayStation 2'},
