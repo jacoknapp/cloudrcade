@@ -3,7 +3,7 @@
 #include <chrono>
 #include <emscripten/bind.h>
 #include "Ps2VmJs.h"
-#include "GSH_OpenGLJs.h"
+#include "GSH_WebGPU.h"
 #include "sound/SH_OpenAL/SH_OpenALProxy.h"
 #include "PS2VM_Preferences.h"
 #include "DefaultAppConfig.h"
@@ -40,18 +40,11 @@ void initialize()
 {
  if(vm) throw std::runtime_error("PS2 core is already initialized.");
  for(auto& pad : axes) for(auto& axis : pad) axis = 128;
- EmscriptenWebGLContextAttributes attr;
- emscripten_webgl_init_context_attributes(&attr);
- attr.majorVersion = 2; attr.minorVersion = 0; attr.alpha = false;
- attr.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
- attr.explicitSwapControl = true;
- auto context = emscripten_webgl_create_context("#outputCanvas", &attr);
- if(context <= 0) throw std::runtime_error("PS2 requires WebGL2.");
  vm = new CPs2VmJs();
  CAppConfig::GetInstance().SetPreferencePath(PREF_PS2_MC0_DIRECTORY, "/cloudrcade/cards/mc0");
  CAppConfig::GetInstance().SetPreferencePath(PREF_PS2_MC1_DIRECTORY, "/cloudrcade/cards/mc1");
  vm->Initialize();
- vm->CreateGSHandler(CGSH_OpenGLJs::GetFactoryFunction(context));
+ vm->CreateGSHandler([]() { return new CGSH_WebGPU(); });
  CGSHandler::PRESENTATION_PARAMS presentation;
  presentation.mode = CGSHandler::PRESENTATION_MODE_FIT;
  presentation.windowWidth = 640; presentation.windowHeight = 480;

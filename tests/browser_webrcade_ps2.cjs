@@ -1,4 +1,4 @@
-/* Actual Play! WASM/GL lifecycle using original homebrew or an owned game.
+/* Actual Play! WASM/device-WebGPU lifecycle using original homebrew or an owned game.
  * PS2_TEST_ROM=/content/cloudrcade.iso WEBRCADE_TEST_ORIGIN=https://localhost:8443
  * WEBRCADE_TEST_BROWSER=webkit uses an isolated persistent profile for Blob IDB.
  */
@@ -10,11 +10,11 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
 (async()=>{
  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'cloudrcade-ps2-browser-'));
  const context=await engine.launchPersistentContext(profile,{headless:true,ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,viewport:{width:390,height:844},
-  ...(engine===chromium?{executablePath:process.env.CHROME,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
+  ...(engine===chromium?{executablePath:process.env.CHROME,args:['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--use-angle=vulkan','--disable-vulkan-surface','--ignore-gpu-blocklist']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
  const page=await context.newPage(),errors=[],logs=[];
  page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{logs.push(message.text());if(process.env.PS2_TEST_DEBUG)console.log(message.type(),message.text());});
  const prefix=process.env.PS2_TEST_PREFIX||'cloudrcade';
- await context.addInitScript(namespace=>{localStorage.setItem(namespace+'.ps2.enabled.v1','1');localStorage.setItem(namespace+'.ps2.perf.v1','1');},prefix);
+ await context.addInitScript(namespace=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){if(/webgl/i.test(kind))throw new Error('PS2 must not create a WebGL context');return original.call(this,kind,...args);};localStorage.setItem(namespace+'.ps2.enabled.v1','1');localStorage.setItem(namespace+'.ps2.perf.v1','1');},prefix);
  const props={title:'PS2 qualification fixture',type:'play-ps2',rom:new URL(rom,origin).href,uid:'ps2-browser-qualification'};
  const url=origin+'/experimental/ps2/?ctx=standalone&props='+encodeURIComponent(Buffer.from(encodeURIComponent(JSON.stringify(props))).toString('base64'));
  async function loaded(){
@@ -27,8 +27,8 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
   if(process.env.PS2_TEST_WARMUP_MS)await page.waitForTimeout(Number(process.env.PS2_TEST_WARMUP_MS));
   const before=await page.locator('#outputCanvas').screenshot();await page.waitForTimeout(800);const after=await page.locator('#outputCanvas').screenshot();
   if(!process.env.PS2_TEST_SKIP_PIXEL_CHANGE)assert(!before.equals(after),'native homebrew pixels advance, not just a frame counter');
-  const resources=await page.evaluate(()=>({frames:WrcadPS2.module.getFrames(),heap:WrcadPS2.module.HEAPU8.length,workers:WrcadPS2.module.PThread.runningWorkers.length+WrcadPS2.module.PThread.unusedWorkers.length,audio:WrcadPS2.module.cloudAudio()?.state,cache:WrcadPS2.disc.cachedBytes||0,transferred:WrcadPS2.disc.transferred||0,size:WrcadPS2.disc.size}));
-  assert(resources.workers<=8);assert(resources.heap<1024**3);assert(resources.cache<=16*1024**2);
+  const resources=await page.evaluate(()=>({adapter:WrcadPS2.module.cloudGpu.adapter,gpuHeap:WrcadPS2.module.cloudGpu.module.HEAPU8.length,frames:WrcadPS2.module.getFrames(),heap:WrcadPS2.module.HEAPU8.length,workers:WrcadPS2.module.PThread.runningWorkers.length+WrcadPS2.module.PThread.unusedWorkers.length,audio:WrcadPS2.module.cloudAudio()?.state,cache:WrcadPS2.disc.cachedBytes||0,transferred:WrcadPS2.disc.transferred||0,size:WrcadPS2.disc.size}));
+  assert.equal(resources.adapter.fallback,false);assert(resources.gpuHeap>0);assert(resources.workers<=8);assert(resources.heap<1024**3);assert(resources.cache<=16*1024**2);
   if(rom.endsWith('.iso'))assert(resources.transferred<resources.size/2,'disc boot streams without whole-disc MEMFS');
   assert(await page.locator('.kt-analog-left').isVisible());assert(await page.locator('.kt-analog-right').isVisible());
   for(const cid of [10,11,16,17])assert(await page.locator(`[data-cid="${cid}"]`).isVisible());
@@ -37,7 +37,7 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
   await page.locator('#ps2-performance').waitFor({state:'visible'});await page.waitForFunction(()=>document.getElementById('ps2-performance').textContent.includes('FPS'));
   await page.setViewportSize({width:844,height:390});await page.waitForTimeout(250);await page.setViewportSize({width:390,height:844});
   await page.evaluate(()=>{window.ps2Inputs=[];const original=WrcadPS2.module.setInput;WrcadPS2.module.setInput=(...args)=>{ps2Inputs.push(args);original(...args);};});
-  const stick=await page.locator('.kt-analog-right').boundingBox();await page.mouse.move(stick.x+stick.width*.8,stick.y+stick.height*.5);await page.mouse.down();await page.waitForTimeout(200);await page.mouse.up();
+  const stick=await page.locator('.kt-analog-right').boundingBox();await page.mouse.move(stick.x+stick.width*.8,stick.y+stick.height*.5);await page.mouse.down();try{await page.waitForFunction(()=>ps2Inputs.some(input=>input[4]>180),null,{timeout:10000});}finally{await page.mouse.up();}
   assert(await page.evaluate(()=>ps2Inputs.some(input=>input[4]>180)),'right stick reaches native input');
   await page.locator('.kt-menu').tap();await page.waitForFunction(()=>app.isPauseScreen()&&app.emulator.paused);await page.waitForTimeout(300);
   const frozen=await page.evaluate(()=>WrcadPS2.module.getFrames()),videoBefore=await page.evaluate(()=>WrcadPS2.module.getVideoFrames());await page.waitForTimeout(250);assert.equal(await page.evaluate(()=>WrcadPS2.module.getFrames()),frozen,'acknowledged pause stops native frames');

@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.request
+import zipfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -31,6 +33,7 @@ def sha(path):
 def native_key():
     files = [HERE / name for name in ['core.json', 'patch-native.py', 'build-linux.sh', 'Dockerfile.build']]
     files += sorted((HERE / 'native').glob('*'))
+    files += sorted(path for path in (HERE / 'gpu').rglob('*') if path.is_file() and '__pycache__' not in path.parts)
     return hashlib.sha256(''.join(sha(path) for path in files).encode()).hexdigest()
 
 def prepare(work, out):
@@ -55,9 +58,33 @@ def prepare(work, out):
     run('git', 'submodule', 'update', '--init', '--recursive', '--depth', '1', cwd=source)
     run('git', 'submodule', 'foreach', '--recursive', 'git diff --quiet && git diff --cached --quiet', cwd=source)
     run('python3', str(HERE / 'patch-native.py'), str(source))
+    gpu_source = work / 'gpu-upstream'
+    if not (gpu_source / '.git').exists():
+        run('git', 'clone', '--no-checkout', '--depth', '1', '--no-tags', LOCK['gpuRepository'], str(gpu_source))
+    if subprocess.check_output(['git','remote','get-url','origin'],cwd=gpu_source,text=True).strip() != LOCK['gpuRepository']:
+        raise ValueError('Unexpected PS2 GPU upstream remote')
+    run('git','fetch','--depth','1','--no-tags','origin',LOCK['gpuCommit'],cwd=gpu_source)
+    run('git','reset','--hard',LOCK['gpuCommit'],cwd=gpu_source)
+    gpu = source / 'CloudGPU'
+    run('python3', str(HERE / 'gpu/prepare.py'), str(gpu_source), str(gpu))
+    # Retain the exact original inputs to the source extraction, plus licenses.
+    for name in ['runtime/src/gs/gs.cpp','runtime/src/gs/gs.hpp','runtime/src/gs/gpu/gpu.cpp',
+                 'runtime/src/gs/gpu/gpu.hpp','runtime/src/gs/gpu/gs.wgsl','runtime/src/gs/gpu/blit.wgsl','LICENSE']:
+        target = gpu / 'upstream' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(gpu_source / name, target)
+    dawn_zip = work / 'dawn.zip'
+    if not dawn_zip.exists() or sha(dawn_zip) != LOCK['dawnSha256']:
+        urllib.request.urlretrieve(LOCK['dawnUrl'], dawn_zip)
+    if sha(dawn_zip) != LOCK['dawnSha256']:
+        raise ValueError('PS2 WebGPU API source archive hash mismatch')
+    with zipfile.ZipFile(dawn_zip) as archive:
+        if any(Path(n).is_absolute() or '..' in Path(n).parts for n in archive.namelist()):
+            raise ValueError('Invalid Dawn archive paths')
+        archive.extractall(gpu / 'dawn')
     artifacts = source / 'build_cmake/build/wasm-ninja/Source/ui_js/Release'
     receipt = work / 'native-receipt.json'
-    names = ['Play.js', 'Play.wasm']
+    names = ['Play.js', 'Play.wasm', 'Gpu.js', 'Gpu.wasm']
     try:
         cached = json.loads(receipt.read_text())
         reusable = cached['key'] == native_key() and all(sha(artifacts / name) == cached['artifacts'][name] for name in names)
@@ -67,7 +94,8 @@ def prepare(work, out):
         sdk_image='cloudrcade-ps2-sdk:'+native_key()[:12]
         run('docker', 'build', '-t', sdk_image, '-f', str(HERE / 'Dockerfile.build'), str(HERE))
         run('docker', 'run', '--rm', '--platform', 'linux/amd64', '-e', 'PS2_BUILD_JOBS=' + os.environ.get('PS2_BUILD_JOBS', '4'),
-            '-v', str(source) + ':/src', '-v', str(HERE / 'build-linux.sh') + ':/build.sh:ro',
+            '-v', str(source) + ':/src', '-v', str(HERE / 'gpu/build.sh') + ':/gpu-build.sh:ro',
+            '-v', str(HERE / 'build-linux.sh') + ':/build.sh:ro',
             sdk_image, 'bash', '/build.sh')
         receipt.write_text(json.dumps({'key': native_key(), 'artifacts': {name: sha(artifacts / name) for name in names}}))
     native_lock=json.loads((HERE / 'native-build.json').read_text())
@@ -90,6 +118,9 @@ def prepare(work, out):
         for name in names:
             shutil.copy2(artifacts / name, app / 'core' / name)
         shutil.copy2(source / 'License.txt', app / 'LICENSE.play')
+        shutil.copy2(gpu / 'LICENSE', app / 'LICENSE.gs-webgpu')
+        shutil.copy2(gpu / 'dawn/emdawnwebgpu_pkg/webgpu/src/LICENSE', app / 'LICENSE.dawn-webgpu')
+        shutil.copy2(gpu / 'dawn/emdawnwebgpu_pkg/webgpu_cpp/LICENSE', app / 'LICENSE.dawn-cpp')
         shutil.copy2(HERE / 'LICENSE', app / 'LICENSE.host')
         sdk = stage / 'sdk'
         shutil.copytree(HERE.parent / 'retro-dolphin/sdk', sdk, ignore=shutil.ignore_patterns('node_modules'))
@@ -116,7 +147,7 @@ def prepare(work, out):
         # dependencies installed by npm, compiler objects or any operator files.
         def source_filter(info):
             parts = Path(info.name).parts
-            return None if any(part in {'.git', 'node_modules', '__pycache__', 'build_cmake'} for part in parts) else info
+            return None if info.name.endswith(('/Gpu.js', '/Gpu.wasm')) or any(part in {'.git', 'node_modules', '__pycache__', 'build_cmake'} for part in parts) else info
         archive = sources / 'ps2-source.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
             tar.add(source, arcname='ps2/Play', filter=source_filter)

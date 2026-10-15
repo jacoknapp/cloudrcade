@@ -64,4 +64,10 @@ archive. The CloudRcade host and shared webRcade save/menu SDK modifications
 are GPL-3.0. The exact patched source, recipe and modified save SDK are served
 at `/licenses/sources/ps2-source.tar.gz`. Native artifacts and source archive
 hashes are recorded in the packaged `core-info.json`. No external PS2 BIOS or
-game data is distributed. See `deploy/webrcade/retro-play/README.md`.
+game data is distributed. The device WebGPU GS compute renderer is derived
+from [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp) under MIT; its
+notice ships as `LICENSE.gs-webgpu`. Pinned Dawn WebGPU bindings retain their
+BSD/Emscripten notices as `LICENSE.dawn-webgpu` and `LICENSE.dawn-cpp`. The source
+archive includes original renderer inputs, modified GS/compute sources, Dawn
+sources and the exact extraction/build recipes. See
+`deploy/webrcade/retro-play/README.md`.

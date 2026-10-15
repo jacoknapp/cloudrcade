@@ -8,12 +8,12 @@ export class Ps2Performance {
  reset(paused=false){this.paused=paused;this.previous=null;this.element.textContent=paused?'PS2 paused':'PS2 measuring…';}
  sample(now=performance.now()){
   if(this.paused)return;
-  const frame=this.module.getFrames(),video=this.module.getVideoFrames(),target=this.module.getVideoRate(),heap=this.module.HEAPU8.length;
+  const frame=this.module.getFrames(),video=this.module.getVideoFrames(),target=this.module.getVideoRate(),heap=this.module.HEAPU8.length+(this.module.cloudGpu?.module?.HEAPU8.length||0);
   const previous=this.previous;this.previous={now,frame,video};
   if(!previous||now<=previous.now||frame<previous.frame||video<previous.video)return;
   const seconds=(now-previous.now)/1000,rendered=(frame-previous.frame)/seconds,timing=(video-previous.video)/seconds;
   const speed=target>0?timing/target*100:0;
-  this.details=`Rendered: ${rendered.toFixed(1)} FPS\nEmulation: ${speed.toFixed(0)}% normal speed (${target} Hz video timing)\nWASM heap: ${(heap/1048576).toFixed(0)} MiB\nDisc cache: ${((this.disc.cachedBytes||0)/1048576).toFixed(1)} / 16 MiB\nBrowser/GPU memory and GPU execution time are not measured.`;
+  this.details=`Rendered: ${rendered.toFixed(1)} FPS\nEmulation: ${speed.toFixed(0)}% normal speed (${target} Hz video timing)\nCPU + graphics WASM heaps: ${(heap/1048576).toFixed(0)} MiB\nDisc cache: ${((this.disc.cachedBytes||0)/1048576).toFixed(1)} / 16 MiB\nRenderer: device WebGPU. Browser/GPU memory and GPU execution time are not measured.`;
   this.element.textContent=`PS2 · ${rendered.toFixed(1)} FPS · ${speed.toFixed(0)}% · ${(heap/1048576).toFixed(0)} MiB`;
   this.element.hidden=!perfEnabled();
  }

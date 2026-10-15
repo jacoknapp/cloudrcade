@@ -7,8 +7,8 @@ const origin=process.env.WEBRCADE_TEST_ORIGIN||'https://localhost:8443',rom=proc
 if(!rom)throw new Error('PS2_TEST_ROM is required.');
 const config={appName:'PS2 Launch Test',storagePrefix:'ps2_launch_test',enabled:false,enable3DS:false,ps2Url:'/experimental/ps2/',feedUrl:'/content/feeds/combined.json'};
 const feed={title:'PS2 launch',categories:[{title:'PlayStation 2',items:[{title:'PS2 homebrew',type:'ps2',props:{rom:new URL(rom,origin).href}}]}]};
-(async()=>{for(const engine of [chromium,webkit]){
- const browser=await engine.launch({headless:true,...(engine===chromium?{executablePath:process.env.CHROME,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
+(async()=>{for(const engine of process.env.WEBRCADE_TEST_BROWSER==='webkit'?[webkit]:[chromium]){
+ const browser=await engine.launch({headless:true,...(engine===chromium?{executablePath:process.env.CHROME,args:['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--use-angle=vulkan','--disable-vulkan-surface','--ignore-gpu-blocklist']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH})});
  try{
   const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,viewport:{width:390,height:844}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));

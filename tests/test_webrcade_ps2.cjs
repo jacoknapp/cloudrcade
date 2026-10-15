@@ -57,5 +57,17 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
   else assert.equal(rect.height,height,'landscape uses the visible window height');
   assert(Math.abs(rect.width/rect.height-4/3)<.00001);
  }
+ // GPU requests acknowledge failures and use the current grown shared heap.
+ const {Ps2Gpu}=await import(pathToFileURL(path.join(root,'gpu.mjs')));
+ const core={HEAPU8:new Uint8Array(new SharedArrayBuffer(1024))},gpuErrors=[];
+ const gpu=new Ps2Gpu(core,error=>gpuErrors.push(error.message));
+ let presented=0;
+ gpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_write(pointer,count){assert.equal(count,3);assert.deepEqual([...this.HEAPU8.subarray(pointer,pointer+12)],Array.from({length:12},(_,i)=>i));},_gpu_present(){presented++;return 1;},_gpu_destroy(){},async ccall(name){assert.equal(name,'gpu_wait');await new Promise(resolve=>setTimeout(resolve,2));}};
+ core.HEAPU8.set(Array.from({length:12},(_,i)=>i),16);
+ gpu.nativeCall(1,16,12,0,128);await gpu.chain;assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),1);
+ core.HEAPU8=new Uint8Array(new SharedArrayBuffer(2048));
+ gpu.nativeCall(3,16,32,0,128);await gpu.chain;assert.equal(presented,1);assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),2);
+ gpu.nativeCall(99,0,0,0,128);await gpu.chain;assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),-1);assert.match(gpuErrors[0],/Invalid PS2 graphics command/);
+ await gpu.dispose();assert.equal(gpu.module,null);assert.doesNotThrow(()=>gpu.nativeCall(1,0,12,0,128));
  console.log('PASS PS2 strict range reads, >4GiB offsets, LRU budget, cleanup, DualShock input and save path isolation');
 })().catch(error=>{console.error(error);process.exitCode=1;});

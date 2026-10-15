@@ -14,14 +14,16 @@ entry in SYSTEM.CNF; ambiguous CHDs require explicit platform metadata. BIOS
 files are excluded. Play! uses its built-in HLE BIOS and does not load external
 console BIOS dumps. Game and save identities are separate from PSX and PSP.
 
-Games run on the browser device using WebGL2, WASM JIT and eight preallocated
-pthread workers. HTTPS/localhost, cross-origin isolation and SharedArrayBuffer
-are required. The initial WASM heap is256MiB and can grow. The native renderer
-commits each completed browser back buffer; WebGL palette indices select the
-red/alpha channel in shaders because WebGL2 has no texture swizzle parameter.
-PS2 emulation is experimental: compatibility, rendering and speed vary by
-device and game. A homebrew test passing does not establish commercial-game
-compatibility or physical-phone performance.
+Games run on the browser device using WebGPU compute shaders, Play!'s WASM JIT
+and eight preallocated workers. The pinned MIT ps2-web-recomp GS renderer handles
+rasterization, textures, depth, blending, swizzled VRAM and presentation; its
+game-specific CPU recompilers are not used. The separate graphics module uses
+pinned Dawn WebGPU bindings and has no WebGL or software-adapter fallback.
+Save states include GS registers, VRAM, the palette and partial image transfers.
+HTTPS/localhost, cross-origin isolation and SharedArrayBuffer are required.
+The CPU module initially reserves256MiB and graphics module64MiB; both can grow.
+Compatibility, rendering and speed remain experimental. Homebrew tests do not
+establish commercial compatibility or physical-phone performance.
 
 Remote ISO/CHD discs use exact2MiB HTTP206 ranges and an eight-entry16MiB LRU
 cache, including discs over4GiB. ETag/Last-Modified validators detect disc

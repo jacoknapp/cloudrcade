@@ -4,12 +4,13 @@ import {inputState,KEYS} from './input.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
 import {enabled} from './preferences.mjs';
 import {Ps2Performance} from './perf.mjs';
+import {Ps2Gpu} from './gpu.mjs';
 import {pictureBounds} from './viewport.mjs';
 
 const get=id=>document.getElementById(id),canvas=get('outputCanvas'),embedded=parent!==window;
 let module=null,device=null,saves=null,menu=null,disc=null,props={},started=false,paused=false,menuVisible=false,closing=false,failed=false;
 let animation=0,backgroundOwned=false,drawerOpen=false,operation=Promise.resolve(),stateBusy=false;
-let performanceReadout=null;
+let performanceReadout=null,gpu=null;
 let generation=0,backgroundSync=Promise.resolve();
 let closePromise=null;
 const launchAbort=new AbortController();
@@ -77,7 +78,7 @@ async function dispose(){
  device?.close();device=null;disc?.close();
  try{owned?.PThread?.terminateAllThreads();}catch{}
  const context=owned?.cloudAudio?.();if(context&&context.state!=='closed')await context.close().catch(()=>{});
- try{canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext();}catch{}
+ await gpu?.dispose();gpu=null;
  document.documentElement.classList.remove('ps2-paused-menu');document.body.classList.remove('running');
 }
 async function exit({leave=true}={}){
@@ -124,6 +125,9 @@ async function boot(selected){
  const identity=props.uid||props.rom||`${disc.name}:${disc.size}`;
  const id=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
  saves=new Ps2Saves(module,props,info.stateFormatId,status);await saves.initialize(id);
+ if(ownedGeneration!==generation||closing||failed)return;
+ gpu=new Ps2Gpu(module,error=>failure(error));module.cloudGpu=gpu;
+ await gpu.initialize(canvas);
  if(ownedGeneration!==generation||closing||failed)return;
  module.initialize();
  const extension=disc.name.split('.').pop().toLowerCase();

@@ -63,29 +63,24 @@ edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sEXPORTE
 (root / 'Source/ui_js/CloudAudio.js').write_text('Module.cloudAudio = () => AL.currentCtx && AL.currentCtx.audioCtx;\n')
 edit('Source/ui_js/CMakeLists.txt', "'_main', '_initVm',", "'_main',")
 edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sUSE_ES6_IMPORT_META=0")', '')
-# The GS thread renders into Emscripten's emulated back buffer. No browser
-# main-loop callback owns it, so each native present must explicitly commit.
-edit('Source/ui_js/GSH_OpenGLJs.cpp', 'void CGSH_OpenGLJs::PresentBackbuffer()\n{\n}',
-     'void CGSH_OpenGLJs::PresentBackbuffer()\n{\n if(emscripten_webgl_commit_frame() == EMSCRIPTEN_RESULT_SUCCESS) ++cloudRenderedFrames;\n}')
-edit('Source/ui_js/GSH_OpenGLJs.cpp', '#include "GSH_OpenGLJs.h"',
-     '#include "GSH_OpenGLJs.h"\n#include <atomic>\nextern std::atomic<uint32> cloudRenderedFrames;')
-# WebGL2 has no texture swizzle. Select alpha/red palette indices in the shader;
-# never change texture parameters on texture0 when an untextured draw uses it.
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL.cpp', '\t\tglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);', '')
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL.cpp',
-     '\t\tglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, m_renderState.texture0AlphaAsIndex ? GL_ALPHA : GL_RED);', '')
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL.cpp', '\t\tglBindTexture(GL_TEXTURE_2D, m_renderState.texture0Handle);',
-     '\t\tglUniform1i(glGetUniformLocation(m_renderState.shaderHandle, "g_alphaAsIndex"), m_renderState.texture0AlphaAsIndex);\n'
-     '\t\tglBindTexture(GL_TEXTURE_2D, m_renderState.texture0Handle);\n\t\tif(m_renderState.texture0Handle) {')
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL.cpp', '\t\tglActiveTexture(GL_TEXTURE1);\n\t\tglBindTexture(GL_TEXTURE_2D, m_renderState.texture1Handle);',
-     '\t\t}\n\t\tglActiveTexture(GL_TEXTURE1);\n\t\tglBindTexture(GL_TEXTURE_2D, m_renderState.texture1Handle);\n\t\tif(m_renderState.texture1Handle) {')
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL.cpp', '\t\tm_validGlState |= GLSTATE_TEXTURE;', '\t\t}\n\t\tm_validGlState |= GLSTATE_TEXTURE;')
-edit('Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp', '\tshaderBuilder << "uniform sampler2D g_palette;" << std::endl;',
-     '\tshaderBuilder << "uniform sampler2D g_palette;" << std::endl;\n'
-     '\tshaderBuilder << "uniform bool g_alphaAsIndex;\\nfloat readIndex(vec2 coord) { vec4 texel = texture(g_texture, coord); return g_alphaAsIndex ? texel.a : texel.r; }" << std::endl;')
-path = root / 'Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp'
+# Compile only the device WebGPU GS frontend, without an OpenGL library/context.
+(root / 'Source/ui_js/GSH_WebGPU.h').write_bytes((here / 'native/GSH_WebGPU.h').read_bytes())
+path = root / 'Source/ui_js/CMakeLists.txt'
 text = path.read_text()
-import re
-text, count = re.subn(r'texture\(g_texture, (texCoord\.st[^;]*?)\)\.r \* 255\.0', r'readIndex(\1) * 255.0', text)
-assert count == 5, 'Pinned palette shader changed'
+start = text.index('if(NOT TARGET gsh_opengl)')
+end = text.index('if(NOT TARGET sh_openal)', start)
+text = text[:start] + text[end:]
+text = text.replace('\tGSH_OpenGLJs.cpp\n\tGSH_OpenGLJs.h', '\tGSH_WebGPU.h')
+text = text.replace('target_link_options(Play PRIVATE "-sOFFSCREEN_FRAMEBUFFER=1")', '')
+text = text.replace('target_link_options(Play PRIVATE "-sUSE_WEBGL2=1")', '')
+path.write_text(text)
+
+# Snapshot source offsets with the rest of each display circuit (GS-thread safe).
+edit('Source/gs/GSHandler.h', '\t\t\tuint32 bufWidth = 0;', '\t\t\tuint32 bufWidth = 0;\n\t\t\tuint32 bufOffsetX = 0, bufOffsetY = 0;')
+path = root / 'Source/gs/GSHandler.cpp'
+text = path.read_text()
+for name in ['dispFb', 'dispFb1', 'dispFb2']:
+    old = f'layer.psm = {name}.nPSM;'
+    assert text.count(old) == 1
+    text = text.replace(old, old + f'\n\t\t\tlayer.bufOffsetX = {name}.nX; layer.bufOffsetY = {name}.nY;')
 path.write_text(text)
