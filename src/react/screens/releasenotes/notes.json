@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.0.8",
+    "date": "October 14, 2026",
+    "title": "Metadata request recovery",
+    "changes": [
+      "Metadata requests stop when leaving the library, recover from temporary failures, and respect provider cooldowns.",
+      "Provider metadata refreshes when its cache expires while imported and offline details remain available."
+    ]
+  },
+  {
     "version": "2.0.7",
     "date": "October 14, 2026",
     "title": "Shared library scanning",

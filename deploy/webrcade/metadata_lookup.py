@@ -19,7 +19,8 @@ def item_key(item):
 def cached_item(item, directory):
  try:
   entry=json.loads((Path(directory)/(item_key(item)+'.json')).read_text())
-  return {k:v for k,v in entry.get('metadata',{}).items() if k in ['longTitle','description','thumbnail'] and isinstance(v,str)}
+  metadata={k:v for k,v in entry.get('metadata',{}).items() if k in ['longTitle','description','thumbnail'] and isinstance(v,str)}
+  return dict(metadata,_cloudrcadeMetadataSource='igdb') if metadata else {}
  except (OSError,ValueError):return {}
 
 def atomic(path,value):
@@ -50,12 +51,13 @@ def lookup(key, state=None, credentials=None):
  feed=json.loads((state/'feeds/combined.json').read_text())
  item=next((i for c in feed.get('categories',[]) for i in c.get('items',[]) if item_key(i)==key),None)
  if not item or item.get('type') not in PLATFORMS:return {'available':False}
- # Imported metadata remains useful even with the old catalog completely gone.
- if item.get('description') and item.get('thumbnail'):
-  return {'available':True,'metadata':{k:item[k] for k in ['longTitle','description','thumbnail'] if k in item}}
  directory=state/'metadata';cached=directory/(key+'.json');now=time.time()
  try:entry=json.loads(cached.read_text())
  except (OSError,ValueError):entry={}
+ # Own cache files also identify provider fields published by older scanners.
+ # Keep genuinely imported details, but never promote provider data past its TTL.
+ if item.get('description') and item.get('thumbnail') and item.get('_cloudrcadeMetadataSource')!='igdb' and not cached.exists():
+  return {'available':True,'metadata':{k:item[k] for k in ['longTitle','description','thumbnail'] if k in item}}
  if entry.get('expires',0)>now:return {'available':bool(entry.get('metadata')),'metadata':entry.get('metadata',{})}
  directory.mkdir(parents=True,exist_ok=True)
  with (directory/'.requests.lock').open('a+') as lock:
@@ -64,7 +66,7 @@ def lookup(key, state=None, credentials=None):
   token_path=directory/'.token.json'
   try:token=json.loads(token_path.read_text())
   except (OSError,ValueError):token={}
-  if token.get('next_request',0)>now:return {'available':False,'pending':True}
+  if token.get('next_request',0)>now:return {'available':False,'pending':True,'retryAfterMs':min(300000,max(1200,int((token['next_request']-now)*1000)+1))}
   cfg=credentials or json.loads(Path(os.environ.get('WEBRCADE_METADATA_CONFIG','/config/metadata.json')).read_text())
   cfg=cfg.get('IGDBConfiguration',cfg)
   if not cfg.get('ClientId') or not cfg.get('Secret'):return {'available':False}
@@ -92,7 +94,7 @@ def lookup(key, state=None, credentials=None):
    # Provider outages never block play or discard previously cached metadata.
    token['next_request']=now+300
    token.pop('access_token',None);token.pop('expires',None);atomic(token_path,token)
-   return {'available':bool(entry.get('metadata')),'metadata':entry.get('metadata',{})}
+   return {'available':bool(entry.get('metadata')),'metadata':entry.get('metadata',{}),'pending':True,'retryAfterMs':300000}
 
 if __name__=='__main__':
  import sys
