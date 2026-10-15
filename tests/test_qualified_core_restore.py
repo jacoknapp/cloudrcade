@@ -14,6 +14,12 @@ spec.loader.exec_module(qualified)
 
 
 class QualifiedRestoreTest(unittest.TestCase):
+    def test_new_ps2_core_does_not_change_existing_build_recipes(self):
+        old = "SHARED = ['old']\nINPUTS = {'psp':['same']}\nCOMMANDS = {'psp':['build']}\ndef build(): return 'same'\n"
+        new = old.replace("['old']", "['new']").replace("'psp':['same']", "'psp':['same'],'ps2':['new']").replace("'psp':['build']", "'psp':['build'],'ps2':['new']")
+        self.assertEqual(qualified.existing_recipe(old), qualified.existing_recipe(new))
+        self.assertNotEqual(qualified.existing_recipe(old), qualified.existing_recipe(new.replace("return 'same'", "return 'changed'")))
+        self.assertNotEqual(qualified.existing_recipe(old), qualified.existing_recipe(new.replace("'psp':['build']", "'psp':['changed']")))
     def test_snapshot_rejects_modified_added_and_missing_core_inputs(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

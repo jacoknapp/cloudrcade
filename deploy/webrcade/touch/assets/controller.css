@@ -107,6 +107,7 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 #wrcad-touch .kt-actions [data-cid="4"] { left: 44px; bottom: 0; }
 #wrcad-touch .kt-center { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
 #wrcad-touch .kt-center button { font-size: 11px; min-height: 44px; padding: 5px 10px; }
+#wrcad-touch.kt-ps2 .kt-center button { min-width: 44px; padding: 5px 3px; }
 #wrcad-touch .kt-cbuttons { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); width: 100px; height: 100px; }
 #wrcad-touch .kt-cbuttons button { position: absolute; padding: 3px; font-size: 12px; }
 #wrcad-touch .kt-cbuttons button:nth-child(1) { top: 0; left: 28px; }

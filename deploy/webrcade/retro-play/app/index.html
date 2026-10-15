@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-cloudrcade-core="ps2">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CloudRcade — PlayStation 2</title>
+<link rel="icon" href="/touch-controls/cloudrcade.svg">
+<link rel="stylesheet" href="/touch-controls/viewport.css">
+<link rel="stylesheet" href="/touch-controls/controller.css">
+<link rel="stylesheet" href="pause-ui.css">
+<link rel="stylesheet" href="/touch-controls/menus.css">
+<link rel="stylesheet" href="ps2.css">
+<script src="/cloud-saves/config.php"></script>
+<script src="/cloud-saves/runtime.js"></script>
+<script src="/cloud-saves/dropbox.js"></script>
+<script src="/cloud-saves/bridge.js"></script>
+<script defer src="/touch-controls/brand.js"></script>
+<script defer src="/touch-controls/controller.js"></script>
+</head><body>
+<main id="launcher"><h1>PlayStation 2 (experimental)</h1>
+<p>Select an ISO, CHD or homebrew ELF. Games run on your device using Play! and WebGL2. No external BIOS is needed.</p>
+<p><label>Game <input id="file" type="file" accept=".iso,.chd,.elf"></label></p>
+<p>Menu opens CloudRcade's save slots and exit controls. Large discs stream with a 16 MiB cache and need a connection during play.</p>
+<p>Keyboard: Z/X/A/S = ✕/○/□/△; arrows = D-pad; Enter/Backspace = Start/Select; 1/2/3 and 8/9/0 = L1/L2/L3 and R1/R2/R3; F/H/T/G and J/L/I/K = sticks; Escape = Menu.</p>
+<p>PS2 compatibility and speed vary by game and device.</p>
+<p><a href="/play/">Back to library</a> · <a href="LICENSE.play">Play! license</a> · <a href="/licenses/sources/ps2-source.tar.gz">Corresponding source</a></p></main>
+<p id="status" role="status">Select a PS2 game.</p>
+<canvas id="outputCanvas" width="640" height="480" tabindex="0" aria-label="PlayStation 2 video"></canvas>
+<div id="ps2-menu" hidden></div>
+<section id="failure" role="alert" hidden><p id="failure-detail"></p><button id="retry-save" hidden>Retry save and exit</button><button id="restart">Restart game</button><button id="leave">Return to library</button></section>
+<div id="safe-area" aria-hidden="true"></div>
+<script type="module" src="host.mjs"></script>
+</body></html>

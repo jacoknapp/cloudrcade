@@ -1,0 +1,7 @@
+{
+  "nativeInputSha256": "26ad1cbc39b909c6f208dd54cee59bec1ae75effc428bb4f1a252e236d54afdf",
+  "artifacts": {
+    "Play.js": "ce6fa1bcec3fc1ffad04472edab8be53044ddbb52beb9a968eeb2eb36f72dd9f",
+    "Play.wasm": "d24e9b025a09b2d97e6cf457faec924fbc4b337215bde25c9d4d940f5392cfe9"
+  }
+}

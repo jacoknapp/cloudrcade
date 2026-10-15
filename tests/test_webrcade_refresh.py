@@ -5,6 +5,29 @@ os.environ.update(WEBRCADE_ENABLE_3DS='true', WEBRCADE_REQUIRE_ROM_MOUNT='true',
 spec=importlib.util.spec_from_file_location('refresh',Path(__file__).parents[1]/'deploy/webrcade/refresh-feed.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class RefreshTests(unittest.TestCase):
+ def ps2_iso(self,boot=b'BOOT2 = cdrom0:\\SLUS_123.45;1\r\nVER = 1.00\r\n'):
+  image=bytearray(24*2048);pvd=memoryview(image)[16*2048:17*2048];pvd[:7]=b'\x01CD001\x01'
+  pvd[40:72]=b'CLOUDRCADE PS2 FIXTURE'.ljust(32,b' ')
+  pvd[156]=34;pvd[158:162]=(20).to_bytes(4,'little');pvd[166:170]=(2048).to_bytes(4,'little')
+  record=memoryview(image)[20*2048:21*2048];name=b'SYSTEM.CNF;1';record[0]=46;record[2:6]=(21).to_bytes(4,'little');record[10:14]=len(boot).to_bytes(4,'little');record[32]=len(name);record[33:33+len(name)]=name
+  image[21*2048:21*2048+len(boot)]=boot;return image
+ def test_ps2_format_detection_stream_identity_and_existing_library_preservation(self):
+  self.put('ps2/roms/Test.iso',self.ps2_iso());path=self.root/'ps2/roms/Test.iso'
+  with path.open('r+b') as stream:stream.truncate(5*1024**3)
+  identity=m.ps2_game(path);self.assertTrue(identity.startswith('ps2:iso:'))
+  self.assertTrue(m.managed_matches(path,'ps2',{'.iso'}));self.assertFalse(m.managed_matches(path,'psp',{'.iso'}))
+  self.put('ps2/PSX.iso',self.ps2_iso(b'BOOT = cdrom:\\SLUS_123.45;1'));self.assertIsNone(m.ps2_game(self.root/'ps2/PSX.iso'))
+  self.put('ps2/bios/not-a-game.bin',bytes(64));self.put('ps2/invalid.iso',bytes(16))
+  self.put('nes/roms/existing.nes',b'existing-game');m.main()
+  before=json.loads((self.state/'feeds/combined.json').read_text());self.assertFalse(any(i['type']=='ps2' for c in before['categories'] for i in c['items']))
+  info=Path(self.tmp.name)/'core-info.json';info.write_text('{}')
+  with patch.object(m,'PS2_CORE_INFO',info),patch.object(m,'digest',wraps=m.digest) as digest:
+   m.main();after=json.loads((self.state/'feeds/combined.json').read_text())
+   self.assertFalse(any(call.args[0]==path for call in digest.call_args_list),'PS2 DVDs never hashed in full')
+  old=[i for c in before['categories'] for i in c['items']];new=[i for c in after['categories'] for i in c['items']]
+  self.assertEqual([i for i in new if i['type']!='ps2'],old)
+  games=[i for i in new if i['type']=='ps2'];self.assertEqual(len(games),1);self.assertTrue(games[0]['props']['uid'].startswith('cloudrcade-ps2-'))
+  self.assertEqual(m.ps2_game(path),identity)
  def test_gamecube_header_without_disc_hash(self):
   self.put('GameCube/game.iso',b'TEST01'+bytes(22)+bytes.fromhex('c2339f3d'))
   path=self.root/'GameCube/game.iso'

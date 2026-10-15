@@ -17,6 +17,7 @@ BASE = os.environ.get('WEBRCADE_CONTENT_URL', '/content/').rstrip('/') + '/'
 NAMESPACE = os.environ.get('WEBRCADE_STORAGE_PREFIX', 'cloudrcade')
 FEED_TITLE = os.environ.get('WEBRCADE_FEED_TITLE', 'CloudRcade')
 FEED_DESCRIPTION = os.environ.get('WEBRCADE_FEED_DESCRIPTION', 'Games from your ROM library.')
+PS2_CORE_INFO = Path('/var/www/html/experimental/ps2/core-info.json')
 SYSTEMS = {
  'nes': ('Nintendo Entertainment System', 'nes', {'.nes'}, 18),
  'snes': ('Super Nintendo', 'snes', {'.sfc', '.smc'}, 19),
@@ -28,12 +29,14 @@ SYSTEMS = {
  'segaMD': ('Sega Genesis', 'genesis', {'.bin', '.gen', '.smd', '.md'}, 29),
  'psx': ('PlayStation', 'psx', {'.chd', '.pbp', '.cue'}, 7),
  'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
+ 'ps2': ('PlayStation 2 (experimental)', 'ps2', {'.iso', '.chd', '.elf'}, 8),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
  'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
 
 def managed_matches(path,folder,extensions):
  if path.suffix.lower() not in extensions:return False
+ if folder=='ps2':return path.suffix.lower()=='.iso' and ps2_game(path) is not None
  if path.suffix.lower()=='.pbp':return pbp_platform(path)==folder
  if path.suffix.lower()=='.iso':
   if folder=='GameCube':return gamecube_game(path) is not None
@@ -74,6 +77,40 @@ def gamecube_game(path):
  if len(head)!=0x20 or head[0x1c:0x20]!=bytes.fromhex('c2339f3d') or head[0x18:0x1c]==bytes.fromhex('5d1c9ea3'): return None
  if not re.fullmatch(b'[A-Z0-9]{6}',head[:6]): return None
  return 'gamecube:'+head[:8].hex()+':'+str(path.stat().st_size)
+
+def ps2_game(path):
+ # Bounded ISO9660 metadata reads distinguish PS2 BOOT2 discs from PSP/PSX and
+ # GameCube. A large DVD never gets hashed in full during a library scan.
+ try:
+  with path.open('rb') as stream:
+   head=stream.read(124);size=path.stat().st_size
+   if path.suffix.lower()=='.elf':
+    if len(head)<52 or head[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(head[16:18],'little')!=2 or int.from_bytes(head[18:20],'little')!=8:return None
+    return 'ps2:elf:'+hashlib.sha256(head).hexdigest()+':'+str(size)
+   if path.suffix.lower()=='.chd':
+    if len(head)<124 or head[:8]!=b'MComprHD' or int.from_bytes(head[8:12],'big')!=124 or int.from_bytes(head[12:16],'big')!=5:return None
+    # The format alone cannot distinguish PSX from PS2; accept CHD only from
+    # the explicit ps2 folder or platform8 metadata, never a shared-folder guess.
+    return 'ps2:chd:'+head[84:104].hex()+':'+str(size)
+   stream.seek(0x8000);pvd=stream.read(2048)
+   if len(pvd)!=2048 or pvd[:7]!=b'\x01CD001\x01':return None
+   offset=int.from_bytes(pvd[158:162],'little')*2048;length=int.from_bytes(pvd[166:170],'little')
+   if not 0<length<=131072 or offset+length>size:return None
+   stream.seek(offset);records=stream.read(length);cursor=0
+   while cursor<len(records):
+    count=records[cursor]
+    if count==0:cursor=(cursor//2048+1)*2048;continue
+    if count<34 or cursor+count>len(records):return None
+    record=records[cursor:cursor+count];cursor+=count
+    name=record[33:33+record[32]].split(b';',1)[0].upper()
+    if name!=b'SYSTEM.CNF':continue
+    position=int.from_bytes(record[2:6],'little')*2048;amount=int.from_bytes(record[10:14],'little')
+    if not 0<amount<=65536 or position+amount>size:return None
+    stream.seek(position);config=stream.read(amount)
+    if not re.search(rb'(?im)^\s*BOOT2\s*=\s*cdrom[01]?:',config):return None
+    return 'ps2:iso:'+hashlib.sha256(pvd[40:72]+config).hexdigest()+':'+str(size)
+ except (OSError,ValueError,OverflowError):return None
+ return None
 # The 3DS share mixes games with updates, DLC, homebrew and console backups.
 N3DS_SKIP_DIRS = set(filter(None, os.environ.get('WEBRCADE_3DS_SKIP_DIRS', '').split('|')))
 N3DS_SKIP_NAMES = set(filter(None, os.environ.get('WEBRCADE_3DS_SKIP_NAMES', '').split('|')))
@@ -217,8 +254,10 @@ def main():
   for folder,(title,core,extensions,platform) in SYSTEMS.items():
    if folder == '3DS' and not env_bool('WEBRCADE_ENABLE_3DS'): continue
    if folder == 'GameCube' and not Path('/var/www/html/experimental/gamecube/core-info.json').is_file(): continue
+   if folder == 'ps2' and not PS2_CORE_INFO.is_file(): continue
    items=[]
-   candidates=sorted((ROOT/folder if folder in ('3DS','GameCube') else ROOT/folder/'roms').rglob('*'))
+   candidates=sorted((ROOT/folder if folder in ('3DS','GameCube','ps2') else ROOT/folder/'roms').rglob('*'))
+   if folder=='ps2':candidates+=sorted((ROOT/'PS2').rglob('*'))
    candidates += [p for p in managed_files if managed_platforms.get(str(p))==platform or (str(p) not in managed_platforms and managed_matches(p,folder,extensions))]
    # A SNES hack was filed under NES; route it by format.
    if folder=='snes': candidates+=sorted((ROOT/'nes/roms').glob('*.smc'))
@@ -226,7 +265,11 @@ def main():
    candidates.sort(key=lambda p:(rom_url(p) not in published_roms,str(p)))
    for p in candidates:
     if not p.is_file() or p.suffix.lower() not in extensions: continue
-    if folder=='GameCube':
+    if folder=='ps2':
+     identity=ps2_game(p)
+     if identity is None: continue
+     scanned+=1;md5=None;info={}
+    elif folder=='GameCube':
      identity=gamecube_game(p)
      if identity is None: continue
      scanned+=1; md5=None; info={}
@@ -240,6 +283,7 @@ def main():
      identity=md5; info=by_hash.get(md5,{})
     display=p.stem
     props={'rom':rom_url(p)}
+    if folder=='ps2':props['uid']=NAMESPACE+'-ps2-'+hashlib.sha256(identity.encode()).hexdigest()[:32]
     if folder=='psx':
      if not feed['props'].get('psx_bios'): raise RuntimeError('PlayStation BIOS set missing')
      try: disc=cue_to_chd(p,cache) if p.suffix.lower()=='.cue' else props['rom']

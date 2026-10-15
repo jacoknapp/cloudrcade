@@ -63,6 +63,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         folder.mkdir(parents=True, exist_ok=True)
     (roms / 'nes/roms/first.nes').write_bytes(b'NES\x1a' + bytes(12) + b'first-fixture')
     (roms / 'psp/roms/psp-fixture.elf').write_bytes(b'\x7fELF' + bytes(16))
+    (roms / 'PS2').mkdir()
+    ps2_header=bytearray(52);ps2_header[:6]=b'\x7fELF\x01\x01';ps2_header[16:20]=b'\x02\x00\x08\x00'
+    (roms / 'PS2/ps2-fixture.elf').write_bytes(ps2_header)
     # A PSP PBP in the shared folder must not be claimed by the PSX scanner or
     # require a PlayStation BIOS. No managed-root override: exercise image defaults.
     import struct
@@ -108,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         until(lambda: any(item['title'] == 'first' for item in items()))
         assert any(item['title'] == 'psp-fixture' and item['type'] == 'psp' for item in items())
         assert any(item['title'] == 'portable-fixture' and item['type'] == 'psp' for item in items())
+        assert any(item['title'] == 'ps2-fixture' and item['type'] == 'ps2' and item['props']['uid'].startswith('release_test-ps2-') for item in items())
         assert any(item['title']=='gamecube-fixture' and item['type']=='gamecube' for item in items()) == gamecube
         assert not any(item['title']=='invalid' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.
@@ -121,6 +125,23 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         assert config['appName'] == 'Release Test Arcade' and config['storagePrefix'] == 'release_test'
         assert not config['enabled'] and not config['autoRedirect']
         assert config['gamecubeUrl'] == ('/experimental/gamecube/' if gamecube else '')
+        assert config['ps2Url'] == '/experimental/ps2/'
+        with get('/experimental/ps2/') as response:
+            assert b'PlayStation 2 (experimental)' in response.read()
+            assert response.headers['Cross-Origin-Opener-Policy'] == 'same-origin'
+            assert response.headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
+        with get('/experimental/ps2/core-info.json') as response:
+            ps2_info=json.load(response)
+            assert ps2_info['experimental'] and ps2_info['binaryOrigin']=='cloudrcade-linux-source-build'
+            assert ps2_info['streamCacheBytes']==16*1024**2
+            native_lock=json.loads(Path('deploy/webrcade/retro-play/native-build.json').read_text())
+            assert ps2_info['nativeBuild']==native_lock and ps2_info['artifacts']==native_lock['artifacts']
+        for filename, expected in ps2_info['artifacts'].items():
+            with get('/experimental/ps2/core/'+filename) as response:
+                assert hashlib.sha256(response.read()).hexdigest()==expected
+                if filename.endswith('.wasm'):assert response.headers['Content-Type']=='application/wasm'
+        with get('/licenses/sources/ps2-source.tar.gz') as response:
+            assert hashlib.sha256(response.read()).hexdigest()==ps2_info['sourceSha256']
         if gamecube:
             base = '/experimental/gamecube/'
             with get(base) as response:

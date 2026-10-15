@@ -61,6 +61,7 @@ The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at
 | `segaMD/roms` | Genesis | `.bin`, `.gen`, `.smd`, `.md` |
 | `psp/roms` | PSP | `.iso`, `.cso`, `.pbp`, `.elf` |
 | `psx/roms` | PlayStation | `.chd`, `.pbp`, `.cue` |
+| `PS2` or `ps2` | PlayStation 2 (experimental beta) | `.iso`, `.chd` v5, homebrew `.elf` |
 | `3DS` | Nintendo 3DS | `.cia`, `.3ds`, `.cci` |
 
 These are the integrated scanner's supported formats, not an exhaustive list of formats/apps possible in a hand-written webRcade feed. A matching extension does not guarantee a valid or compatible game. The scanner validates 3DS headers and application titles, excludes updates/DLC/system titles and known unsupported seed-protected titles, and applies operator exclusions. It also routes `.smc` files directly under `nes/roms` to SNES for compatibility with a misfiled library.

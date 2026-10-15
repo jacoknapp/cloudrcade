@@ -6,6 +6,7 @@ This is a verified release cache, never a fallback source/binary download:
 changed build inputs or toolchains compile normally, and forced builds bypass it.
 New packages still require all current source, image and publication checks.
 """
+import ast
 import importlib.util
 import os
 from pathlib import Path
@@ -41,7 +42,24 @@ def toolchain(text):
             if child.strip():
                 block.append(child.strip())
         environments.append(tuple(block))
-    return versions, tuple(environments)
+    return tuple(sorted(set(versions))), tuple(environments)
+
+
+def existing_recipe(text):
+    """Ignore only PS2's new graph entries when comparing existing recipes."""
+    tree = ast.parse(text)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        name = node.targets[0].id
+        if name == 'SHARED':
+            node.value = ast.Constant('identity inputs')
+        elif name in ('INPUTS', 'COMMANDS') and isinstance(node.value, ast.Dict):
+            entries = [(key, value) for key, value in zip(node.value.keys, node.value.values)
+                       if not (isinstance(key, ast.Constant) and key.value == 'ps2')]
+            node.value.keys = [key for key, value in entries]
+            node.value.values = [value for key, value in entries]
+    return ast.dump(tree, include_attributes=False)
 
 
 def unchanged(core, root, source=SOURCE):
@@ -71,8 +89,7 @@ def restore(root=cache.ROOT):
     old_helper = git(root, 'show', SOURCE + ':scripts/core-cache.py').decode()
     new_helper = (root / 'scripts/core-cache.py').read_text()
     # Adding the bootstrap file to cache identity changes keys, not the recipe.
-    normalize = lambda text: re.sub(r'^SHARED = .*$', 'SHARED = <identity inputs>', text, flags=re.M)
-    if normalize(old_helper) != normalize(new_helper):
+    if existing_recipe(old_helper) != existing_recipe(new_helper):
         print('Core prepare/validation logic changed: compile cores normally', flush=True)
         return
     selected = []

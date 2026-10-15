@@ -20,6 +20,13 @@ Start with [your first game](docs/wiki/quick-start.md#play-your-first-game). The
 
 PSP support is available by default; no player or Docker enable setting is needed. Place PSP games under `roms/psp/roms/`. HTTPS and WebGL2 are required.
 
+The **PS2 beta** adds Play! under **Settings → Experimental Settings**. Enable
+PlayStation 2 and optionally its performance readout, then press OK. Both switches
+default off. Existing ISO/CHD/homebrew ELF files under `roms/PS2/` or `roms/ps2/`
+are scanned in place. No external PS2 BIOS is needed. Large discs stream with a
+16 MiB cache; compatibility and speed vary. The `beta-ps2-core` image is AMD64
+only. See the [PS2 beta guide](deploy/webrcade/retro-play/README.md).
+
 <a id="nextcloud-and-sso"></a>
 
 Nextcloud and Dropbox can sync supported game saves, state slots, controller preferences and Recently Played. Operators enable providers; players choose a save destination in **Settings → Cloud Storage → Choose storage** and link their own account. Dropbox requires the operator's scoped App Folder app and public app key; its sign-in uses PKCE without an app secret. Browser-local saves work without a cloud connection for supported games. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) explains provider setup, switching, shared-file hosting and Google Drive source files. Google Drive save synchronization is not implemented.

@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/jpd002/Play-.git",
+  "commit": "d44bfa1814b729d4a3ed3c6c3a945432d5ee5bbe",
+  "sdk": "emscripten/emsdk@sha256:90b757eb11fa9a0e3ce4d2d9f76d932a56018e4accc37b5a28b2783751e60eb7",
+  "saveSdkCommit": "9a7cf19b64a440df8ca9b22a4136b34dc6e9f3db",
+  "stateFormatId": "play-d44bfa18-v1"
+}

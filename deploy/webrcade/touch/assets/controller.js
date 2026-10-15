@@ -159,10 +159,12 @@
     genesis: ['genesis', 'genplusgx-md', 'retro-genplusgx-md', 'retro-genesis'],
     psx: ['psx', 'beetle-psx'],
     psp: ['psp', 'retro-ppsspp'],
+    ps2: ['ps2', 'play-ps2'],
     gamecube: ['gamecube', 'retro-dolphin'],
   };
   const core = launchProps?.type || emulatorPath;
-  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (gamecubePage ? 'gamecube' : emulatorPath);
+  const ps2Page = document.documentElement.dataset.cloudrcadeCore === 'ps2';
+  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (ps2Page ? 'ps2' : gamecubePage ? 'gamecube' : emulatorPath);
   const gamecube = system === 'gamecube' || gamecubePage;
   if (gamecube) {
     if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
@@ -292,7 +294,7 @@
     element.dataset.stickIndex = String(index);
     element.classList.toggle('kt-dpad', kind === 'digital');
     element.setAttribute('aria-label', kind === 'digital' ? 'Directional pad: slide for directions and diagonals' :
-      system === 'psx' ? `${index ? 'Right' : 'Left'} analog stick` :
+      ['psx','ps2'].includes(system) ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
   configureDirection(stick, n64 || n3ds || system === 'psp' || gamecube ? 'analog' : 'digital');
@@ -306,12 +308,19 @@
   }
   if (n64 || n3ds || system === 'psp' || gamecube) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
   if (n3ds || gamecube) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
-  if (system === 'psx') {
+  if (system === 'psx' || system === 'ps2') {
     // A steady DualShock overlay avoids layout changes when games select digital
     // or analog input. The core retains its per-game controller-mode setting.
     addDirection('stick-left', 'analog', 0, 'kt-analog-left');
     addDirection('stick-right', 'analog', 1, 'kt-analog-right');
     host.classList.add('kt-dualshock');
+  }
+  if (system === 'ps2') {
+    host.classList.add('kt-ps2');
+    for (const [cid,label] of [[16,'L3'],[17,'R3']]) {
+      const button=document.createElement('button');button.dataset.cid=String(cid);button.textContent=label;
+      if(cid===16)$('.kt-center').prepend(button);else $('.kt-center').append(button);
+    }
   }
   const LAYOUT_KEY = prefix + '.touch.layouts.v1';
   let layouts = {};
@@ -598,7 +607,7 @@
     const z = $('[data-cid="12"]'); z.textContent = 'Z'; $('.kt-shoulders').append(z);
     $('[data-cid="10"]').hidden = true; $('[data-cid="11"]').hidden = true;
   }
-  if (system === 'psx' || system === 'psp') {
+  if (system === 'psx' || system === 'psp' || system === 'ps2') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
     $('[data-cid="8"]').textContent = 'L1';
     $('[data-cid="9"]').textContent = 'R1';
@@ -719,6 +728,7 @@
     draw();
     if (open) cloud()?.syncControls?.();
     if (gamecube) window.WrcadGameCube?.menuOpen(open);
+    if (system === 'ps2') window.WrcadPS2?.menuOpen(open);
   }
   toggle.addEventListener('click', () => {
     if (editing) finishEdit(false);

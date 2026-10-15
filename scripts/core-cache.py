@@ -16,6 +16,9 @@ INPUTS = {
     '3ds': [BASE + 'retro-azahar', 'scripts/prepare-core.py',
             'scripts/package-core-source.py', 'core-release.json', 'LICENSES'],
     'psp': [BASE + 'retro-ppsspp', READER],
+    'ps2': [BASE + 'retro-play', BASE + 'retro-dolphin/sdk'] + [
+        BASE + 'touch/assets/' + name for name in
+        ('brand.js', 'controller.js', 'viewport.css', 'controller.css', 'menus.css')],
     'gamecube': [BASE + 'retro-dolphin', READER] + [
         BASE + 'touch/assets/' + name for name in
         ('brand.js', 'controller.js', 'viewport.css', 'controller.css', 'menus.css')],
@@ -26,6 +29,7 @@ MANIFEST = '.core-cache.json'
 COMMANDS = {
     '3ds': ['python3', 'scripts/prepare-core.py'],
     'psp': ['bash', BASE + 'retro-ppsspp/build.sh'],
+    'ps2': ['python3', BASE + 'retro-play/prepare.py'],
     'gamecube': ['python3', BASE + 'retro-dolphin/prepare.py'],
 }
 
