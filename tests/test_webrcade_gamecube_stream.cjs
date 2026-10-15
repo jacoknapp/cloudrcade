@@ -42,6 +42,39 @@ const assert=require('node:assert/strict'),{pathToFileURL}=require('node:url'),p
  }});
  await retry.read(req(0));await tick();assert.equal(retry.counters.prefetchErrors,1);
  await retry.read(req(1));assert.equal(attempts,2,'failed speculative read is retried on demand');retry.close();
+ // A streaming game must retain its completed read-ahead after the cache fills.
+ // Ready future chunks used to be evicted ahead of stale demand chunks, so
+ // sequential reads fetched the same data again and blocked Dolphin each time.
+ const sequentialRequests=[],sequentialSize=32*chunkSize;
+ const sequential=new DiscRangeCache({chunkSize,maxChunks:8,fetcher:async(url,{headers})=>{
+  const [,first,last]=/bytes=(\d+)-(\d+)/.exec(headers.Range).map(Number);
+  sequentialRequests.push(first/chunkSize);
+  return new Response(new Uint8Array(last-first+1).fill(first/chunkSize),{status:206,
+   headers:{'Content-Range':`bytes ${first}-${last}/${sequentialSize}`,ETag:'"fixture"'}});
+ }});
+ for(let i=0;i<32;i++){
+  const bytes=await sequential.read({...req(i),size:sequentialSize,last:(i+1)*chunkSize-1});
+  assert.equal(bytes[0],i);assert(sequential.entries.size<=8);
+  await Promise.all([...sequential.entries.values()].map(e=>e.promise));
+ }
+ assert.deepEqual(sequentialRequests,Array.from({length:32},(_,i)=>i),'read-ahead survives eviction without duplicate network transfers');
+ assert.equal(sequential.counters.misses,1,'only the first sequential chunk waits for the network');
+ assert.equal(sequential.counters.prefetchHits,31);sequential.close();
+ let networkAttempts=0;
+ const recovered=new DiscRangeCache({chunkSize,maxChunks:8,fetcher:async(url,init)=>{
+  networkAttempts++;
+  if(networkAttempts===1)throw new TypeError('Failed to fetch');
+  const [,first,last]=/bytes=(\d+)-(\d+)/.exec(init.headers.Range).map(Number);
+  return new Response(new Uint8Array(last-first+1).fill(42),{status:206,
+   headers:{'Content-Range':`bytes ${first}-${last}/${12*chunkSize+7}`,ETag:'"fixture"'}});
+ }});
+ assert.equal((await recovered.read(req(0)))[0],42,'a transient network failure retries before failing the native disc read');
+ assert.equal(networkAttempts,4,'one bounded retry plus the two normal read-ahead requests');
+ recovered.close();
+ let failedAttempts=0;
+ const unavailable=new DiscRangeCache({chunkSize,maxChunks:8,fetcher:async()=>{failedAttempts++;throw new TypeError('Failed to fetch');}});
+ await assert.rejects(unavailable.read(req(0)),/Failed to fetch/);
+ assert.equal(failedAttempts,2,'a persistent network failure is not retried indefinitely');unavailable.close();
  const limit=new FrameLimit(60);limit.presented(0);assert.equal(limit.timerDelay(0),17);assert.equal(limit.timerDelay(16),1);assert.equal(limit.timerDelay(17),0);limit.reset();let count=0;
  for(let ms=0;ms<1000;ms+=.1)if(!limit.remaining(ms)){limit.presented(ms);count++;}
  assert.equal(count,60,'thousands of drain attempts cannot submit over60 frames/s');

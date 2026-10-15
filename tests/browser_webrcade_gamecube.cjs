@@ -65,6 +65,13 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         finally {adapter.rejectAll('integrity test exit');adapter.worker?.terminate();}
       });
       assert.match(mismatch,/Core WASM SHA-256 mismatch/,'downstream pin still rejects unexpected core bytes');
+      let interruptedRange=false;
+      await page.route('**/fixtures/'+fixtureName,route=>{
+        if(!interruptedRange&&route.request().headers().range==='bytes=0-2097151'){
+          interruptedRange=true;return route.abort('failed');
+        }
+        return route.continue();
+      });
       for (let attempt=0;attempt<2;attempt++) {
         const result = await page.evaluate(async fixtureName => {
           const {UpstreamWorkerAdapter}=await import('./vendor/src/upstream-worker-adapter.js');
@@ -93,6 +100,7 @@ const origin = process.env.WEBRCADE_GAMECUBE_ORIGIN || 'http://127.0.0.1:18572';
         for(let retry=0;retry<20 && workers.size;retry++) await page.waitForTimeout(100);
         assert.equal(workers.size,0,'all owned core workers exit');
       }
+      assert(interruptedRange,'real native DiscIO recovered from an interrupted chunk fetch');
       // Unsupported images must be rejected before a worker starts.
       await page.locator('#disc').setInputFiles({name:'invalid.iso',mimeType:'application/octet-stream',buffer:Buffer.alloc(32)});
       await page.getByRole('status').filter({hasText:'no GameCube disc header'}).waitFor();

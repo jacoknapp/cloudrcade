@@ -137,7 +137,10 @@ browser/GPU memory are explicitly unavailable without intrusive probes.
 Remote discs retain the existing2MiB chunks/eight-entry16MiB budget. The fetch
 worker owns the cache (pending buffers included), reads ahead two chunks and
 coalesces demand with pending prefetch. Seeks cancel unrelated speculative work;
-failed speculative fetches retry on demand. Shared2MiB staging carries only the
+completed entries use LRU eviction so old reads cannot displace upcoming data.
+Transient network failures retry once within the original timeout; disc-identity
+and range-validation failures are never retried. Failed speculative fetches can
+still retry on demand. Shared2MiB staging carries only the
 requested bytes on a cache hit, with no second full-chunk cache/copy in the core
 worker. This is GameCube-only; the shared disk reader is unchanged.
 
