@@ -1,4 +1,15 @@
 // Match the controller's visible-window intersection without moving its layout.
+// Reading viewport numbers does not force layout. The host can reserve geometry
+// reads for changed viewports; ancestor style changes invalidate its cached fit.
+export function viewportKey(scope=window){
+ const values=[];let view=scope;
+ try{while(view){
+  const v=view.visualViewport;
+  values.push(view.innerWidth,view.innerHeight,view.scrollX,view.scrollY,v?.width,v?.height,v?.offsetLeft,v?.offsetTop,v?.scale);
+  if(view===view.top)break;view=view.parent;
+ }}catch{/* Only same-origin ancestors can contribute. */}
+ return values.join(',');
+}
 export function visibleViewport(scope=window){
  let left=0,top=0,right=scope.innerWidth,bottom=scope.innerHeight,view=scope,offsetX=0,offsetY=0;
  try{while(view){

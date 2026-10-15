@@ -49,6 +49,16 @@ export async function remoteDisc(value, {signal} = {}) {
  const disc={name:decodeURIComponent(url.pathname.split('/').pop()),size,url:url.href,streamed:true,
   get cachedBytes(){return [...cache.values()].reduce((total,bytes)=>total+bytes.length,0);},
   get transferred(){return transferred;},
+  // Copy cached sectors directly into the current native heap. Check the whole
+  // range first so a miss never leaves a partially copied result.
+  copyCached(offset,length,heap,pointer){
+   if(disposed)throw new Error('PS2 disc is closed.');
+   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>CHUNK)throw new Error('Invalid PS2 disc read.');
+   const end=Math.min(size,offset+length);
+   for(let cursor=offset;cursor<end;cursor=(Math.floor(cursor/CHUNK)+1)*CHUNK)if(!cache.has(Math.floor(cursor/CHUNK)))return null;
+   for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),bytes=cache.get(index),from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);heap.set(bytes.subarray(from,from+count),pointer+cursor-offset);cache.delete(index);cache.set(index,bytes);cursor+=count;}
+   return Math.max(0,end-offset);
+  },
   async read(offset,length){
    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>CHUNK)throw new Error('Invalid PS2 disc read.');
    const end=Math.min(size,offset+length),out=new Uint8Array(Math.max(0,end-offset));
@@ -80,12 +90,15 @@ export class DiscDevice {
    let count=0;
    while(count<length && offset+count<this.disc.size){
     if(this.closed)throw new Error('PS2 disc is closed.');
-    const bytes=await this.disc.read(offset+count,Math.min(CHUNK,length-count));
+    const amount=Math.min(CHUNK,length-count),cached=this.disc.copyCached?.(offset+count,amount,this.module.HEAPU8,pointer+count);
+    if(cached!=null){if(!cached)break;count+=cached;continue;}
+    const bytes=await this.disc.read(offset+count,amount);
+    if(this.closed)throw new Error('PS2 disc is closed.');
     if(!bytes.length)break;
     this.module.HEAPU8.set(bytes,pointer+count);count+=bytes.length;
    }
    this.count=count;
-  })().catch(error=>{this.count=-1;this.onError(error);}).finally(()=>{this.done=true;});
+  })().catch(error=>{this.count=-1;if(!this.closed)this.onError(error);}).finally(()=>{this.done=true;});
  }
  close(){this.closed=true;this.disc.close();this.count=-1;this.done=true;}
 }

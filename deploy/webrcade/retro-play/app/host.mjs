@@ -1,11 +1,11 @@
 import {remoteDisc,localDisc,DiscDevice,CHUNK,THRESHOLD} from './disc.mjs';
 import {Ps2Saves} from './saves.mjs';
-import {inputState,KEYS} from './input.mjs';
+import {inputState,inputWriter,KEYS} from './input.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
 import {enabled} from './preferences.mjs';
 import {Ps2Performance} from './perf.mjs';
 import {Ps2Gpu} from './gpu.mjs';
-import {pictureBounds} from './viewport.mjs';
+import {pictureBounds,viewportKey} from './viewport.mjs';
 
 const get=id=>document.getElementById(id),canvas=get('outputCanvas'),embedded=parent!==window;
 let module=null,device=null,saves=null,menu=null,disc=null,props={},started=false,paused=false,menuVisible=false,closing=false,failed=false;
@@ -13,9 +13,15 @@ let animation=0,backgroundOwned=false,drawerOpen=false,operation=Promise.resolve
 let performanceReadout=null,gpu=null;
 let generation=0,backgroundSync=Promise.resolve();
 let closePromise=null,journalStarted=false;
+let fittedViewport=null;
+const coarsePointer=matchMedia('(pointer:coarse)'),viewportObservers=[];
+// Position-only changes in a parent can move an oversized launch iframe without
+// changing its own inner dimensions. Invalidate when ancestor layout changes.
+try{let view=window;while(view!==view.top){view=view.parent;const observer=new MutationObserver(()=>{fittedViewport=null;});observer.observe(view.document.documentElement,{subtree:true,attributes:true,attributeFilter:['class','style']});viewportObservers.push(observer);}}catch{}
 window.WrcadCoreCrash?.clear();
 const launchAbort=new AbortController();
 const keys=new Set(),touch={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
+const emptyKeys=new Set(),writeInput=inputWriter((...state)=>module?.setInput(...state));
 const status=text=>{get('status').textContent=text;};
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function acknowledged(){
@@ -24,13 +30,13 @@ async function acknowledged(){
 }
 function command(action){const next=operation.then(async()=>{if(!module||failed)throw new Error('PS2 core is unavailable.');action();await acknowledged();});operation=next.catch(()=>{});return next;}
 async function resumeAudio(){const context=module?.cloudAudio?.();if(context&&context.state!=='closed'&&context.state!=='running')await context.resume();}
-function neutral(){keys.clear();if(failed)return;for(let pad=0;pad<2;pad++)module?.setInput(pad,0,128,128,128,128);}
+function neutral(){keys.clear();if(failed)return;for(let pad=0;pad<2;pad++)writeInput(pad,[0,128,128,128,128],true);}
 function frame(){
  animation=0;if(!started||paused||failed)return;
  if(!drawerOpen&&!menuVisible){const pads=navigator.getGamepads?.()||[],standard=[...pads].filter(pad=>pad?.connected&&pad.mapping==='standard');
-  for(let pad=0;pad<2;pad++)module.setInput(pad,...inputState(pad===0?keys:new Set(),standard[pad],pad===0?touch:null));
+  for(let pad=0;pad<2;pad++)writeInput(pad,inputState(pad===0?keys:emptyKeys,standard[pad],pad===0?touch:null));
  }
- fitCanvas();animation=requestAnimationFrame(frame);
+ fitCanvas(false);animation=requestAnimationFrame(frame);
 }
 function startFrames(){if(!animation&&started&&!paused&&!failed)animation=requestAnimationFrame(frame);}
 async function pause(){
@@ -78,6 +84,7 @@ async function dispose(){
  generation++;launchAbort.abort();
  started=false;cancelAnimationFrame(animation);animation=0;neutral();menu?.dispose();menu=null;
  performanceReadout?.dispose();performanceReadout=null;
+ for(const observer of viewportObservers)observer.disconnect();
  const owned=module;module=null;window.Module=null;
  device?.close();device=null;disc?.close();
  try{owned?.PThread?.terminateAllThreads();}catch{}
@@ -105,10 +112,12 @@ function failure(error){
  console.error('PlayStation 2 core:',error);
  void dispose();
 }
-function fitCanvas(){
+function fitCanvas(force=true){
  const enabled=document.getElementById('wrcad-touch')?.classList.contains('kt-enabled');
+ const key=viewportKey()+','+coarsePointer.matches+','+enabled;
+ if(!force&&key===fittedViewport)return;fittedViewport=key;
  // Fixed default reservation is independent of a user's moved/resized controls.
- const rect=pictureBounds({safe:get('safe-area').getBoundingClientRect(),touch:matchMedia('(pointer:coarse)').matches,controls:enabled});
+ const rect=pictureBounds({safe:get('safe-area').getBoundingClientRect(),touch:coarsePointer.matches,controls:enabled});
  for(const [name,value]of Object.entries({position:'fixed',width:rect.width+'px',height:rect.height+'px',left:rect.left+'px',top:rect.top+'px',transform:'none'}))if(canvas.style[name]!==value)canvas.style[name]=value;
 }
 async function boot(selected){

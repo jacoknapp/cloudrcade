@@ -30,6 +30,12 @@ const feed={title:'PS2 launch',categories:[{title:'PlayStation 2',items:[{title:
    if(viewport.width<viewport.height){const pad=await game.locator('.kt-pad').boundingBox();assert(picture.y+picture.height<=pad.y-19.5,'picture clears fixed default controls with20px gap');}
    else assert(Math.abs(picture.height-viewport.height)<.5,'landscape picture fits the clipped iframe');
   }
+  await game.evaluate(()=>{window.ps2GeometryReads=0;const original=Element.prototype.getBoundingClientRect;Element.prototype.getBoundingClientRect=function(...args){if(this.id==='safe-area')ps2GeometryReads++;return original.apply(this,args);};});
+  await page.waitForTimeout(500);assert(await game.evaluate(()=>ps2GeometryReads<3),'stable play avoids layout measurements every animation frame');
+  await page.locator('#webrcade-app-iframe').evaluate(frame=>frame.style.setProperty('transform','translateY(24px)','important'));await page.waitForTimeout(350);
+  assert(await game.evaluate(()=>ps2GeometryReads>0),'position-only ancestor changes invalidate the cached fit');
+  const moved=await game.locator('#outputCanvas').boundingBox();assert(moved.y>=-.5&&moved.y+moved.height<=844.5,'moved iframe stays within the parent viewport');
+  await page.locator('#webrcade-app-iframe').evaluate(frame=>frame.style.removeProperty('transform'));await page.waitForTimeout(350);
   await game.locator('.kt-menu').tap();await game.waitForFunction(()=>app.isPauseScreen());await game.evaluate(()=>WrcadPS2.hideMenu());
   await game.evaluate(()=>WrcadPS2.exit());await page.locator('#webrcade-app-iframe').waitFor({state:'detached'});assert.deepEqual(errors,[]);
   console.log('PASS',engine.name(),'PS2 actual library Play/canonical launch, portrait/landscape/oversized-frame geometry, Menu and return to library');
