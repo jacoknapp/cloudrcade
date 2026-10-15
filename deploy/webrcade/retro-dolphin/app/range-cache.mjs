@@ -22,17 +22,26 @@ export class DiscRangeCache {
     let entry=this.entries.get(index);
     if(entry)return entry;
     if(this.entries.size>=this.maxChunks) {
-      // Prefer speculative entries, then the oldest completed demand entry.
-      const victim=[...this.entries].find(([,e])=>e.speculative&&e.ready)||
-        [...this.entries].find(([,e])=>e.ready);
+      // Demand reads move their entry to the end; evict the oldest completed
+      // entry. Future read-ahead is useful work: evicting it first leaves old
+      // demand chunks resident and repeatedly downloads the next disc chunks.
+      // Unrelated speculative entries are already cancelled when a seek begins.
+      const victim=[...this.entries].find(([,e])=>e.ready);
       if(!victim)return null;
       this.discard(victim[0]);
     }
     entry={bytes:new Uint8Array(last-first+1),abort:new AbortController(),ready:false,speculative};
     this.entries.set(index,entry);this.counters.requests++;
     const started=performance.now(),timer=setTimeout(()=>entry.abort.abort(),request.timeoutMs||this.timeoutMs);
-    entry.promise=fetchDiscRange({...request,first,last},entry.bytes,
-      {fetcher:this.fetcher,signal:entry.abort.signal}).then(length=>{
+    const fetchChunk=()=>fetchDiscRange({...request,first,last},entry.bytes,
+      {fetcher:this.fetcher,signal:entry.abort.signal});
+    entry.promise=fetchChunk().catch(error=>{
+      // Browsers report a transient transport/body failure as TypeError. Retry
+      // once within the original timeout, with the same range and validator.
+      // Cancellation and changed/invalid disc responses must still fail closed.
+      if(entry.abort.signal.aborted||!(error instanceof TypeError))throw error;
+      this.counters.requests++;this.report();return fetchChunk();
+    }).then(length=>{
         entry.ready=true;this.counters.bytesFetched+=length;
         this.counters.networkMs+=performance.now()-started;return entry.bytes;
       }).catch(error=>{
