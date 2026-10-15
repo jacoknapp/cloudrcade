@@ -186,5 +186,5 @@ try{
  const encoded=new URLSearchParams(location.search).get('props');if(encoded)props=JSON.parse(decodeURIComponent(atob(encoded)));
  if(embedded){if(frameElement)frameElement.style.display='block';parent.postMessage('appLoaded',location.origin);}
  if(props.rom){document.body.classList.add('library');if(!enabled())throw new Error('Enable PlayStation 2 in Settings → Experimental Settings before launching.');const selected=await remoteDisc(props.rom,{signal:launchAbort.signal});if(closing)selected.close();else await boot(selected);}
- else if(!enabled()){get('file').disabled=true;status('Enable PlayStation 2 in Settings → Experimental Settings before launching.');}
+ else{get('launcher').hidden=false;if(enabled())status('Select a PS2 game.');else{get('file').disabled=true;status('Enable PlayStation 2 in Settings → Experimental Settings before launching.');}}
 }catch(error){if(!closing)failure(error);}
