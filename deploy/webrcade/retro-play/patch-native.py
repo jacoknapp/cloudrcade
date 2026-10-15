@@ -38,21 +38,10 @@ text = text.replace('printf("Failed to start: %s.\\r\\n", ex.what());',
                     'cloudError = ex.what(); cloudStatus = -1;')
 assert text.count('ResumeImpl();') == 2
 path.write_text(text.replace('ResumeImpl();', 'ResumeImpl(); cloudStatus = 1;'))
-# Failed/short HTTP reads must terminate the native read, never spin forever or
-# pretend bytes past EOF were supplied. The JS device publishes its result first.
-edit('Source/Js_DiscImageDeviceStream.cpp', '\tm_position += size;\n\treturn size;', '''
- int result = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.result()});
- if(result < 0) throw std::runtime_error("PS2 disc read failed.");
- m_position += result;
- return result;''')
-edit('Source/Js_DiscImageDeviceStream.cpp', '\t\tm_position = static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32);',
-     '\t\tm_position = (static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32)) + position;')
-edit('Source/Js_DiscImageDeviceStream.cpp', 'bool CJsDiscImageDeviceStream::IsEOF()\n{\n\tthrow std::runtime_error("Not supported.");\n}', '''bool CJsDiscImageDeviceStream::IsEOF()
-{
- uint32 lo = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize()});
- uint32 hi = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize() / 4294967296});
- return m_position >= (static_cast<uint64>(lo) | (static_cast<uint64>(hi) << 32));
-}''')
+# Bounded native coalescing removes repeated browser crossings for tiny reads.
+for name in ['h', 'cpp']:
+    (root / ('Source/Js_DiscImageDeviceStream.' + name)).write_bytes(
+        (here / ('native/DiscImageDeviceStream.' + name)).read_bytes())
 edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sPTHREAD_POOL_SIZE=2")',
      'target_link_options(Play PRIVATE "-sPTHREAD_POOL_SIZE=8")')
 edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sEXPORT_ES6=1")',

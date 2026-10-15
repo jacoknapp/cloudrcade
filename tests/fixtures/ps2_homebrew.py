@@ -10,7 +10,7 @@ from pathlib import Path
 import struct
 import sys
 
-def generate(directory):
+def generate(directory, language_probe=False):
     directory.mkdir(parents=True, exist_ok=True)
     words, labels, fixups = [], {}, []
     def emit(word): words.append(word & 0xffffffff)
@@ -36,12 +36,24 @@ def generate(directory):
     store64(16, 0x80, display)
     store64(16, 0xe0, 0x302010)
     li(17, 0x102000); li(18, 0x1000a000); li(19, 0x80403020)
+    if language_probe:
+        # Ask the actual HLE BIOS for its OSD language, then display that value
+        # in the sprite's red channel. This verifies what guest code receives.
+        li(4, 0x103000); li(3, 0x4b); emit(0x0c)
+        i(35, 4, 19, 0)
+        emit(19 << 16 | 19 << 11 | 16 << 6 | 2)  # srl s3,s3,16
+        i(12, 19, 19, 31)
+        emit(19 << 16 | 19 << 11 | 4 << 6)  # sll s3,s3,4
+        i(13, 19, 19, 1)
+        li(9, 0x80304000); emit(19 << 21 | 9 << 16 | 19 << 11 | 0x25)
     li(8, 0x1000e000); i(9, 0, 9, 1); i(43, 8, 9, 0) # DMAC master enable
     label('frame')
     # Poll VSync, acknowledge it, then submit a color-changing sprite.
     i(35, 16, 9, 0x1000); i(12, 9, 9, 8); branch(4, 9, 0, 'frame')
     i(9, 0, 9, 8); i(43, 16, 9, 0x1000)
-    i(9, 19, 19, 1); i(43, 17, 19, 16 * 6)
+    if not language_probe:
+        i(9, 19, 19, 1)
+    i(43, 17, 19, 16 * 6)
     i(43, 18, 17, 0x10); i(9, 0, 9, 9); i(43, 18, 9, 0x20)
     i(9, 0, 9, 0x101); i(43, 18, 9, 0)
     label('dma')
@@ -86,4 +98,4 @@ def generate(directory):
     print('Generated original PS2 ELF and 256MiB sparse ISO in ' + str(directory))
 
 if __name__ == '__main__':
-    generate(Path(sys.argv[1]))
+    generate(Path(sys.argv[1]), language_probe='--language' in sys.argv[2:])

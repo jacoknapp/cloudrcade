@@ -41,6 +41,7 @@ void initialize()
  if(vm) throw std::runtime_error("PS2 core is already initialized.");
  for(auto& pad : axes) for(auto& axis : pad) axis = 128;
  vm = new CPs2VmJs();
+ CAppConfig::GetInstance().RegisterPreferenceInteger(PREF_SYSTEM_LANGUAGE, 1);
  CAppConfig::GetInstance().SetPreferencePath(PREF_PS2_MC0_DIRECTORY, "/cloudrcade/cards/mc0");
  CAppConfig::GetInstance().SetPreferencePath(PREF_PS2_MC1_DIRECTORY, "/cloudrcade/cards/mc1");
  vm->Initialize();
@@ -77,6 +78,11 @@ EMSCRIPTEN_BINDINGS(CloudRcade)
 {
  using namespace emscripten;
  function("initialize", &initialize);
+ function("setSystemLanguage", optional_override([](unsigned language) {
+  if(!vm || language > 11) throw std::runtime_error("Invalid PS2 system language.");
+  CAppConfig::GetInstance().SetPreferenceInteger(PREF_SYSTEM_LANGUAGE, language);
+ }));
+ function("getSystemLanguage", optional_override([]() { return CAppConfig::GetInstance().GetPreferenceInteger(PREF_SYSTEM_LANGUAGE); }));
  function("bootElf", optional_override([](std::string path) { vm->BootElf(path); }));
  function("bootDiscImage", optional_override([](std::string path) { vm->BootDiscImage(path); }));
  function("pauseVm", optional_override([]() { vm->CloudPause(); }));

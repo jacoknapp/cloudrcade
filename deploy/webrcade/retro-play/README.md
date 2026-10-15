@@ -25,6 +25,12 @@ The CPU module initially reserves256MiB and graphics module64MiB; both can grow.
 Compatibility, rendering and speed remain experimental. Homebrew tests do not
 establish commercial compatibility or physical-phone performance.
 
+The emulated PS2 system language follows the browser's preferred supported
+language, with English as the fallback. Chinese script/region selects Simplified
+or Traditional Chinese. A game can only use languages included on its disc;
+existing save states can retain a language already chosen by the game. The
+preference is applied before each fresh boot, including local homebrew launches.
+
 Remote ISO/CHD discs use exact2MiB HTTP206 ranges and an eight-entry16MiB LRU
 cache, including discs over4GiB. ETag/Last-Modified validators detect disc
 changes when supplied by the server. Full200 responses, short/oversized ranges
@@ -41,6 +47,13 @@ unrelated speculation, isolated metadata reads do not trigger it, and failed
 read-ahead is retried on demand with the same strict response validation.
 Transient transport failures retry once within the original request timeout;
 cancelled requests and invalid or changed disc responses still fail closed.
+
+Each native disc stream also uses a64KiB read buffer to combine small sector
+reads before crossing to the browser. Adjacent sectors and seeks within that
+buffer reuse it; large/unaligned reads, EOF and offsets above4GiB retain normal
+stream behavior. The buffer lives in the existing CPU WASM heap and adds64KiB
+per open stream to the existing16MiB browser cache. It does not skip frames or
+alter the emulated CPU/video clocks, resolution or graphics backend.
 
 Keyboard, two standard gamepads and touch input support both analog sticks,
 the D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu. PS2 keeps
@@ -69,6 +82,8 @@ acknowledges pause and saves before terminating workers, disc reads and audio.
 python3 deploy/webrcade/retro-play/prepare.py
 node tests/test_webrcade_ps2.cjs
 node tests/test_webrcade_ps2_stream.cjs
+node tests/test_webrcade_ps2_native_disc.cjs
+node tests/test_webrcade_ps2_language.cjs
 python3 tests/fixtures/ps2_homebrew.py /tmp/ps2-homebrew
 ```
 

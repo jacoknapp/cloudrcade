@@ -6,6 +6,7 @@ import {enabled} from './preferences.mjs';
 import {Ps2Performance} from './perf.mjs';
 import {Ps2Gpu} from './gpu.mjs';
 import {pictureBounds,viewportKey} from './viewport.mjs';
+import {systemLanguage} from './language.mjs';
 
 const get=id=>document.getElementById(id),canvas=get('outputCanvas'),embedded=parent!==window;
 let module=null,device=null,saves=null,menu=null,disc=null,props={},started=false,paused=false,menuVisible=false,closing=false,failed=false;
@@ -150,6 +151,7 @@ async function boot(selected){
  await gpu.initialize(canvas);
  if(ownedGeneration!==generation||closing||failed)return;
  module.initialize();
+ module.setSystemLanguage(systemLanguage());
  const extension=disc.name.split('.').pop().toLowerCase();
  if(!['iso','chd','elf'].includes(extension))throw new Error('PS2 accepts ISO, CHD and homebrew ELF files.');
  status('Starting PlayStation 2…');
