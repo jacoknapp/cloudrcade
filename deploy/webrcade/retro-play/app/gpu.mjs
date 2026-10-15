@@ -1,6 +1,6 @@
 // PS2 GS compute renderer. One bounded native request at a time; no software path.
 export class Ps2Gpu {
- constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.presents=0;}
+ constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;}
  async initialize(canvas){this.initializing=this.open(canvas);return this.initializing;}
  async open(canvas){
   if(!navigator.gpu)throw new Error('PlayStation 2 requires device WebGPU.');
@@ -30,19 +30,21 @@ export class Ps2Gpu {
   if(this.closed||!this.core)return; // A terminated GS worker may have a queued proxy call.
   // Copy before the Emscripten proxy returns, including across memory growth.
   const bytes=size?this.core.HEAPU8.slice(pointer,pointer+size):null;
-  const finish=value=>{const words=new Int32Array(this.core.HEAPU8.buffer);Atomics.store(words,ack>>>2,value);Atomics.notify(words,ack>>>2);};
+  const finish=value=>{
+   // Memory growth replaces the shared buffer; refresh before acknowledging.
+   const buffer=this.core.HEAPU8.buffer;
+   if(this.ackWords?.buffer!==buffer)this.ackWords=new Int32Array(buffer);
+   const words=this.ackWords;Atomics.store(words,ack>>>2,value);Atomics.notify(words,ack>>>2);
+  };
   this.chain=this.chain.then(async()=>{
    if(this.closed||this.error)throw this.error||new Error('PS2 graphics has closed.');
    const m=this.module,buffer=this.reserve(Math.max(size,op===7?4*1024*1024:0));
    if(bytes)m.HEAPU8.set(bytes,buffer);
-   // Queue order preserves rendering dependencies. Bound outstanding display
-   // work to two presents; state changes and readbacks always drain it first.
-   if(op>=4&&this.presents){await m.ccall('gpu_wait',null,[],[],{async:true});this.presents=0;}
    let result=1;
    switch(op){
     case 1:m._gpu_write(buffer,size/4);break;
     case 2:m._gpu_image(buffer,size);break;
-    case 3:result=1+m._gpu_present(buffer);if(++this.presents===2){await m.ccall('gpu_wait',null,[],[],{async:true});this.presents=0;}break;
+    case 3:result=1+m._gpu_present(buffer);await m.ccall('gpu_wait',null,[],[],{async:true});break;
     case 4:{const length=m._gpu_state_size();if(length>8*1024*1024)throw new Error('Invalid PS2 graphics state size.');const address=await m.ccall('gpu_save','number',[],[],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(address,address+length),output);result=length+1;break;}
     case 5:await m.ccall('gpu_load',null,['number','number'],[buffer,size],{async:true});break;
     case 6:await m.ccall('gpu_reset',null,[],[],{async:true});break;
@@ -54,7 +56,7 @@ export class Ps2Gpu {
  }
  dispose(){
   if(this.closePromise)return this.closePromise;this.closed=true;
-  this.closePromise=(async()=>{await this.initializing?.catch(()=>{});await this.chain.catch(()=>{});try{if(this.module){try{if(this.presents)await this.module.ccall('gpu_wait',null,[],[],{async:true});}finally{if(this.buffer)this.module._free(this.buffer);this.module._gpu_destroy();}}}catch(error){console.warn('PS2 graphics cleanup:',error);}finally{this.module=null;this.core=null;}})();
+  this.closePromise=(async()=>{await this.initializing?.catch(()=>{});await this.chain.catch(()=>{});try{if(this.module){if(this.buffer)this.module._free(this.buffer);this.module._gpu_destroy();}}catch(error){console.warn('PS2 graphics cleanup:',error);}finally{this.module=null;this.core=null;this.ackWords=null;}})();
   return this.closePromise;
  }
 }

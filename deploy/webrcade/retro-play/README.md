@@ -39,11 +39,11 @@ its own saved touch-layout key. Mobile portrait reserves the default controller
 area below the picture; moved controls do not reposition it. Landscape and
 controls-off use the available safe viewport. Native rendering stays640×480.
 
-Rendering can overlap CPU work across at most two display submissions. State
-operations, readbacks and exit drain pending GPU work. Cached disc sectors copy
-directly into the current native heap; unchanged controller values and viewport
-geometry skip repeated native calls and layout measurements. These savings keep
-normal guest timing and every rendered frame; they do not guarantee full speed.
+GPU acknowledgments reuse their shared heap view and refresh it after memory
+growth. Cached disc sectors copy directly into the current native heap;
+unchanged controller values and viewport geometry skip repeated native calls
+and layout measurements. These savings preserve guest timing, rendering cadence
+and resolution; they do not guarantee full speed.
 
 Menu and Escape open CloudRcade's shared native pause/save-slot screen. Memory
 cards sync on Menu, background and exit, with local recovery, account/provider
