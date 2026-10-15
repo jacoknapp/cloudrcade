@@ -4,12 +4,14 @@ import {inputState,KEYS} from './input.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
 import {enabled} from './preferences.mjs';
 import {Ps2Performance} from './perf.mjs';
+import {pictureBounds} from './viewport.mjs';
 
 const get=id=>document.getElementById(id),canvas=get('outputCanvas'),embedded=parent!==window;
 let module=null,device=null,saves=null,menu=null,disc=null,props={},started=false,paused=false,menuVisible=false,closing=false,failed=false;
 let animation=0,backgroundOwned=false,drawerOpen=false,operation=Promise.resolve(),stateBusy=false;
 let performanceReadout=null;
 let generation=0,backgroundSync=Promise.resolve();
+let closePromise=null;
 const launchAbort=new AbortController();
 const keys=new Set(),touch={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
 const status=text=>{get('status').textContent=text;};
@@ -79,15 +81,19 @@ async function dispose(){
  document.documentElement.classList.remove('ps2-paused-menu');document.body.classList.remove('running');
 }
 async function exit({leave=true}={}){
- if(closing)return;closing=true;
- try{
+ if(closing){await closePromise;if(!leave&&embedded)parent.postMessage('exitComplete',location.origin);return;}
+ closing=true;
+ closePromise=(async()=>{
   const end=performance.now()+60000;
   while(stateBusy){if(performance.now()>end)throw new Error('PS2 save operation is still busy. Retry exit when it finishes.');await delay(16);}
   if(started&&!failed){await syncPause();await saves.queue;}
   await dispose();
+ })();
+ try{
+  await closePromise;closing=false;
   if(embedded)parent.postMessage(leave?'appExiting':'exitComplete',location.origin);
   else if(leave)location.href='/play/';
- }catch(error){closing=false;get('retry-save').hidden=false;get('failure-detail').textContent=error.message;get('failure').hidden=false;throw error;}
+ }catch(error){closing=false;closePromise=null;get('retry-save').hidden=false;get('failure-detail').textContent=error.message;get('failure').hidden=false;throw error;}
 }
 function failure(error){
  if(failed)return;failed=true;status(error.message);get('failure-detail').textContent=error.message;get('failure').hidden=false;
@@ -95,15 +101,10 @@ function failure(error){
  void dispose();
 }
 function fitCanvas(){
- const viewport=visualViewport,safe=get('safe-area').getBoundingClientRect();
- const left=Math.max(safe.left,viewport?.offsetLeft||0),top=Math.max(safe.top,viewport?.offsetTop||0);
- const width=Math.max(1,Math.min(safe.right,(viewport?.offsetLeft||0)+(viewport?.width||innerWidth))-left);
- let height=Math.max(1,Math.min(safe.bottom,(viewport?.offsetTop||0)+(viewport?.height||innerHeight))-top);
  const enabled=document.getElementById('wrcad-touch')?.classList.contains('kt-enabled');
  // Fixed default reservation is independent of a user's moved/resized controls.
- if(matchMedia('(pointer:coarse)').matches&&enabled&&height>width)height=Math.max(80,height-390);
- const w=Math.min(width,height*4/3),h=w*3/4;
- for(const [name,value]of Object.entries({position:'fixed',width:w+'px',height:h+'px',left:(left+width/2)+'px',top:(top+height/2)+'px',transform:'translate(-50%,-50%)'}))if(canvas.style[name]!==value)canvas.style[name]=value;
+ const rect=pictureBounds({safe:get('safe-area').getBoundingClientRect(),touch:matchMedia('(pointer:coarse)').matches,controls:enabled});
+ for(const [name,value]of Object.entries({position:'fixed',width:rect.width+'px',height:rect.height+'px',left:rect.left+'px',top:rect.top+'px',transform:'none'}))if(canvas.style[name]!==value)canvas.style[name]=value;
 }
 async function boot(selected){
  if(!enabled())throw new Error('Enable PlayStation 2 in Settings → Experimental Settings before launching.');

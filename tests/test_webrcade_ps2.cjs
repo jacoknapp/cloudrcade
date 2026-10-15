@@ -47,5 +47,15 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  assert(monitor.details.includes('30.0 FPS')&&monitor.details.includes('100% normal speed'),'rendered presents and emulated timing stay separate');
  preferences.set('metric_test.ps2.perf.v1','1');rendered+=30;video+=60;monitor.sample(3000);assert(!monitor.element.hidden);
  monitor.reset(true);monitor.sample(4000);assert.equal(monitor.element.textContent,'PS2 paused');monitor.dispose();
+ const {pictureBounds}=await import(pathToFileURL(path.join(root,'viewport.mjs')));
+ const windowOf=(width,height)=>{const value={innerWidth:width,innerHeight:height};value.top=value;return value;};
+ for(const [width,height]of [[320,568],[390,844],[768,1024],[844,390]]){
+  const parent=windowOf(width,height),scope=windowOf(width,height+60);scope.top=parent;scope.parent=parent;scope.frameElement={clientLeft:0,clientTop:0,getBoundingClientRect:()=>({left:0,top:0})};
+  const safe={left:0,top:0,right:width,bottom:height+60},rect=pictureBounds({scope,safe,touch:true,controls:true});
+  assert(rect.left>=0&&rect.top>=0&&rect.left+rect.width<=width+.01&&rect.top+rect.height<=height+.01,'picture fits the parent window');
+  if(height>width)assert(rect.top+rect.height<=height-(width<600?370:280)-12-20+.01,'picture clears fixed default controls and gap');
+  else assert.equal(rect.height,height,'landscape uses the visible window height');
+  assert(Math.abs(rect.width/rect.height-4/3)<.00001);
+ }
  console.log('PASS PS2 strict range reads, >4GiB offsets, LRU budget, cleanup, DualShock input and save path isolation');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -73,6 +73,10 @@ requires `PS2_TEST_ROM` on a disposable test instance; generated original
 homebrew ELF/ISO fixtures exercise actual rendering and lifecycle without
 copyrighted games or BIOS. Use persistent isolated WebKit profiles for its
 Blob-backed IndexedDB saves. No operator accounts or saves are needed.
+`tests/browser_webrcade_ps2_launch.cjs` follows the actual library, details,
+Play and return flow, including portrait/landscape frames extending60px beyond
+the visible parent window. PS2 picture sizing intersects that visible window;
+the default portrait controller reservation stays independent of moved controls.
 
 Beta builds publish `beta-ps2-core` for `linux/amd64` only. Main's architecture
 policy remains independent. This source directory contains no games, BIOS,
