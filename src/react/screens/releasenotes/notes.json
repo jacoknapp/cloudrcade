@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.0.11",
+    "date": "October 14, 2026",
+    "title": "Mobile save-state menus",
+    "changes": [
+      "Save-state previews and actions fit phone and tablet screens without clipping.",
+      "Save-slot menus size to their content with readable timestamps and accessible Load, Save and Delete controls."
+    ]
+  },
+  {
     "version": "2.0.8",
     "date": "October 14, 2026",
     "title": "Metadata request recovery",
