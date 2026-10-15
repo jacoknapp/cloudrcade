@@ -244,9 +244,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         until(lambda: get('/cloud-saves/api.php?action=status'))
         docker('exec', name, 'python3', '-c',
                'import os,signal; from pathlib import Path; '
-               'pids=[int(p.parent.name) for p in Path("/proc").glob("[0-9]*/cmdline") '
-               'if p.read_bytes().startswith(b"php-fpm: master process")]; '
-               'assert len(pids)==1; os.kill(pids[0],signal.SIGTERM)')
+               'os.kill(int(Path("/run/cloudrcade-php-fpm.pid").read_text()),signal.SIGTERM)')
         until(lambda: json.loads(docker('inspect', name))[0]['State']['Status'] == 'exited')
         assert json.loads(docker('inspect', name))[0]['State']['ExitCode'] != 0
         print('PASS ' + (platform or 'host platform') + ' one app: HTTP/2/PHP sessions, overlays, env branding, mounted key isolation, real CHD conversion, scheduled discovery, failed-scan preservation, graceful shutdown and PHP failure recovery')
