@@ -106,6 +106,11 @@ requires `PS2_TEST_ROM` on a disposable test instance; generated original
 homebrew ELF/ISO fixtures exercise actual rendering and lifecycle without
 copyrighted games or BIOS. Use persistent isolated WebKit profiles for its
 Blob-backed IndexedDB saves. No operator accounts or saves are needed.
+`tests/browser_webrcade_ps2_gpu.cjs` checks actual device rendering, transfers,
+state, composition, device loss and a deliberately delayed queue fence.
+`tests/browser_webrcade_ps2_decode.cjs` checks generated mixed-size textures,
+partial workgroups and multi-row dispatch against the original renderer's
+full-VRAM result. Both require a hardware WebGPU test browser.
 `tests/browser_webrcade_ps2_launch.cjs` follows the actual library, details,
 Play and return flow, including portrait/landscape frames extending60px beyond
 the visible parent window. PS2 picture sizing intersects that visible window;
@@ -120,7 +125,14 @@ packets, with each display last. Capacity pressure, VRAM readback and state save
 drain pending commands; reset/load discard them before restoring graphics. Large
 individual transfers retain the direct protocol. GPU completion is still awaited
 for every display, and the worker uses shared-memory notification while waiting.
+The browser awaits the queue's completion future through Dawn's Asyncify
+TimedWaitAny API instead of polling with zero-delay timers. The 60-second timeout
+is canceled on completion; timeout callbacks never retain a native stack pointer.
 Guest timing, rendering resolution, WebGPU compute and state format are preserved.
+Independent texture-decode jobs within each raster batch share one GPU dispatch.
+Each workgroup decodes a disjoint portion of one texture before rasterization;
+this reduces command and synchronization overhead while preserving texture data,
+palette selection, draw order and the existing raster tile size.
 
 When the experimental performance readout is enabled, its overlay shows last,
 average and p95 presentation intervals, GPU command submission CPU time, GPU
@@ -128,6 +140,11 @@ completion/readback wait, disc service time, input/layout work and bridge queue
 delay/call rate. Stage values are one-second averages per completed rendered
 frame and can overlap across threads; they are not additive or a measurement of
 native emulation CPU/device GPU execution time. The pause menu's performance
-details explain the counters. Timing clocks are inactive with the readout off;
+details explain the counters. On devices supporting WebGPU timestamp queries,
+the readout also reports sampled elapsed GPU compute-pass duration. This covers
+graphics compute passes and excludes the final presentation blit,
+and is not a GPU utilization measure or an estimate of total GPU time per frame. Unsupported devices show
+timestamps as unavailable. Browser timing clocks and native-counter inspection
+are inactive with the readout off;
 pause/resume/state changes discard old samples and bounded interval storage
-avoids growing memory during play. Native binaries and guest timing are unchanged.
+avoids growing memory during play. Guest timing is unchanged.

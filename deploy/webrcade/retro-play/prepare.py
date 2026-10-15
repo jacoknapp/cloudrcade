@@ -82,6 +82,7 @@ def prepare(work, out):
         if any(Path(n).is_absolute() or '..' in Path(n).parts for n in archive.namelist()):
             raise ValueError('Invalid Dawn archive paths')
         archive.extractall(gpu / 'dawn')
+    run('python3', str(HERE / 'gpu/patch-dawn.py'), str(gpu / 'dawn'))
     artifacts = source / 'build_cmake/build/wasm-ninja/Source/ui_js/Release'
     receipt = work / 'native-receipt.json'
     names = ['Play.js', 'Play.wasm', 'Gpu.js', 'Gpu.wasm']

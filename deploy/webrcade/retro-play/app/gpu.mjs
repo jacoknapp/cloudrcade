@@ -21,6 +21,10 @@ export class Ps2Gpu {
   if(this.error)throw this.error;
  }
  fail(error){if(!(error instanceof Error))error=new Error('PS2 WebGPU operation failed. Restart the game.');if(!this.error&&!this.closed){this.error=error;this.onError(error);}}
+ sampleTiming(){
+  const m=this.module;if(this.closed||!m?._gpu_has_timestamps)return null;
+  return {supported:!!m._gpu_has_timestamps(),count:m._gpu_compute_samples(),ms:m._gpu_compute_ms()};
+ }
  reserve(size){
   if(size>8*1024*1024)throw new Error('PS2 graphics request exceeds its limit.');
   if(size>this.capacity){if(this.buffer)this.module._free(this.buffer);this.capacity=Math.max(size,4*1024*1024);this.buffer=this.module._malloc(this.capacity);if(!this.buffer)throw new Error('PS2 graphics allocation failed.');}

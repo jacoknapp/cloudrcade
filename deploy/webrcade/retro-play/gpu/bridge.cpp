@@ -10,12 +10,16 @@ void write(std::uint32_t, std::uint64_t);
 extern std::uint32_t cbp0, cbp1;
 }
 namespace ps2::gs::gpu { void shutdown(); bool present_layers(const std::uint32_t*); void save_transfer(std::uint32_t*); void load_transfer(const std::uint32_t*); }
+namespace ps2::gs::gpu { bool timestamp_queries(); double compute_samples(); double compute_ms(); }
 namespace ps2 { extern unsigned long long cloudGpuFrames; }
 using namespace ps2::gs;
 static std::vector<std::uint8_t> snapshot;
 static constexpr std::uint32_t magic = 0x32534757;
 static constexpr size_t stateSize = 16 + sizeof(State) + kMemorySize + 512 * 4 + 512;
 extern "C" {
+EMSCRIPTEN_KEEPALIVE int gpu_has_timestamps() { return gpu::timestamp_queries(); }
+EMSCRIPTEN_KEEPALIVE double gpu_compute_samples() { return gpu::compute_samples(); }
+EMSCRIPTEN_KEEPALIVE double gpu_compute_ms() { return gpu::compute_ms(); }
 EMSCRIPTEN_KEEPALIVE void gpu_wait() { gpu::wait_idle(); }
 EMSCRIPTEN_KEEPALIVE void gpu_destroy() { gpu::shutdown(); }
 EMSCRIPTEN_KEEPALIVE int gpu_init() {

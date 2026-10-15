@@ -14,6 +14,24 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
    const {default:Gpu}=await import('./core/Gpu.js'),failures=[];
    const m=await Gpu({canvas:document.getElementById('outputCanvas'),onGpuError:error=>failures.push(error)});
    if(!await m.ccall('gpu_init','number',[],[],{async:true}))throw Error('No device WebGPU');
+   // Hold the real queue-completion promise: a display fence must remain
+   // pending, use no zero-delay polling, and release its timeout after success.
+   const realDone=GPUQueue.prototype.onSubmittedWorkDone;
+   const realTimer=globalThis.setTimeout,realClear=globalThis.clearTimeout;
+   const pendingTimers=new Set();let polling=0,timeouts=0,release,settled=false;
+   const held=new Promise(resolve=>release=resolve);
+   GPUQueue.prototype.onSubmittedWorkDone=function(){return Promise.all([realDone.call(this),held]);};
+   globalThis.setTimeout=(callback,delay,...args)=>{const id=realTimer(callback,delay,...args);if(delay===0)polling++;if(delay===60000){timeouts++;pendingTimers.add(id);}return id;};
+   globalThis.clearTimeout=id=>{pendingTimers.delete(id);return realClear(id);};
+   let fence;
+   try{
+    const waiting=m.ccall('gpu_wait',null,[],[],{async:true}).then(()=>settled=true);
+    await new Promise(resolve=>realTimer(resolve,30));
+    if(settled)throw Error('PS2 fence completed before the GPU queue');
+    release();await waiting;
+    fence={polling,timeouts,pending:pendingTimers.size};
+    if(polling||timeouts!==1||pendingTimers.size)throw Error('PS2 fence polls or retains its timeout: '+JSON.stringify(fence));
+   }finally{release();GPUQueue.prototype.onSubmittedWorkDone=realDone;globalThis.setTimeout=realTimer;globalThis.clearTimeout=realClear;}
    await m.ccall('gpu_reset',null,[],[],{async:true});
    const p=m._malloc(8*1024*1024),regs=[],queued=[];
    function enqueue(op,bytes){queued.push({op,bytes:new Uint8Array(bytes)});}
@@ -53,7 +71,7 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
     if(!rejected)throw Error('Malformed GS batch accepted');malformed.push(words[0]);
    }
    const beforeLoss=failures.slice();m._gpu_destroy();await new Promise(resolve=>setTimeout(resolve,100));m._free(p);
-   return {raster,partial,composed,malformed,beforeLoss,loss:failures};
+   return {fence,raster,partial,composed,malformed,beforeLoss,loss:failures};
   },process.env.PS2_GPU_BATCH==='1');
   if(process.env.PS2_GPU_BATCH==='1')assert.equal(result.malformed.length,6);
   assert.deepEqual(result.raster,[128,64,32,128]);assert.deepEqual(result.partial,[10,20,30,40,50,60,70,80,90]);

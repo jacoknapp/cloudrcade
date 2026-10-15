@@ -16,6 +16,57 @@ p.write_text(p.read_text().replace('"../gs.hpp"', '"gs.hpp"'))
 p = out / 'gpu.cpp'
 s = p.read_text().replace('#include "ps2/system.hpp"', '#include <emscripten.h>\n#include <stdexcept>\nnamespace ps2 { unsigned long long cloudGpuFrames = 0; unsigned long long frame_count() { return cloudGpuFrames; } void browser_yield() { emscripten_sleep(0); } }')
 s = s.replace('    options.forceFallbackAdapter = std::getenv("PS2_GPU_FALLBACK") != nullptr;', '    options.forceFallbackAdapter = false;')
+# Await the actual queue future once instead of repeatedly waking Asyncify via
+# setTimeout(0). TimedWaitAny is provided by the pinned Dawn Asyncify port.
+old = '    g_instance = wgpuCreateInstance(nullptr);'
+assert s.count(old) == 1
+s = s.replace(old, '''    WGPUInstanceDescriptor instance = WGPU_INSTANCE_DESCRIPTOR_INIT;
+    const WGPUInstanceFeatureName feature = WGPUInstanceFeatureName_TimedWaitAny;
+    instance.requiredFeatureCount = 1;
+    instance.requiredFeatures = &feature;
+    g_instance = wgpuCreateInstance(&instance);''')
+old = '''    bool done = false;
+    WGPUQueueWorkDoneCallbackInfo cb = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    cb.mode = WGPUCallbackMode_AllowProcessEvents;
+    cb.callback = [](WGPUQueueWorkDoneStatus, WGPUStringView, void *flag, void *) { *static_cast<bool *>(flag) = true; };
+    cb.userdata1 = &done;
+    wgpuQueueOnSubmittedWorkDone(g_queue, cb);
+    wait_until(done);'''
+assert s.count(old) == 1
+s = s.replace(old, '''    // Failure is fatal for this device. No callback points into a stack frame
+    // that could unwind on timeout while the GPU future is still pending.
+    static bool failed = false;
+    WGPUQueueWorkDoneCallbackInfo cb = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    cb.mode = WGPUCallbackMode_WaitAnyOnly;
+    cb.callback = [](WGPUQueueWorkDoneStatus status, WGPUStringView, void *, void *) {
+        if(status != WGPUQueueWorkDoneStatus_Success) failed = true;
+    };
+    WGPUFutureWaitInfo info = WGPU_FUTURE_WAIT_INFO_INIT;
+    info.future = wgpuQueueOnSubmittedWorkDone(g_queue, cb);
+    if(wgpuInstanceWaitAny(g_instance, 1, &info, 60000000000ull) != WGPUWaitStatus_Success || !info.completed)
+        throw std::runtime_error("PS2 WebGPU timed out.");
+    if(failed) throw std::runtime_error("PS2 WebGPU queue completion failed.");
+    wgpuInstanceProcessEvents(g_instance);''')
+# Decode jobs read the same pre-raster VRAM/CLUT and write disjoint decoded
+# ranges. One dispatch preserves that dependency while avoiding a barrier and
+# dynamic-uniform record for each individual texture.
+old = '    for (const Decode &d : g_decodes) dispatch_linear(kDecode, d.words, push_params({setup_offset + d.setup * kSetupWords, d.offset, d.words}));'
+assert s.count(old) == 1
+s = s.replace(old, '''    if (!g_decodes.empty()) {
+        const auto count = static_cast<std::uint32_t>(g_decodes.size());
+        const auto jobs = static_cast<std::uint32_t>(g_arena.size());
+        auto* records = g_arena.grow(count * 4);
+        std::uint32_t groups = 0;
+        for (std::uint32_t j = 0; j < count; ++j) {
+            const auto& d = g_decodes[j];
+            records[j * 4] = setup_offset + d.setup * kSetupWords;
+            records[j * 4 + 1] = d.offset;
+            records[j * 4 + 2] = d.words;
+            records[j * 4 + 3] = groups;
+            groups += (d.words + 63u) / 64u;
+        }
+        dispatch_linear(kDecode, groups * 64u, push_params({jobs, count, groups}));
+    }''')
 s = s.replace('        wgpuAdapterInfoFreeMembers(info);', '        const bool software = info.adapterType == WGPUAdapterType_CPU;\n        wgpuAdapterInfoFreeMembers(info);\n        if(software) return false;')
 s = s.replace('void wait_until(const bool &flag) {\n    while (!flag) pump();\n}', 'void wait_until(const bool &flag) {\n const auto end = emscripten_get_now() + 60000;\n while (!flag) { if(emscripten_get_now() > end) throw std::runtime_error("PS2 WebGPU timed out."); pump(); }\n}')
 s = s.replace('    while (!adapter_done) pump();', '    wait_until(adapter_done);').replace('    while (!device_done) pump();', '    wait_until(device_done);')
@@ -38,6 +89,9 @@ s = s.replace('    g_commands.push_back({kDisplay, (src.width * g_scale + 7) / 8
     g_commands.push_back({cloud_composite?kComposite:kDisplay, (src.width * g_scale + 7) / 8, (src.height * g_scale + 7) / 8, param});''', 1)
 s += '''
 namespace ps2::gs::gpu {
+bool timestamp_queries() { return g_timestamps; }
+double compute_samples() { return static_cast<double>(g_measured); }
+double compute_ms() { return static_cast<double>(g_measured_ns) / 1e6; }
 bool present_layers(const std::uint32_t* p) {
  if(!p[0]||!p[1]) { flush(); return false; }
  if(p[0]>2048||p[1]>1024||std::uint64_t(p[0])*p[1]>g_field_words) throw std::runtime_error("PS2 display exceeds renderer dimensions.");
@@ -65,7 +119,11 @@ void load_transfer(const std::uint32_t* p) {
 s += '\nnamespace ps2::gs::gpu { void shutdown() { if(g_surface) wgpuSurfaceUnconfigure(g_surface); if(g_device) wgpuDeviceDestroy(g_device); } }\n'
 p.write_text(s)
 p = out / 'gs.wgsl'
-p.write_text(p.read_text() + '\n' + Path(__file__).with_name('composite.wgsl').read_text())
+shader = p.read_text()
+start = shader.index('@compute @workgroup_size(64)\nfn decode(')
+end = shader.index('\n@compute', start + 1)
+shader = shader[:start] + Path(__file__).with_name('decode.wgsl').read_text() + shader[end:]
+p.write_text(shader + '\n' + Path(__file__).with_name('composite.wgsl').read_text())
 source = (up / 'runtime/src/gs/gs.cpp').read_text()
 def between(start, end):
     assert source.count(start) == 1 and source.count(end) == 1
