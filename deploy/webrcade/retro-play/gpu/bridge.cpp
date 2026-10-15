@@ -69,3 +69,21 @@ EMSCRIPTEN_KEEPALIVE void gpu_reset() {
  g_state={}; cbp0=cbp1=~0u; ++g_setup_generation;
 }
 }
+
+extern "C" EMSCRIPTEN_KEEPALIVE int gpu_batch(const std::uint32_t* words,unsigned size) {
+ if(size>4*1024*1024 || size%4) throw std::runtime_error("Invalid GS batch size.");
+ const unsigned count=size/4; unsigned cursor=0;int result=1;
+ while(cursor<count) {
+  if(count-cursor<2)throw std::runtime_error("Truncated GS batch header.");
+  const auto op=words[cursor++],bytes=words[cursor++];
+  if(bytes>size || (bytes+3)/4>count-cursor)throw std::runtime_error("Truncated GS batch payload.");
+  const auto* data=words+cursor;cursor+=(bytes+3)/4;
+  switch(op) {
+  case 1:if(bytes%12)throw std::runtime_error("Invalid batched GS registers.");gpu_write(data,bytes/4);break;
+  case 2:gpu_image(reinterpret_cast<const std::uint8_t*>(data),bytes);break;
+  case 3:if(bytes!=104 || cursor!=count)throw std::runtime_error("Invalid batched GS display.");result=3|(gpu_present(data)?4:0);break;
+  default:throw std::runtime_error("Invalid GS batch command.");
+  }
+ }
+ return result;
+}

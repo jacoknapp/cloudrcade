@@ -89,3 +89,10 @@ the default portrait controller reservation stays independent of moved controls.
 Beta builds publish `beta-ps2-core` for `linux/amd64` only. Main's architecture
 policy remains independent. This source directory contains no games, BIOS,
 keys, accounts or operator settings.
+
+The GS worker batches ordered register and image commands into bounded 4MiB
+packets, with each display last. Capacity pressure, VRAM readback and state saves
+drain pending commands; reset/load discard them before restoring graphics. Large
+individual transfers retain the direct protocol. GPU completion is still awaited
+for every display, and the worker uses shared-memory notification while waiting.
+Guest timing, rendering resolution, WebGPU compute and state format are preserved.

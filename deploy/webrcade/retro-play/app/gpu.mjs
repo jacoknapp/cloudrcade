@@ -48,6 +48,12 @@ export class Ps2Gpu {
     case 4:{const length=m._gpu_state_size();if(length>8*1024*1024)throw new Error('Invalid PS2 graphics state size.');const address=await m.ccall('gpu_save','number',[],[],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(address,address+length),output);result=length+1;break;}
     case 5:await m.ccall('gpu_load',null,['number','number'],[buffer,size],{async:true});break;
     case 6:await m.ccall('gpu_reset',null,[],[],{async:true});break;
+    case 8:{
+     const flags=m._gpu_batch(buffer,size);
+     result=1+((flags&4)?1:0);
+     if(flags&2)await m.ccall('gpu_wait',null,[],[],{async:true});
+     break;
+    }
     case 7:await m.ccall('gpu_download',null,['number'],[buffer],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(buffer,buffer+4*1024*1024),output);break;
     default:throw new Error('Invalid PS2 graphics command.');
    }
