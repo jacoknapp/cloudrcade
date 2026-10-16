@@ -39,7 +39,7 @@ or Traditional Chinese. A game can only use languages included on its disc;
 existing save states can retain a language already chosen by the game. The
 preference is applied before each fresh boot, including local homebrew launches.
 
-Remote ISO/CHD discs use exact2MiB HTTP206 ranges and an eight-entry16MiB LRU
+Remote ISO/CHD discs use exact512KiB HTTP206 ranges and a32-entry16MiB LRU
 cache, including discs over4GiB. ETag/Last-Modified validators detect disc
 changes when supplied by the server. Full200 responses, short/oversized ranges
 and unexpected Content-Range values fail before native reads continue. Local
@@ -48,8 +48,10 @@ require connectivity throughout play; partial cached bytes are not an offline
 download. No ROM is copied into MEMFS for disc launches.
 
 Sustained sequential reads start read-ahead, overlapping downloads
-with emulation instead of waiting at every2MiB boundary: one future chunk after
-256KiB of contiguous demand, two after2MiB. Pending buffers share
+with emulation instead of waiting at every range boundary: one future range after
+256KiB of contiguous demand, four after512KiB (a2MiB look-ahead horizon). Small
+metadata reads fetch less unrelated data, while cached native reads up to2MiB
+still complete synchronously. Pending buffers share
 the same16MiB cache budget; demand joins a pending download. Seeks cancel
 unrelated speculation, isolated metadata reads do not trigger it, and failed
 read-ahead is retried on demand with the same strict response validation.

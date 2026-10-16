@@ -1,5 +1,8 @@
 // Bounded, asynchronous disc access. Native code never downloads a whole DVD.
-export const CHUNK = 2 * 1024 * 1024, LIMIT = 8, THRESHOLD = 128 * 1024 * 1024;
+// Small files/seeks must not wait for an unrelated 2 MiB body. Retain the same
+// 16 MiB cache and a 2 MiB read-ahead horizon for sustained streaming.
+export const CHUNK = 512 * 1024, LIMIT = 32, AHEAD = 4, THRESHOLD = 128 * 1024 * 1024;
+const MAX_READ = 2 * 1024 * 1024;
 const checkedSize = size => {
  if (!Number.isSafeInteger(size) || size <= 0) throw new Error('Invalid PS2 disc size.');
  return size;
@@ -27,7 +30,7 @@ export async function remoteDisc(value, {signal} = {}) {
  }
  function cancelAhead(index) {
   const pending=[];
-  for(const [at,entry]of cache)if(entry.speculative&&(at<index||at>index+2)) {
+  for(const [at,entry]of cache)if(entry.speculative&&(at<index||at>index+AHEAD)) {
    discard(at,entry);pending.push(entry.promise.catch(()=>{}));
   }
   return pending;
@@ -105,10 +108,10 @@ export async function remoteDisc(value, {signal} = {}) {
   sequentialBytes=sequential?sequentialBytes+end-offset:end-offset;
   previousEnd=end;
   // Small metadata/file reads often consist of adjacent sectors too. Require a
-  // sustained 256KiB stream before one chunk of look-ahead, and a full chunk of
-  // sequential demand before two. This avoids amplifying startup downloads.
+  // sustained 256KiB stream before one range of look-ahead, and 512KiB of
+  // sequential demand before four. This avoids amplifying startup downloads.
   if(!sequential){aheadFrom=-1;aheadDepth=0;}
-  const depth=sequentialBytes>=CHUNK?2:1;
+  const depth=sequentialBytes>=CHUNK?AHEAD:1;
   if(sequential&&sequentialBytes>=256*1024&&(aheadFrom!==index||aheadDepth<depth)){
    aheadFrom=index;aheadDepth=depth;for(let ahead=1;ahead<=depth;ahead++)entryFor(index+ahead,true);
   }
@@ -120,7 +123,7 @@ export async function remoteDisc(value, {signal} = {}) {
   // range first so a miss never leaves a partially copied result.
   copyCached(offset,length,heap,pointer){
    if(disposed)throw new Error('PS2 disc is closed.');
-   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>CHUNK)throw new Error('Invalid PS2 disc read.');
+   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||length>MAX_READ)throw new Error('Invalid PS2 disc read.');
    const end=Math.min(size,offset+length);
    for(let cursor=offset;cursor<end;cursor=(Math.floor(cursor/CHUNK)+1)*CHUNK)if(!cache.get(Math.floor(cursor/CHUNK))?.ready)return null;
    for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),entry=cache.get(index),bytes=entry.bytes,from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);heap.set(bytes.subarray(from,from+count),pointer+cursor-offset);entry.speculative=false;cache.delete(index);cache.set(index,entry);cursor+=count;}
@@ -158,7 +161,7 @@ export class DiscDevice {
   // Ready data must finish synchronously: a Promise.finally would otherwise
   // make the worker poll/yield while the requested bytes are already in RAM.
   try{
-   if(!this.closed&&length<=CHUNK){
+   if(!this.closed&&length<=MAX_READ){
     const cached=this.disc.copyCached?.(offset,length,this.module.HEAPU8,pointer);
     if(cached!=null){this.count=cached;this.done=true;if(start!==null)timing.record('disc',start,epoch);return;}
    }

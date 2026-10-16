@@ -28,7 +28,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  assert.equal((await disc.read(size-3,16)).length,3);assert.equal((await disc.read(size,10)).length,0);
  for(let i=0;i<20;i++)await disc.read(i*CHUNK,64);
  assert(disc.cachedBytes<=CHUNK*LIMIT);assert(disc.transferred<size,'no complete DVD read');
- const module={HEAPU8:new Uint8Array(CHUNK*3)},errors=[];
+ const module={HEAPU8:new Uint8Array(CHUNK*5)},errors=[];
  const device=new DiscDevice(module,disc,error=>errors.push(error));device.read(0,CHUNK-8,CHUNK+32);
  while(!device.isDone())await new Promise(resolve=>setTimeout(resolve,1));assert.equal(device.result(),CHUNK+32);
  assert.equal(module.HEAPU8[0],(CHUNK-8)%251);assert.deepEqual(errors,[]);
@@ -36,6 +36,11 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  // sectors must report completion in that same task, without another yield.
  device.read(0,CHUNK,2048);assert(device.isDone(),'cached read completes before the next native poll');assert.equal(device.result(),2048);
  assert.equal(module.HEAPU8[0],CHUNK%251);
+ for(let index=0;index<4;index++)await disc.read(index*CHUNK,64);
+ device.read(0,0,2*1024**2);
+ assert(device.isDone(),'a cached native2MiB read remains synchronous across four smaller ranges');
+ assert.equal(device.result(),2*1024**2);
+ for(const offset of [0,CHUNK-1,CHUNK,2*CHUNK,3*CHUNK,4*CHUNK-1])assert.equal(module.HEAPU8[offset],offset%251);
  device.close();assert.equal(disc.cachedBytes,0);await assert.rejects(disc.read(0,1),/closed/);
  assert.throws(()=>disc.copyCached(0,1,direct,0),/closed/);
  // An outstanding asynchronous miss must use a grown heap, and must never

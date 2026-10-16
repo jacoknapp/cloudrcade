@@ -1,9 +1,9 @@
 /* PS2 mobile streaming: held network responses, read-ahead, seeks and memory. */
 const assert=require('node:assert/strict'),path=require('node:path'),{pathToFileURL}=require('node:url');
 (async()=>{
- const {remoteDisc,CHUNK,LIMIT}=await import(pathToFileURL(path.resolve(__dirname,'../deploy/webrcade/retro-play/app/disc.mjs')));
+ const {remoteDisc,CHUNK,LIMIT,AHEAD}=await import(pathToFileURL(path.resolve(__dirname,'../deploy/webrcade/retro-play/app/disc.mjs')));
  global.location={href:'https://arcade.test/play/'};
- const size=40*CHUNK+123,requests=[],pending=new Set();
+ const size=100*CHUNK+123,requests=[],pending=new Set();
  let peak=0,disc;
  const tick=()=>new Promise(resolve=>setImmediate(resolve));
  global.fetch=async(url,options)=>{
@@ -28,6 +28,8 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  const next=index=>{const request=[...pending].find(r=>r.index===index);assert(request,`range ${index} pending`);return request;};
  const opening=remoteDisc('/content/ps2/test.iso');await tick();next(0).release();disc=await opening;
  assert.equal(requests.length,1,'initial probe must not speculate');
+ assert.equal(requests[0].last+1,512*1024,'cold metadata must not wait for a full2MiB download');
+ assert.equal(CHUNK*LIMIT,16*1024**2,'smaller ranges retain the existing memory budget');
  // A random metadata seek loads only its requested chunk.
  let read=disc.read(10*CHUNK,2048);await tick();next(10).release();await read;
  assert.equal(requests.length,2,'single metadata read must not speculate');
@@ -37,8 +39,8 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  await disc.read(10*CHUNK+4096,256*1024-4096);
  assert.deepEqual([...pending].map(r=>r.index),[11],'256KiB of demand starts one future chunk');
  await disc.read(10*CHUNK+256*1024,CHUNK-256*1024);
- assert.deepEqual([...pending].map(r=>r.index),[11,12],'a sustained stream starts two future ranges before a boundary');
- assert.equal(disc.cachedBytes,4*CHUNK,'pending read-ahead buffers count inside the cache budget');
+ assert.deepEqual([...pending].map(r=>r.index),[11,12,13,14],'a sustained stream fetches the next2MiB in parallel before a boundary');
+ assert.equal(disc.cachedBytes,(2+AHEAD)*CHUNK,'pending read-ahead buffers count inside the cache budget');
  // Demand joins an in-flight read-ahead instead of fetching it twice.
  read=disc.read(11*CHUNK,2048);let completed=false;read.then(()=>completed=true);
  await tick();assert(!completed);assert.equal(requests.filter(r=>r.index===11).length,1);
@@ -65,17 +67,17 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  assert.equal((await read)[0],27,'interrupted response body retries with a fresh strict byte count');
  // Multiple foreground consumers also coalesce; completed-cache eviction and
  // aborted speculative buffers cannot exceed the original eight-slot budget.
- for(let index=1;index<20;index++){
+ for(let index=1;index<LIMIT+8;index++){
   const a=disc.read(index*CHUNK,64),b=disc.read(index*CHUNK,64);await tick();
   const request=[...pending].find(r=>r.index===index);request?.release();
   assert.deepEqual(await a,await b);assert(disc.cachedBytes<=CHUNK*LIMIT);
  }
  assert(peak<=CHUNK*LIMIT,'ready plus pending allocations stay at most16MiB');
  // EOF read-ahead stops at the disc boundary; close aborts every pending fetch.
- read=disc.read(39*CHUNK,2048);await tick();next(39).release();await read;
- await disc.read(39*CHUNK+2048,CHUNK-2048);assert.equal(next(40).last,size-1);
- assert(!requests.some(r=>r.index>40));
- const last=disc.read(40*CHUNK,123);await tick();disc.close();await assert.rejects(last,/cancel|closed/i);
+ read=disc.read(99*CHUNK,2048);await tick();next(99).release();await read;
+ await disc.read(99*CHUNK+2048,CHUNK-2048);assert.equal(next(100).last,size-1);
+ assert(!requests.some(r=>r.index>100));
+ const last=disc.read(100*CHUNK,123);await tick();disc.close();await assert.rejects(last,/cancel|closed/i);
  await tick();assert.equal(pending.size,0);assert.equal(disc.cachedBytes,0);
  console.log('PASS PS2 sequential read-ahead removes ready boundary waits, coalesces demand, cancels seeks, retries speculation, validates responses and bounds pending+ready memory');
 })().catch(error=>{console.error(error);process.exitCode=1;});
