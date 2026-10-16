@@ -52,8 +52,9 @@
     };
   }
   function applyMute() {
-    // Ambient is non-exclusive, so phone music/podcasts can keep playing.
-    try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch (_) { /* Older browsers. */ }
+    // Unmuted games use media playback so iOS's silent switch does not mute
+    // them. Muted games release exclusive playback while gain keeps audio off.
+    try { if (navigator.audioSession) navigator.audioSession.type = muted ? 'ambient' : 'playback'; } catch (_) { /* Older browsers. */ }
     for (const gate of audioGates.values()) gate.gain.value = muted ? 0 : 1;
   }
   applyMute();
