@@ -1,6 +1,6 @@
 // PS2 GS compute renderer. One bounded native request at a time; no software path.
 export class Ps2Gpu {
- constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;}
+ constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;this.pending=0;}
  async initialize(canvas){this.initializing=this.open(canvas);return this.initializing;}
  async open(canvas){
   if(!navigator.gpu)throw new Error('PlayStation 2 requires device WebGPU.');
@@ -34,8 +34,17 @@ export class Ps2Gpu {
   if(this.closed||!this.core)return; // A terminated GS worker may have a queued proxy call.
   const timing=this.core.cloudTimings,epoch=timing?.epoch;
   const copyStart=timing?.begin()??null;
-  // Copy before the Emscripten proxy returns, including across memory growth.
-  const bytes=size?this.core.HEAPU8.slice(pointer,pointer+size):null;
+  // Finish the input copy before the native proxy returns. An idle GPU buffer
+  // can own it directly; overlapping requests retain independent snapshots.
+  // This also preserves payloads if the native caller later times out/exits.
+  let bytes=null,staged=null,copyError=null;
+  try{
+   if(size&&!this.pending&&!this.error){
+    staged=this.reserve(size);
+    this.module.HEAPU8.set(this.core.HEAPU8.subarray(pointer,pointer+size),staged);
+   }else if(size)bytes=this.core.HEAPU8.slice(pointer,pointer+size);
+  }catch(error){copyError=error;}
+  this.pending++;
   if(copyStart!==null)timing.record('gpuSubmit',copyStart,epoch);
   const queued=timing?.begin()??null;
   const finish=value=>{
@@ -45,10 +54,11 @@ export class Ps2Gpu {
    const words=this.ackWords;Atomics.store(words,ack>>>2,value);Atomics.notify(words,ack>>>2);
   };
   this.chain=this.chain.then(async()=>{
+   if(copyError)throw copyError;
    if(this.closed||this.error)throw this.error||new Error('PS2 graphics has closed.');
    if(queued!==null){timing.record('bridge',queued,epoch);timing.gpuCall(epoch);}
    const submitStart=timing?.begin()??null;
-   const m=this.module,buffer=this.reserve(Math.max(size,op===7?4*1024*1024:0));
+   const m=this.module,buffer=staged??this.reserve(Math.max(size,op===7?4*1024*1024:0));
    if(bytes)m.HEAPU8.set(bytes,buffer);
    let result=1,display=false;
    switch(op){
@@ -79,7 +89,7 @@ export class Ps2Gpu {
    if(this.error)throw this.error;
    if(display&&result===2)timing?.present(epoch);
    finish(result);
-  }).catch(error=>{this.fail(error);finish(-1);});
+  }).catch(error=>{this.fail(error);finish(-1);}).finally(()=>{this.pending--;});
  }
  dispose(){
   if(this.closePromise)return this.closePromise;this.closed=true;

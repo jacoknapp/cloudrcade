@@ -131,6 +131,39 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  timedGpu.nativeCall(8,0,0,0,128);clock+=3;await timedGpu.chain;
  const gpuTiming=tracked.take();assert.equal(gpuTiming.gpuSubmit,4);assert.equal(gpuTiming.gpuWait,12);assert.equal(gpuTiming.bridge,3);assert.equal(gpuTiming.frames,1);assert.equal(gpuTiming.calls,1);
  await timedGpu.dispose();
+ // A queued native payload stays owned until acknowledgement, including when
+ // another native thread grows the shared memory before the GPU consumes it.
+ const memory=new WebAssembly.Memory({initial:1,maximum:2,shared:true});
+ const growingCore={HEAPU8:new Uint8Array(memory.buffer)},payload=Uint8Array.from({length:4096},(_,i)=>(i*37+11)&255);
+ growingCore.HEAPU8.set(payload,1024);
+ const growingGpu=new Ps2Gpu(growingCore,error=>{throw error;});let consumed=false,release;
+ growingGpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,1024);assert.deepEqual(this.HEAPU8.subarray(pointer,pointer+4096),payload);consumed=true;}};
+ growingGpu.chain=new Promise(resolve=>{release=resolve;});
+ growingGpu.nativeCall(1,1024,4096,0,128);
+ const oldSharedBuffer=growingCore.HEAPU8.buffer;memory.grow(1);growingCore.HEAPU8=new Uint8Array(memory.buffer);
+ assert.notEqual(growingCore.HEAPU8.buffer,oldSharedBuffer);
+ growingCore.HEAPU8.fill(77,65536,65552);
+ assert.equal(consumed,false);assert.equal(Atomics.load(new Int32Array(growingCore.HEAPU8.buffer),32),0);
+ release();await growingGpu.chain;assert(consumed);assert.equal(Atomics.load(new Int32Array(growingCore.HEAPU8.buffer),32),1);
+ await growingGpu.dispose();
+ // Native proxy return releases the source even if GPU work is queued. A
+ // later overlapping request must not overwrite the first staged payload.
+ const queuedCore={HEAPU8:new Uint8Array(new SharedArrayBuffer(16384))},queuedGpu=new Ps2Gpu(queuedCore,error=>{throw error;});
+ const firstPacket=Uint8Array.from({length:1024},(_,i)=>i&255),secondPacket=Uint8Array.from({length:1024},(_,i)=>(i+73)&255),received=[];let openQueue;
+ queuedGpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,256);received.push(this.HEAPU8.slice(pointer,pointer+1024));}};
+ queuedGpu.chain=new Promise(resolve=>{openQueue=resolve;});
+ queuedCore.HEAPU8.set(firstPacket,1024);queuedGpu.nativeCall(1,1024,1024,0,128);queuedCore.HEAPU8.fill(0,1024,2048);
+ queuedCore.HEAPU8.set(secondPacket,2048);queuedGpu.nativeCall(1,2048,1024,0,132);queuedCore.HEAPU8.fill(0,2048,3072);
+ assert.equal(queuedGpu.pending,2);openQueue();await queuedGpu.chain;
+ assert.deepEqual(received,[firstPacket,secondPacket]);assert.equal(queuedGpu.pending,0);
+ assert.equal(Atomics.load(new Int32Array(queuedCore.HEAPU8.buffer),32),1);assert.equal(Atomics.load(new Int32Array(queuedCore.HEAPU8.buffer),33),1);
+ await queuedGpu.dispose();
+ // Synchronous staging failures must reach the native acknowledgement rather
+ // than escaping the main-thread proxy and leaving the worker blocked.
+ const copyFailures=[],copyCore={HEAPU8:new Uint8Array(new SharedArrayBuffer(4096))},copyFailure=new Ps2Gpu(copyCore,error=>copyFailures.push(error.message));
+ copyFailure.module={HEAPU8:new Uint8Array(4096),_malloc(){throw new Error('Owned allocation failure');},_gpu_destroy(){}};
+ assert.doesNotThrow(()=>copyFailure.nativeCall(1,1024,12,0,128));await copyFailure.chain;
+ assert.deepEqual(copyFailures,['Owned allocation failure']);assert.equal(Atomics.load(new Int32Array(copyCore.HEAPU8.buffer),32),-1);assert.equal(copyFailure.pending,0);await copyFailure.dispose();
  const nativeFailure=new Ps2Gpu(core,error=>assert.match(error.message,/WebGPU operation failed/));nativeFailure.fail(17);await nativeFailure.dispose();
  console.log('PASS PS2 strict range reads, >4GiB offsets, LRU budget, cleanup, DualShock input and save path isolation');
 })().catch(error=>{console.error(error);process.exitCode=1;});
