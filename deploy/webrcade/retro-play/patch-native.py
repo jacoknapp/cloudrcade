@@ -68,22 +68,62 @@ path.write_text(text)
 # replace executable overlays and call FlushCache before running the new code.
 # Compare only active instruction ranges at that safe point; unchanged blocks
 # keep their compiled functions and lookup entries.
-edit('Source/ee/EeExecutor.h', '#include <optional>', '#include <optional>\n#include <unordered_map>')
 edit('Source/ee/EeExecutor.h', '\tvoid Reset() override;', '''#ifdef __EMSCRIPTEN__
  void SyncInstructionCache();
 #endif
 \tvoid Reset() override;''')
 edit('Source/ee/EeExecutor.h', '\tCachedBlockMap m_cachedBlocks;', '''\tCachedBlockMap m_cachedBlocks;
 #ifdef __EMSCRIPTEN__
- std::unordered_map<uint32, uint128> m_instructionHashes;
+ struct InstructionPage {
+  uint128 hash;
+  std::set<uint32> entries;
+ };
+ std::map<uint32, uint128> m_instructionHashes;
+ std::map<uint32, InstructionPage> m_instructionPages;
 #endif''')
 edit('Source/ee/EeExecutor.cpp', '\tm_cachedBlocks.clear();', '''\tm_cachedBlocks.clear();
 #ifdef __EMSCRIPTEN__
  m_instructionHashes.clear();
+ m_instructionPages.clear();
 #endif''')
 edit('Source/ee/EeExecutor.cpp', '\tmemcpy(&hash, &xxHash, sizeof(xxHash));', '''\tmemcpy(&hash, &xxHash, sizeof(xxHash));
 #ifdef __EMSCRIPTEN__
- if(end < PS2::EE_RAM_SIZE) m_instructionHashes[start] = hash;
+ if(end < PS2::EE_RAM_SIZE) {
+  m_instructionHashes[start] = hash;
+  for(uint32 page = start & ~0xFFF; page <= (end & ~0xFFF); page += 0x1000) {
+   auto found = m_instructionPages.find(page);
+   if(found == m_instructionPages.end()) {
+    InstructionPage entry;
+    const auto actual = XXH3_128bits(m_ram + page, 0x1000);
+    memcpy(&entry.hash, &actual, sizeof(actual));
+    found = m_instructionPages.emplace(page, std::move(entry)).first;
+   }
+   found->second.entries.insert(start);
+  }
+ }
+#endif''')
+edit('Source/ee/EeExecutor.cpp',
+     '\tCGenericMipsExecutor::ClearActiveBlocksInRange(start, end, executing);',
+     '\tCGenericMipsExecutor::ClearActiveBlocksInRange(start, end, executing);' + '''
+#ifdef __EMSCRIPTEN__
+ const uint32 first = start > MAX_BLOCK_SIZE ? start - MAX_BLOCK_SIZE : 0;
+ for(auto it = m_instructionHashes.lower_bound(first); it != m_instructionHashes.end() && it->first <= end;)
+ {
+  if(!HasBlockAt(it->first)) it = m_instructionHashes.erase(it);
+  else ++it;
+ }
+ const uint32 last = std::min<uint32>(PS2::EE_RAM_SIZE - 1, end + MAX_BLOCK_SIZE);
+ for(auto it = m_instructionPages.lower_bound(first & ~0xFFF); it != m_instructionPages.end() && it->first <= last;)
+ {
+  auto& entries = it->second.entries;
+  for(auto entry = entries.begin(); entry != entries.end();)
+  {
+   if(!HasBlockAt(*entry)) entry = entries.erase(entry);
+   else ++entry;
+  }
+  if(entries.empty()) it = m_instructionPages.erase(it);
+  else ++it;
+ }
 #endif''')
 with (root / 'Source/ee/EeExecutor.cpp').open('a') as stream:
     stream.write('''
@@ -91,16 +131,27 @@ with (root / 'Source/ee/EeExecutor.cpp').open('a') as stream:
 void CEeExecutor::SyncInstructionCache()
 {
  std::vector<std::pair<uint32, uint32>> changed;
- for(const auto& block : m_blocks)
+ // Most flushes only write back data. Hash each compiled code page once,
+ // then inspect instructions only on pages whose bytes changed.
+ for(auto& pair : m_instructionPages)
  {
-  const auto start = block->GetBeginAddress(), end = block->GetEndAddress();
-  if(end >= PS2::EE_RAM_SIZE) continue;
-  const auto found = m_instructionHashes.find(start);
-  const auto actual = XXH3_128bits(m_ram + start, end - start + 4);
+  auto& page = pair.second;
+  const auto actual = XXH3_128bits(m_ram + pair.first, 0x1000);
   uint128 hash;
   memcpy(&hash, &actual, sizeof(actual));
-  if(found == m_instructionHashes.end() || !(found->second == hash))
-   changed.emplace_back(start, end + 4);
+  if(page.hash == hash) continue;
+  page.hash = hash;
+  for(const auto start : page.entries)
+  {
+   const auto* block = FindBlockStartingAt(start);
+   if(block->IsEmpty()) continue;
+   const auto end = block->GetEndAddress();
+   const auto found = m_instructionHashes.find(start);
+   const auto actual = XXH3_128bits(m_ram + start, end - start + 4);
+   memcpy(&hash, &actual, sizeof(actual));
+   if(found == m_instructionHashes.end() || !(found->second == hash))
+    changed.emplace_back(start, end + 4);
+  }
  }
  // Merge overlaps before unlinking, including blocks spanning a changed range.
  std::sort(changed.begin(), changed.end());
@@ -111,12 +162,7 @@ void CEeExecutor::SyncInstructionCache()
    range.second = std::max(range.second, changed[i++].second);
   ClearActiveBlocksInRange(range.first, range.second, false);
  }
- // Inactive hashes are unnecessary; a new block always records its source.
- for(auto it = m_instructionHashes.begin(); it != m_instructionHashes.end();)
- {
-  if(!HasBlockAt(it->first)) it = m_instructionHashes.erase(it);
-  else ++it;
- }
+
 }
 #endif
 ''')

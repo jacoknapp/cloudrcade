@@ -47,18 +47,19 @@ def generate(directory, language_probe=False, code_cache_probe=False):
         i(13, 19, 19, 1)
         li(9, 0x80304000); emit(19 << 21 | 9 << 16 | 19 << 11 | 0x25)
     if code_cache_probe:
-        # Compile two overlapping entry points, then replace their instructions.
+        # Compile overlapping entry points spanning a4KiB page boundary, then
+        # replace their instructions on the second page.
         # A browser cannot use protected RAM faults to invalidate these blocks.
-        li(25, 0x101000)
-        for target in [0x101000, 0x101004]:
+        li(25, 0x100ffc)
+        for target in [0x100ffc, 0x101000]:
             emit(3 << 26 | target >> 2); emit(0)
         li(9, 0x24020055); i(43, 25, 9, 4)
         li(4, 2); li(3, 0x64); emit(0x0c)  # FlushCache(2)
-        emit(3 << 26 | 0x101000 >> 2); emit(0)
+        emit(3 << 26 | 0x100ffc >> 2); emit(0)
         i(14, 2, 20, 0x55)  # Remember a stale word replacement.
         li(9, 0x66); i(40, 25, 9, 4)  # Replace just the immediate's low byte.
         li(4, 0); li(3, 0x64); emit(0x0c)  # FlushCache(0)
-        emit(3 << 26 | 0x101004 >> 2); emit(0)
+        emit(3 << 26 | 0x101000 >> 2); emit(0)
         branch(4, 20, 0, 'code_cache_color')
         li(2, 0x11)  # Failure red; success red is0x66 from the new code.
         label('code_cache_color')
@@ -87,7 +88,7 @@ def generate(directory, language_probe=False, code_cache_probe=False):
     packet += b''.join(struct.pack('<QQ', value, register) for value, register in registers)
     if code_cache_probe:
         function = struct.pack('<4I', 0, 0x24020011, 0x03e00008, 0)
-        code = code.ljust(0x1000, b'\0') + function
+        code = code.ljust(0xffc, b'\0') + function
     payload = code.ljust(0x2000, b'\0') + packet
     ident = b'\x7fELF\x01\x01\x01' + bytes(9)
     header = ident + struct.pack('<HHIIIIIHHHHHH', 2, 8, 1, 0x100000, 52, 0, 0x20924001, 52, 32, 1, 0, 0, 0)

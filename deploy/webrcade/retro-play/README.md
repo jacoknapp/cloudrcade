@@ -26,8 +26,9 @@ Compatibility, rendering and speed remain experimental. Homebrew tests do not
 establish commercial compatibility or physical-phone performance.
 
 The browser CPU keeps executable overlays coherent at guest `FlushCache` calls.
-It checks the instruction bytes of active compiled blocks and invalidates changed
-ranges, including overlapping entry points, while retaining unchanged functions.
+It first checks pages containing compiled instructions, then checks blocks only
+on changed pages. It invalidates changed ranges, including overlapping entry
+points across page boundaries, while retaining unchanged functions.
 This replaces the protected-memory write detection unavailable in WebAssembly;
 without it, Kingdom Hearts could stop rendering after New Game settings while
 its emulated video counter continued advancing and disc I/O was idle.
