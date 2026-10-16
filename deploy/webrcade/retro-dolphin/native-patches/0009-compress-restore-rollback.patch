@@ -1,0 +1,199 @@
+--- a/Source/Core/Core/State.cpp
++++ b/Source/Core/Core/State.cpp
+@@ -2,6 +2,10 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+
+ #include "Core/State.h"
++#ifdef __EMSCRIPTEN__
++#include <atomic>
++#include "Core/ChunkedRollbackBuffer.h"
++#endif
+
+ #include <algorithm>
+ #include <filesystem>
+@@ -72,6 +76,23 @@
+
+ // Temporary undo state buffer
+ static Common::UniqueBuffer<u8> s_undo_load_buffer;
++#ifdef __EMSCRIPTEN__
++struct RollbackLz4
++{
++  static int Bound(int size) { return LZ4_compressBound(size); }
++  static int Compress(const char* src, char* dst, int size, int capacity)
++  { return LZ4_compress_default(src, dst, size, capacity); }
++  static int Decompress(const char* src, char* dst, int size, int capacity)
++  { return LZ4_decompress_safe(src, dst, size, capacity); }
++};
++static ChunkedRollbackBuffer<RollbackLz4> s_compressed_undo;
++static std::atomic<int> s_last_load_succeeded{0};
++extern "C" int DolphinWeb_GetLastStateLoadResult()
++{
++  return s_last_load_succeeded.load(std::memory_order_acquire);
++}
++#endif
++
+
+ // Used to estimate buffer size for the next save.
+ static u32 s_last_state_size = 0;
+@@ -853,11 +874,30 @@
+   // Ensure all data has reached the filesystem before trying to use it.
+   s_compress_and_dump_thread.WaitForCompletion();
+
++#ifdef __EMSCRIPTEN__
++  s_last_load_succeeded.store(0, std::memory_order_release);
++  s_compressed_undo.Clear();
++#endif
++
+   // Save temp buffer for undo load state
+   auto& movie = system.GetMovie();
+   if (!movie.IsJustStartingRecordingInputFromSaveState())
+   {
++#ifdef __EMSCRIPTEN__
++    if (!SaveToBuffer(system, s_undo_load_buffer))
++    {
++      // The current state is intact; never attempt a destructive load without
++      // a rollback snapshot. Still acknowledge the completed failed request.
++      s_undo_load_buffer.reset();
++      if (s_on_after_load_callback)
++        s_on_after_load_callback();
++      return;
++    }
++    if (s_compressed_undo.TryStore(s_undo_load_buffer))
++      s_undo_load_buffer.reset();
++#else
+     SaveToBuffer(system, s_undo_load_buffer);
++#endif
+     const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
+     if (movie.IsMovieActive())
+       movie.SaveRecording(dtmpath);
+@@ -911,6 +951,8 @@
+   // the completed transaction's snapshot. The browser exposes no Undo Load
+   // action; retaining this full state needlessly competes with the next save.
+   s_undo_load_buffer.reset();
++  s_compressed_undo.Clear();
++  s_last_load_succeeded.store(loaded_successfully ? 1 : 0, std::memory_order_release);
+ #endif
+
+   if (s_on_after_load_callback)
+@@ -947,6 +989,9 @@
+ {
+   s_compress_and_dump_thread.Shutdown();
+   s_undo_load_buffer.reset();
++#ifdef __EMSCRIPTEN__
++  s_compressed_undo.Clear();
++#endif
+   s_flush_unsaved_data_hook.reset();
+ }
+
+@@ -1007,6 +1052,19 @@
+     return;
+
+   Core::RunOnCPUThread(system, [&system] {
++#ifdef __EMSCRIPTEN__
++    if (!s_compressed_undo.Empty())
++    {
++      s_undo_load_buffer.reset(s_compressed_undo.RawSize());
++      if (!s_compressed_undo.Restore(s_undo_load_buffer))
++      {
++        s_undo_load_buffer.reset();
++        PanicAlertFmtT("The rollback snapshot could not be decoded");
++        return;
++      }
++      s_compressed_undo.Clear();
++    }
++#endif
+     if (s_undo_load_buffer.empty())
+     {
+       PanicAlertFmtT("There is nothing to undo!");
+--- /dev/null
++++ b/Source/Core/Core/ChunkedRollbackBuffer.h
+@@ -0,0 +1,78 @@
++// Copyright 2026 CloudRcade contributors
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++
++#include <algorithm>
++#include <cstddef>
++#include <span>
++#include <vector>
++
++namespace State
++{
++// Codec supplies Bound/Compress/Decompress with the LZ4 block contract.
++// A poorly compressible snapshot keeps the existing raw rollback path. During
++// compression, retained encoded blocks never exceed half the original snapshot.
++template <typename Codec, std::size_t BlockBytes = 4 * 1024 * 1024>
++class ChunkedRollbackBuffer
++{
++public:
++  bool TryStore(std::span<const unsigned char> raw)
++  {
++    Clear();
++    if (raw.empty())
++      return false;
++    const std::size_t budget = raw.size() / 2;
++    const int bound = Codec::Bound(static_cast<int>(std::min(BlockBytes, raw.size())));
++    if (bound <= 0)
++      return false;
++    std::vector<char> scratch(static_cast<std::size_t>(bound));
++    std::size_t stored = 0;
++    for (std::size_t offset = 0; offset < raw.size();)
++    {
++      const auto count = std::min(BlockBytes, raw.size() - offset);
++      const int encoded = Codec::Compress(reinterpret_cast<const char*>(raw.data() + offset),
++                                          scratch.data(), static_cast<int>(count), bound);
++      if (encoded <= 0 || encoded > bound || static_cast<std::size_t>(encoded) > budget - stored)
++      {
++        Clear();
++        return false;
++      }
++      m_chunks.emplace_back(scratch.data(), scratch.data() + encoded);
++      stored += static_cast<std::size_t>(encoded);
++      offset += count;
++    }
++    m_raw_size = raw.size();
++    return true;
++  }
++
++  bool Restore(std::span<unsigned char> output) const
++  {
++    if (Empty() || output.size() != m_raw_size)
++      return false;
++    std::size_t offset = 0;
++    for (const auto& chunk : m_chunks)
++    {
++      const auto count = std::min(BlockBytes, output.size() - offset);
++      const int decoded = Codec::Decompress(chunk.data(),
++          reinterpret_cast<char*>(output.data() + offset), static_cast<int>(chunk.size()),
++          static_cast<int>(count));
++      if (decoded != static_cast<int>(count))
++        return false;
++      offset += count;
++    }
++    return offset == output.size();
++  }
++
++  std::size_t RawSize() const { return m_raw_size; }
++  bool Empty() const { return m_raw_size == 0; }
++  void Clear()
++  {
++    m_chunks.clear();
++    m_raw_size = 0;
++  }
++
++private:
++  std::vector<std::vector<char>> m_chunks;
++  std::size_t m_raw_size = 0;
++};
++}  // namespace State
+--- a/Source/Core/Core/CMakeLists.txt
++++ b/Source/Core/Core/CMakeLists.txt
+@@ -934,7 +934,7 @@
+     "-sSTACK_SIZE=5242880"
+     "-sDEFAULT_PTHREAD_STACK_SIZE=5242880"
+     "-sPTHREAD_POOL_SIZE=16"
+-    "-sEXPORTED_FUNCTIONS=['_CoreInit','_SetVideoBackend','_SetCpuThread','_SetCpuCore','_SetCpuOverclock','_SetEmulationSpeed','_SetPresentationScale','_SetFastSoftwareRaster','_SetSoftwareTevHotCaseMode','_SetPpcWasmJitEnabled','_SetPpcProfileEnabled','_SetCachedInterpreterDisableMask','_GetCachedInterpreterDisableMask','_SetRendererFeatureMask','_GetRendererFeatureMask','_GetFrameRingEntryPtr','_GetFrameRingCapacity','_GetFrameRingEntrySize','_GetFrameRingHead','_GetPpcProfileStats','_BootDisc','_StopCore','_SetCorePaused','_ResetCore','_SaveCoreState','_LoadCoreState','_LoadStateFile','_SaveStateFile','_PumpHostJobs','_GetCoreState','_GetCoreStateName','_GetCoreStatus','_GetCoreTitle','_GetCoreTicksLow','_GetCoreTicksHigh','_GetCoreTicksPerSecond','_GetPPCPC','_GetLastLoadedCoreTicksLow','_GetLastLoadedCoreTicksHigh','_GetLastLoadedPPCPC','_GetLastLoadedCheckpointGeneration','_GetCPUCoreName','_AudioSampleRate','_AudioChannels','_AudioBufferFrames','_AudioBuffer','_MixAudio','_SetAudioMuted','_GetAudioStats','_GetPpcWasmBlockCompileCount','_GetPpcWasmBlockRunCount','_GetPpcWasmHelperStats','_SetWebGpuStateCacheEnabled','_SetWebGpuUboCacheEnabled','_SetWebGpuUboPackEnabled','_SetWebGpuGeometryPackEnabled','_SetWebGpuGeometryRangeEnabled','_SetWebGpuUploadArenaMiB','_SetWebGpuOwnershipTraceEnabled','_AcknowledgeWebGpuOwnershipTraceCapture','_GetWebGpuOwnershipTracePtr','_GetWebGpuOwnershipTraceCapacity','_SetWebGpuProducerProfileEnabled','_SetWebGpuDrawProfileEnabled','_SetWgpuDeepDiagnosticsEnabled','_SetWgpuIdleFifoTailElisionEnabled','_RunWebGpuDenseUboPacketSmoke','_RunWebGpuDenseUboRollbackSmoke','_GetWebGpuDenseUboSmokeError','_GetWebGpuStateCacheStats','_DolphinWeb_RecordModuleUs','_DolphinWeb_RecordInstanceUs','_DolphinWeb_RecordCacheHit','_DolphinWeb_RecordCacheMiss','_TestPpcWasmDirectCandidate','_TestDcbxLoopPattern','_TestPpcWasmDirectCandidateCompiles','_RunPpcWasmMultipleWordMemorySmoke','_RunPpcWasmSinglePrecisionArithmeticSmoke','_RunPpcWasmDoublePrecisionArithmeticSmoke','_RunPpcWasmPairedQuantizedMemorySmoke','_RunPpcWasmFloatCompareSmoke','_GetVideoStats','_RunWasmJitSmoke','_RunPpcWasmAddiSmoke','_RunPpcWasmStateAddiSmoke','_RunPpcWasmDolphinStateAddiSmoke','_RunPpcWasmIntegerBlockSmoke','_MountDisc','_Reset','_SetInputMask','_SetInputState','_RunFrame','_FrameWidth','_FrameHeight','_FrameBuffer','_SaveState','_LoadState','_GetFrame','_GetFrameSignalPtr','_GetGameId','_GetGameTitle','_GetMakerId','_GetPlatform','_GetRegion','_GetDiscNumber','_GetApploaderDate','_GetApploaderSize','_GetBootDolOffset','_GetBootDolSize','_GetFstOffset','_GetFstSize','_GetRawSize','_GetDataSize','_GetRootEntryCount','_GetRootEntryName','_GetRootEntryPath','_GetRootEntryIsDirectory','_GetRootEntryOffset','_GetRootEntrySize','_ReadDisc','_ReadDiscFile','_malloc','_free','_GetHeapStats']"
++    "-sEXPORTED_FUNCTIONS=['_CoreInit','_SetVideoBackend','_SetCpuThread','_SetCpuCore','_SetCpuOverclock','_SetEmulationSpeed','_SetPresentationScale','_SetFastSoftwareRaster','_SetSoftwareTevHotCaseMode','_SetPpcWasmJitEnabled','_SetPpcProfileEnabled','_SetCachedInterpreterDisableMask','_GetCachedInterpreterDisableMask','_SetRendererFeatureMask','_GetRendererFeatureMask','_GetFrameRingEntryPtr','_GetFrameRingCapacity','_GetFrameRingEntrySize','_GetFrameRingHead','_GetPpcProfileStats','_BootDisc','_StopCore','_SetCorePaused','_ResetCore','_SaveCoreState','_LoadCoreState','_LoadStateFile','_SaveStateFile','_PumpHostJobs','_GetCoreState','_GetCoreStateName','_GetCoreStatus','_GetCoreTitle','_GetCoreTicksLow','_GetCoreTicksHigh','_GetCoreTicksPerSecond','_GetPPCPC','_GetLastLoadedCoreTicksLow','_GetLastLoadedCoreTicksHigh','_GetLastLoadedPPCPC','_GetLastLoadedCheckpointGeneration','_GetCPUCoreName','_AudioSampleRate','_AudioChannels','_AudioBufferFrames','_AudioBuffer','_MixAudio','_SetAudioMuted','_GetAudioStats','_GetPpcWasmBlockCompileCount','_GetPpcWasmBlockRunCount','_GetPpcWasmHelperStats','_SetWebGpuStateCacheEnabled','_SetWebGpuUboCacheEnabled','_SetWebGpuUboPackEnabled','_SetWebGpuGeometryPackEnabled','_SetWebGpuGeometryRangeEnabled','_SetWebGpuUploadArenaMiB','_SetWebGpuOwnershipTraceEnabled','_AcknowledgeWebGpuOwnershipTraceCapture','_GetWebGpuOwnershipTracePtr','_GetWebGpuOwnershipTraceCapacity','_SetWebGpuProducerProfileEnabled','_SetWebGpuDrawProfileEnabled','_SetWgpuDeepDiagnosticsEnabled','_SetWgpuIdleFifoTailElisionEnabled','_RunWebGpuDenseUboPacketSmoke','_RunWebGpuDenseUboRollbackSmoke','_GetWebGpuDenseUboSmokeError','_GetWebGpuStateCacheStats','_DolphinWeb_RecordModuleUs','_DolphinWeb_RecordInstanceUs','_DolphinWeb_RecordCacheHit','_DolphinWeb_RecordCacheMiss','_TestPpcWasmDirectCandidate','_TestDcbxLoopPattern','_TestPpcWasmDirectCandidateCompiles','_RunPpcWasmMultipleWordMemorySmoke','_RunPpcWasmSinglePrecisionArithmeticSmoke','_RunPpcWasmDoublePrecisionArithmeticSmoke','_RunPpcWasmPairedQuantizedMemorySmoke','_RunPpcWasmFloatCompareSmoke','_GetVideoStats','_RunWasmJitSmoke','_RunPpcWasmAddiSmoke','_RunPpcWasmStateAddiSmoke','_RunPpcWasmDolphinStateAddiSmoke','_RunPpcWasmIntegerBlockSmoke','_MountDisc','_Reset','_SetInputMask','_SetInputState','_RunFrame','_FrameWidth','_FrameHeight','_FrameBuffer','_SaveState','_LoadState','_GetFrame','_GetFrameSignalPtr','_GetGameId','_GetGameTitle','_GetMakerId','_GetPlatform','_GetRegion','_GetDiscNumber','_GetApploaderDate','_GetApploaderSize','_GetBootDolOffset','_GetBootDolSize','_GetFstOffset','_GetFstSize','_GetRawSize','_GetDataSize','_GetRootEntryCount','_GetRootEntryName','_GetRootEntryPath','_GetRootEntryIsDirectory','_GetRootEntryOffset','_GetRootEntrySize','_ReadDisc','_ReadDiscFile','_malloc','_free','_GetHeapStats','_DolphinWeb_GetLastStateLoadResult']"
+     # WORKERFS and NODEFS are named here so they survive dead-code
+     # elimination. -lworkerfs.js / -lnodefs.js above only make the JS
+     # libraries available to the link; current Emscripten still drops a JS
