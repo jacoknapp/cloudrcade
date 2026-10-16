@@ -376,6 +376,8 @@
   }
   const pspOrigin = system === 'psp' ? safeArea('kt-psp-origin') : null;
   const psxOrigin = system === 'psx' ? safeArea('kt-psx-origin') : null;
+  const gameboy = system === 'gb' || system === 'gbc';
+  const gbOrigin = gameboy ? safeArea('kt-gb-origin') : null;
   let controllerBounds = visibleViewport();
   function alignPSPScreen(emulator) {
     if (system !== 'psp' || !emulator?.started || !emulator.canvas) return;
@@ -432,13 +434,13 @@
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
     const height = canvas?.getBoundingClientRect().height || 0;
-    // PSX has its own default portrait picture area, independent of live
+    // PSX and GB/GBC have default portrait picture areas, independent of live
     // controller positions, visibility and sizing.
-    const portraitPSX = system === 'psx' && bounds.width < bounds.height;
-    const safe = portraitPSX ? psxOrigin.getBoundingClientRect() : null;
-    const safeTop = portraitPSX ? Math.max(bounds.top, safe.top) : bounds.top;
-    const safeBottom = portraitPSX ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
-    const middle = portraitPSX ? (safeTop + Math.max(safeTop, safeBottom)) / 2 :
+    const portraitArea = bounds.width < bounds.height && (system === 'psx' || gameboy);
+    const safe = portraitArea ? (gameboy ? gbOrigin : psxOrigin).getBoundingClientRect() : null;
+    const safeTop = portraitArea ? Math.max(bounds.top, safe.top) : bounds.top;
+    const safeBottom = portraitArea ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
+    const middle = portraitArea ? (safeTop + Math.max(safeTop, safeBottom)) / 2 :
       bounds.top + (bounds.height - excludedTop) / 2;
     // Fill/zoom can leave no room to move: keep the native picture visible.
     const center = height <= bounds.height ?
@@ -572,6 +574,7 @@
   host.classList.toggle('kt-3ds', n3ds);
   host.classList.toggle('kt-gamecube', gamecube);
   host.classList.toggle('kt-psp', system === 'psp');
+  host.classList.toggle('kt-gameboy', gameboy);
   $('.kt-cbuttons').hidden = !n64;
   // Labels reflect each console, rather than the standard gamepad's ABXY names.
   if (['nes', 'gb', 'gbc', 'gba', 'snes', 'nds'].includes(system)) {

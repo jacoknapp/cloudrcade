@@ -132,6 +132,12 @@ const fixture = `
             const picture=await game.locator('canvas').boundingBox();
             assert(picture.x>=-.5 && picture.y>=-.5 && picture.x+picture.width<=viewport.width+.5 && picture.y+picture.height<=height+.5,
               core+' picture fits visible phone');
+            if(['gb','gbc'].includes(core) && viewport.width<height) {
+              const safe=await game.locator('.kt-gb-origin').boundingBox();
+              const center=Math.max(picture.height/2,Math.min(height-picture.height/2,safe.y+safe.height/2));
+              assert(Math.abs(picture.y+picture.height/2-center)<.5,core+' picture centers above raised default controls');
+              assert.equal(await game.locator('#wrcad-touch.kt-gameboy').count(),1);
+            }
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
               assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height/2))<.5,'PSX approved default picture position remains independent of DualShock controls');
@@ -199,6 +205,12 @@ const fixture = `
           assert.deepEqual(off,initial,'PSX centering above standard controls and native size remain with controls off/drawer open');
           await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
           await page.evaluate(()=>window.opaqueInset=0);
+        } else if(['gb','gbc'].includes(core)) {
+          await page.setViewportSize({width:390,height:784});await page.waitForTimeout(300);
+          const original=await game.locator('canvas').boundingBox();
+          await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();await page.waitForTimeout(300);
+          assert.deepEqual(await game.locator('canvas').boundingBox(),original,core+' hiding controls keeps upper picture placement');
+          await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
         } else if(!['nds','3ds','psp'].includes(core)) {
           await page.setViewportSize({width:390,height:784});
           const expectedCenter=async (center) => {
@@ -242,7 +254,7 @@ const fixture = `
       }));
       assert.equal(stable,0,'no repeated viewport writes while dimensions are stable');
       assert.deepEqual(errors,[]);
-      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, PSX portrait above standard controls and PSP above controls; native buffers intact');
+      console.log('PASS',engine.name(),'all 11 cores/library/native frames fit actual visible phone through rotation/browser chrome; whole-phone single-screen centering, GB/GBC and PSX portrait above default controls and PSP above controls; native buffers intact');
       await context.close();
       const desktop=await browser.newPage({viewport:{width:1440,height:900}});
       await desktop.goto('data:text/html,<html><head></head><body></body></html>');
