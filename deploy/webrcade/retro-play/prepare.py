@@ -170,7 +170,7 @@ def prepare(work, out):
         (app / 'core-info.json').write_text(json.dumps({**LOCK, 'experimental': True, 'binaryOrigin': 'cloudrcade-linux-source-build',
             'nativeInputSha256': native_key(), 'artifacts': {name: sha(artifacts / name) for name in names},
             'nativeBuild': native_lock,
-            'sourceSha256': sha(archive), 'streamChunkBytes': 2 * 1024 * 1024, 'streamCacheBytes': 16 * 1024 * 1024}, indent=2) + '\n')
+            'sourceSha256': sha(archive), 'streamChunkBytes': 512 * 1024, 'streamCacheBytes': 16 * 1024 * 1024}, indent=2) + '\n')
         shutil.rmtree(sdk)
         stage.rename(out)
     print('Prepared PS2 core: ' + str(out))
