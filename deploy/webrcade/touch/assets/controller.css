@@ -23,7 +23,7 @@ html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh);
 #wrcad-touch .kt-switch { display: grid; grid-template-columns: 20px 1fr 20px; align-items: center; width: 100%; text-align: center; }
 #wrcad-touch .kt-switch i { display: block; width: 15px; height: 15px; border-radius: 50%; background: #86909f; }
 #wrcad-touch .kt-switch[aria-checked="true"] i { background: #67e5c5; box-shadow: 0 0 10px #67e5c566; }
-#wrcad-touch .kt-gamepad-touch { width: 100%; margin-top: 8px; }
+#wrcad-touch .kt-gamepad-touch { width: 100%; }
 #wrcad-touch .kt-mute { margin-top: 8px; }
 #wrcad-touch .kt-close { width: 100%; margin-top: 12px; }
 #wrcad-touch .kt-edit { width: 100%; margin-top: 8px; }

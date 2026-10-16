@@ -89,6 +89,28 @@ const fixture = `
     assert.equal(await page.evaluate(()=>pauseCalls),0,label+' presentation does not pause');
    };
    for(const core of cores){
+    // One actual button exists with no physical controller too, saves the
+    // existing normal preference and survives reload in either state.
+    await page.goto('http://gamepad.test/play/app/'+core+'/');
+    await page.locator('.kt-pad').waitFor({state:'visible'});await page.locator('.kt-tab').tap();
+    assert.equal(await page.locator('.kt-toggle,.kt-gamepad-touch').count(),1,'one touch controls button in the drawer');
+    const controls=page.getByRole('button',{name:'Touch controls: On',exact:true});
+    assert.equal(await controls.getAttribute('aria-pressed'),'true');
+    assert.equal(await controls.getAttribute('role'),null,'native button semantics replace the old switch');
+    const overrideBefore=await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.gamepad-touch.v1'));
+    await controls.tap();
+    assert.equal(await page.getByRole('button',{name:'Touch controls: Off',exact:true}).getAttribute('aria-pressed'),'false');
+    assert.deepEqual(await page.evaluate(()=>cloudWrites),[{enabled:false}],'normal Off uses existing cloud preference');
+    await page.locator('.kt-close').tap();assert.equal(await page.locator('.kt-pad').isVisible(),false);
+    assert(await page.locator('.kt-tab').isVisible(),'tab remains available with normal controls off');
+    await page.reload();await page.locator('.kt-tab').waitFor({state:'visible'});await page.locator('.kt-tab').tap();
+    await page.getByRole('button',{name:'Touch controls: Off',exact:true}).tap();
+    assert.deepEqual(await page.evaluate(()=>cloudWrites),[{enabled:true}],'normal On uses existing cloud preference');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.gamepad-touch.v1')),overrideBefore,'normal choice leaves connected-pad override untouched');
+    await page.locator('.kt-close').tap();await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.reload();await page.locator('.kt-pad').waitFor({state:'visible'});await page.locator('.kt-tab').tap();
+    assert.equal(await page.getByRole('button',{name:'Touch controls: On',exact:true}).getAttribute('aria-pressed'),'true','normal On persists across reload');
+    await page.locator('.kt-close').tap();
     await page.goto('http://gamepad.test/play/app/'+core+'/?connected');
     await centered(core+' already connected');
     assert.equal(await page.locator('.kt-gamepad-touch').getAttribute('aria-pressed'),'false');
@@ -96,7 +118,8 @@ const fixture = `
      await page.setViewportSize(viewport);await page.waitForTimeout(180);await centered(core+' rotation');
     }
     await page.locator('.kt-tab').tap();
-    assert.equal(await page.locator('.kt-toggle').isVisible(),false,'one controls toggle while connected');
+    assert.equal(await page.locator('.kt-toggle,.kt-gamepad-touch').count(),1,'same single controls button while connected');
+    assert(await page.locator('.kt-toggle').isVisible(),'touch controls button remains available with a gamepad');
     await page.getByRole('button',{name:'Touch controls: Off',exact:true}).tap();
     await page.locator('.kt-close').tap();await page.locator('.kt-pad').waitFor({state:'visible'});
     const normal=await page.locator('canvas').boundingBox();
@@ -105,7 +128,7 @@ const fixture = `
     const customButton=await page.locator('.kt-actions [data-cid="4"]').boundingBox();
     if(['gb','gbc','psx','psp','nds','3ds','ps2','gamecube'].includes(core))
       assert(normal.y+normal.height/2<420,core+' normal mobile position restored');
-    assert.equal(await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.enabled.v1')),null,'no-pad preference untouched');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.enabled.v1')),'true','no-pad preference untouched');
     await page.reload();await page.locator('.kt-pad').waitFor({state:'visible'});
     const restored=await page.locator('canvas').boundingBox();assert(Math.abs(restored.y-normal.y)<.6,core+' override survives reload');
     await page.locator('.kt-tab').tap();await page.getByRole('button',{name:'Touch controls: On',exact:true}).tap();await page.locator('.kt-close').tap();await centered(core+' off button');
@@ -131,7 +154,7 @@ const fixture = `
     await page.evaluate(()=>setPads([],false));await page.locator('.kt-pad').waitFor({state:'visible'});
     await page.evaluate(()=>setPads([0],false));await centered(core+' polling fallback');
     assert.deepEqual(await page.evaluate(()=>cloudWrites),[],'automatic presentation/override never changes cloud settings');
-    console.log('PASS',engine.name(),core,'connect/rotate/override/reload/multiple/disconnect/held-input/poll');
+    console.log('PASS',engine.name(),core,'normal-button/off/on/cloud/persistence + connect/rotate/override/reload/multiple/disconnect/held-input/poll');
    }
    // Connected On temporarily overrides a normal Controls-off preference.
    // Last disconnect must release a held touch even though gamepadMode stays off.
@@ -162,6 +185,29 @@ const fixture = `
     const after=await page.locator('canvas').boundingBox();assert(Math.abs(after.y+after.height/2-422)<.6,core+' applies deferred centered mode');
     assert.equal(await page.evaluate(()=>pauseCalls),2,'only editor pause/resume occurs');
    }
+   // Clicking the displayed state while ending an edit honors that target,
+   // even when deferred hotplug changes which preference owns the button.
+   for(const core of ['gb','ps2','gamecube']){
+    await page.evaluate(()=>{localStorage.setItem('gamepad-fixture.touch.enabled.v1','true');localStorage.removeItem('gamepad-fixture.touch.gamepad-touch.v1')});
+    await page.goto('http://gamepad.test/play/app/'+core+'/');await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.locator('.kt-tab').tap();await page.locator('.kt-edit').tap();
+    await page.evaluate(()=>setPads([0]));
+    assert.equal(await page.locator('.kt-toggle').getAttribute('aria-pressed'),'true','edit still displays the original On state');
+    await page.locator('.kt-toggle').evaluate(button=>button.click());
+    assert.equal(await page.locator('.kt-toggle').getAttribute('aria-pressed'),'false','deferred connect click reaches requested Off');
+    assert.equal(await page.locator('.kt-editor').isVisible(),false,'button cancels edit transaction');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.enabled.v1')),'true','connected click preserves normal preference');
+    // Turn connected controls back on, then disconnect while editing. Off must
+    // apply to the normal preference after the deferred disconnect is reconciled.
+    await page.locator('.kt-toggle').evaluate(button=>button.click());await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.locator('.kt-tab').tap();await page.locator('.kt-edit').tap();await page.evaluate(()=>setPads([]));
+    assert.equal(await page.locator('.kt-toggle').getAttribute('aria-pressed'),'true');
+    await page.locator('.kt-toggle').evaluate(button=>button.click());
+    assert.equal(await page.locator('.kt-toggle').getAttribute('aria-pressed'),'false','deferred disconnect click reaches requested Off');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('gamepad-fixture.touch.enabled.v1')),'false');
+    assert.equal(await page.locator('.kt-editor').isVisible(),false);
+   }
+   await page.evaluate(()=>localStorage.setItem('gamepad-fixture.touch.gamepad-touch.v1','false'));
    // DS/3DS also center nonvertical/book/landscape views within an ancestor
    // that exposes only part of an oversized native iframe.
    for(const core of ['nds','3ds']){

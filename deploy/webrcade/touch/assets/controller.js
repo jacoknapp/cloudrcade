@@ -115,8 +115,7 @@
       <button class="kt-tab" aria-label="Touch controller settings" aria-expanded="false" aria-controls="kt-drawer">‹</button>
       <section id="kt-drawer" aria-label="Touch controller settings" hidden>
         <strong>Touch controller</strong>
-        <button class="kt-toggle kt-switch" role="switch" aria-checked="true"><i></i><span>Controls on</span></button>
-        <button class="kt-gamepad-touch" aria-pressed="false" hidden>Touch controls: Off</button>
+        <button class="kt-toggle kt-gamepad-touch" aria-pressed="true">Touch controls: On</button>
         <button class="kt-mute kt-switch" role="switch" aria-checked="false"><i></i><span>Mute audio</span></button>
         <button class="kt-edit" disabled>Edit layout</button>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
@@ -776,13 +775,8 @@
     // PS2/GameCube own their canvas geometry and consume this class. Refit on
     // transitions even if the game is paused and has no animation frame.
     if (presentationChanged && (system === 'ps2' || gamecube)) window.app?.emulator?.updateScreenSize?.();
-    const gamepadToggle = $('.kt-gamepad-touch');
-    gamepadToggle.hidden = !presentedGamepadConnected;
-    toggle.hidden = presentedGamepadConnected;
-    gamepadToggle.setAttribute('aria-pressed', String(!gamepadMode()));
-    gamepadToggle.textContent = `Touch controls: ${gamepadMode() ? 'Off' : 'On'}`;
-    toggle.setAttribute('aria-checked', String(enabled));
-    toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
+    toggle.setAttribute('aria-pressed', String(effectiveEnabled));
+    toggle.textContent = `Touch controls: ${effectiveEnabled ? 'On' : 'Off'}`;
     const wasHidden = pad.hidden;
     pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!effectiveEnabled || !gameReady));
     $('.kt-editor').hidden = !editing || drawerOpen;
@@ -806,16 +800,21 @@
     if (gamecube) window.WrcadGameCube?.menuOpen(open);
     if (system === 'ps2') window.WrcadPS2?.menuOpen(open);
   }
-  $('.kt-gamepad-touch').addEventListener('click', () => {
-    gamepadTouch = !gamepadTouch;
-    try { localStorage.setItem(GAMEPAD_TOUCH_KEY, String(gamepadTouch)); } catch (_) {}
-    updateGamepadPresentation(); draw();
-  });
   toggle.addEventListener('click', () => {
+    // Keep the target the user saw even if ending an edit applies deferred
+    // hotplug state and switches which preference owns the button.
+    const desiredEnabled = !touchEnabled();
     if (editing) finishEdit(false);
-    clear(); enabled = !enabled;
-    try { localStorage.setItem(KEY, String(enabled)); } catch (_) { /* Optional persistence. */ }
-    saveControls({enabled});
+    clear();
+    if (presentedGamepadConnected) {
+      gamepadTouch = desiredEnabled;
+      try { localStorage.setItem(GAMEPAD_TOUCH_KEY, String(gamepadTouch)); } catch (_) {}
+      updateGamepadPresentation();
+    } else {
+      enabled = desiredEnabled;
+      try { localStorage.setItem(KEY, String(enabled)); } catch (_) { /* Optional persistence. */ }
+      saveControls({enabled});
+    }
     draw();
   });
   tab.addEventListener('click', () => {
