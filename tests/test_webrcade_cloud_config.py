@@ -24,6 +24,7 @@ def run(env,action='status',headers=None,session=None):
  result=subprocess.run(shlex.split(os.getenv('WEBRCADE_PHP','php')),input=code,text=True,capture_output=True,check=True)
  lines=result.stdout.strip().splitlines();return json.loads(lines[0]),json.loads(lines[-1])
 def main():
+ body,state=run(BASE,'cancel',{'HTTP_X_CSRF_TOKEN':'expired'});assert state['status']==403 and body['code']=='csrf_invalid' and not state['calls']
  body,state=run({});assert body['config']['enabled'] is False and not state['calls']
  body,state=run({'WEBRCADE_PUBLIC_URL':BASE['WEBRCADE_PUBLIC_URL']},'login');assert state['status']==403 and body['code']=='nextcloud_disabled' and not state['calls']
  for env in [{**BASE,'NEXTCLOUD_ENABLED':'false'},{**BASE,'NEXTCLOUD_URL':'http://unsafe.example.com'},{**BASE,'NEXTCLOUD_URL':'https://user:password@cloud.example.com'},{**BASE,'NEXTCLOUD_URL':'https://cloud.example.com/?extra=1'}]:

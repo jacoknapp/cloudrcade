@@ -70,7 +70,7 @@ if ($action === 'status' && $method === 'GET') {
         'pending' => isset($_SESSION['pending']) && $_SESSION['pending']['expires'] > time()]);
 }
 if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== ORIGIN) reply(403, ['error' => 'Origin rejected.']);
-if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) reply(403, ['error' => 'Refresh the page and try again.']);
+if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) reply(403, ['code' => 'csrf_invalid', 'error' => 'Refresh the page and try again.']);
 if ($action === 'cancel' && $method === 'POST') {
     unset($_SESSION['pending']);
     reply(200, ['cancelled' => true]);

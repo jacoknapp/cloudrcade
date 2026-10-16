@@ -8,7 +8,8 @@ export class Ps2Saves {
   const sdk=await import('./save-sdk.mjs');
   if(!globalThis.WrcadCloud)throw new Error('CloudRcade save bridge did not load.');
   WrcadCloud.install(sdk);await sdk.settings.load();
-  this.manager=new sdk.SaveManager({getTitle:()=>this.props.title||'PlayStation 2',getProps:()=>this.props},text=>this.report(text));
+  this.manager=new sdk.SaveManager({getTitle:()=>this.props.title||'PlayStation 2',getProps:()=>this.props},text=>{this.lastCloudError=text;this.report(text);});
+  this.manager.cloudRequestTimeoutMs=60000;
   this.manager.createZip=sdk.createSaveZip;this.manager.getFiles=blob=>sdk.readSaveZip(blob);
   this.manager.getSaveMetadata=blob=>sdk.readSaveZip(blob,true);
   this.prefix=`ps2/${id}/`;this.states=this.prefix+'states/'+this.format+'/';
@@ -26,9 +27,10 @@ export class Ps2Saves {
   }};walk(ROOT,'');return result;
  }
  async store(path,files,label){
+  this.lastCloudError='';
   this.report(`Saving ${label}…`,true);
   try{const ok=await this.manager.save(path,files)!==false;
-   this.report(ok?(await this.manager.isCloudEnabled()?`${label} uploaded to cloud.`:`${label} saved locally.`):`${label} saved locally; cloud upload needs attention.`);
+   this.report(ok?(await this.manager.isCloudEnabled()?`${label} uploaded to cloud.`:`${label} saved locally.`):`${label} saved locally; ${this.lastCloudError||'cloud upload needs attention.'}`);
    return ok;
   }catch(error){this.report(error.message);throw error;}
  }
