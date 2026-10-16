@@ -7,6 +7,13 @@
   const gamecubePage = location.pathname.startsWith('/experimental/gamecube/') || document.documentElement.dataset.cloudrcadeCore === 'gamecube';
   if (!touchDevice) return;
   const KEY = prefix + '.touch.enabled.v1';
+  // Device-local: a phone with a gamepad may still need the touch layout.
+  // Keep this separate from the existing synced controls preference.
+  const GAMEPAD_TOUCH_KEY = prefix + '.touch.gamepad-touch.v1';
+  let gamepadTouch = false, gamepadConnected = false, presentedGamepadConnected = false, presentedGamepadMode = false;
+  try { gamepadTouch = localStorage.getItem(GAMEPAD_TOUCH_KEY) === 'true'; } catch (_) {}
+  const gamepadMode = () => presentedGamepadMode;
+  const touchEnabled = () => presentedGamepadConnected ? !gamepadMode() : enabled;
   const MUTE_KEY = prefix + '.touch.muted.v1';
   const DS_VIEW_KEY = prefix + '.touch.ds-view.v1';
   const parseDSView = value => /^[0-5]$/.test(String(value)) ? Number(value) : null;
@@ -109,6 +116,7 @@
       <section id="kt-drawer" aria-label="Touch controller settings" hidden>
         <strong>Touch controller</strong>
         <button class="kt-toggle kt-switch" role="switch" aria-checked="true"><i></i><span>Controls on</span></button>
+        <button class="kt-gamepad-touch" aria-pressed="false" hidden>Touch controls: Off</button>
         <button class="kt-mute kt-switch" role="switch" aria-checked="false"><i></i><span>Mute audio</span></button>
         <button class="kt-edit" disabled>Edit layout</button>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
@@ -229,7 +237,7 @@
   function alignDSScreens(emulator) {
     const canvas = emulator.canvas;
     if (!canvas) return;
-    if (emulator.bookMode || ![0, 1].includes(emulator.getScreenLayout())) {
+    if (!gamepadMode() && (emulator.bookMode || ![0, 1].includes(emulator.getScreenLayout()))) {
       // The core's resize has restored its normal size; restore CSS centering
       // as well when leaving either of the vertically stacked views.
       canvas.style.removeProperty('top');
@@ -238,7 +246,13 @@
     }
     // Fit the native screen ratio into the entire safe area. Starting from the
     // core's already-inset canvas would keep its margins and prevent enlargement.
-    const bounds = dsOrigin.getBoundingClientRect();
+    const bounds = gamepadScreenBounds(dsOrigin);
+    if (emulator.bookMode) {
+      // Book mode owns its rotated native size/transform; move its origin only.
+      canvas.style.setProperty('left', `${bounds.left + bounds.width / 2}px`, 'important');
+      canvas.style.setProperty('top', `${bounds.top + bounds.height / 2}px`, 'important');
+      return;
+    }
     const ratio = emulator.getDefaultAspectRatio();
     if (!bounds.width || !bounds.height || !Number.isFinite(ratio) || ratio <= 0) return;
     const width = Math.min(bounds.width, bounds.height * ratio), height = width / ratio;
@@ -247,7 +261,7 @@
     canvas.style.setProperty('width', `${width}px`, 'important');
     canvas.style.setProperty('height', `${height}px`, 'important');
     canvas.style.setProperty('left', `${bounds.left + bounds.width / 2}px`, 'important');
-    canvas.style.setProperty('top', `${bounds.top + height / 2}px`, 'important');
+    canvas.style.setProperty('top', `${bounds.top + (gamepadMode() ? bounds.height / 2 : height / 2)}px`, 'important');
   }
   const n3dsOrigin = system === '3ds' ? safeArea('kt-3ds-origin') : null;
   // The 3DS arrangement is the app's own setting (emulator.getViews/setView);
@@ -275,8 +289,8 @@
     // The app has just restored the aspect-preserving size. Landscape keeps it;
     // only portrait's explicit positioning needs clearing on every resize.
     for (const name of ['left', 'top']) canvas.style.removeProperty(name);
-    if (innerWidth > innerHeight) return;
-    const bounds = n3dsOrigin.getBoundingClientRect();
+    if (innerWidth > innerHeight && !gamepadMode()) return;
+    const bounds = gamepadScreenBounds(n3dsOrigin);
     const ratio = emulator.getDefaultAspectRatio();
     if (!bounds.width || !bounds.height || !Number.isFinite(ratio) || ratio <= 0) return;
     const width = Math.min(bounds.width, bounds.height * ratio), height = width / ratio;
@@ -285,7 +299,7 @@
     canvas.style.setProperty('width', `${width}px`, 'important');
     canvas.style.setProperty('height', `${height}px`, 'important');
     canvas.style.setProperty('left', `${bounds.left + bounds.width / 2}px`, 'important');
-    canvas.style.setProperty('top', `${bounds.top + height / 2}px`, 'important');
+    canvas.style.setProperty('top', `${bounds.top + (gamepadMode() ? bounds.height / 2 : height / 2)}px`, 'important');
   }
   function applyDSView(emulator, value) {
     if (system !== 'nds' || !emulator?.started || value === null) return;
@@ -415,6 +429,14 @@
     } catch (_) { /* Cross-origin ancestors cannot supply their bounds. */ }
     return {left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
   }
+  function gamepadScreenBounds(origin) {
+    const safe = origin.getBoundingClientRect();
+    if (!gamepadMode()) return safe;
+    const visible = visibleViewport();
+    const left = Math.max(safe.left, visible.left), top = Math.max(safe.top, visible.top);
+    const right = Math.min(safe.right, visible.right), bottom = Math.min(safe.bottom, visible.bottom);
+    return {left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top)};
+  }
   const pspOrigin = system === 'psp' ? safeArea('kt-psp-origin') : null;
   const psxOrigin = system === 'psx' ? safeArea('kt-psx-origin') : null;
   const gameboy = system === 'gb' || system === 'gbc';
@@ -426,7 +448,7 @@
     if (!bounds.width || !bounds.height) return;
     // Portrait touch controls have their own lower area. Center the picture in
     // the remaining safe space, even when pause/settings hide the controls.
-    if (enabled && bounds.width < bounds.height) {
+    if (touchEnabled() && bounds.width < bounds.height) {
       const safe = pspOrigin.getBoundingClientRect(), controls = getComputedStyle(pad);
       bounds.left = Math.max(bounds.left, safe.left);
       bounds.right = Math.min(bounds.right, safe.right);
@@ -477,7 +499,7 @@
     const height = canvas?.getBoundingClientRect().height || 0;
     // PSX and GB/GBC have default portrait picture areas, independent of live
     // controller positions, visibility and sizing.
-    const portraitArea = bounds.width < bounds.height && (system === 'psx' || gameboy);
+    const portraitArea = !gamepadMode() && bounds.width < bounds.height && (system === 'psx' || gameboy);
     const safe = portraitArea ? (gameboy ? gbOrigin : psxOrigin).getBoundingClientRect() : null;
     const safeTop = portraitArea ? Math.max(bounds.top, safe.top) : bounds.top;
     const safeBottom = portraitArea ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
@@ -578,7 +600,7 @@
     host.classList.remove('kt-editing');
     $('.kt-editor').hidden = true;
     if (editEmulator === window.app?.emulator && !document.hidden && !window.app.isPauseScreen()) editEmulator.pause(false);
-    editEmulator = null; layoutStamp = ''; clear(); draw();
+    editEmulator = null; layoutStamp = ''; clear(); updateGamepadPresentation(); draw();
     refreshPreferences();
   }
   $('.kt-edit').addEventListener('click', () => {
@@ -748,10 +770,21 @@
     fitVisibleViewport();
     if (system === 'psp') alignPSPScreen(window.app?.emulator);
     else alignCenteredScreen(window.app?.emulator);
+    const effectiveEnabled = touchEnabled();
+    const presentationChanged = host.classList.contains('kt-enabled') !== effectiveEnabled;
+    host.classList.toggle('kt-enabled', effectiveEnabled);
+    // PS2/GameCube own their canvas geometry and consume this class. Refit on
+    // transitions even if the game is paused and has no animation frame.
+    if (presentationChanged && (system === 'ps2' || gamecube)) window.app?.emulator?.updateScreenSize?.();
+    const gamepadToggle = $('.kt-gamepad-touch');
+    gamepadToggle.hidden = !presentedGamepadConnected;
+    toggle.hidden = presentedGamepadConnected;
+    gamepadToggle.setAttribute('aria-pressed', String(!gamepadMode()));
+    gamepadToggle.textContent = `Touch controls: ${gamepadMode() ? 'Off' : 'On'}`;
     toggle.setAttribute('aria-checked', String(enabled));
     toggle.querySelector('span').textContent = enabled ? 'Controls on' : 'Controls off';
     const wasHidden = pad.hidden;
-    pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!enabled || !gameReady));
+    pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!effectiveEnabled || !gameReady));
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
@@ -764,7 +797,6 @@
     const tabRect = tab.getBoundingClientRect();
     const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
-    host.classList.toggle('kt-enabled', enabled);
   }
   function setDrawer(open) {
     clear(); drawerOpen = open; drawer.hidden = !open;
@@ -774,6 +806,11 @@
     if (gamecube) window.WrcadGameCube?.menuOpen(open);
     if (system === 'ps2') window.WrcadPS2?.menuOpen(open);
   }
+  $('.kt-gamepad-touch').addEventListener('click', () => {
+    gamepadTouch = !gamepadTouch;
+    try { localStorage.setItem(GAMEPAD_TOUCH_KEY, String(gamepadTouch)); } catch (_) {}
+    updateGamepadPresentation(); draw();
+  });
   toggle.addEventListener('click', () => {
     if (editing) finishEdit(false);
     clear(); enabled = !enabled;
@@ -897,7 +934,7 @@
       trackTouch(e);
       return;
     }
-    if (!enabled || !gameReady || drawerOpen) return;
+    if (!touchEnabled() || !gameReady || drawerOpen) return;
     const target = hitTarget(e);
     if (!target) return;
     e.preventDefault(); pad.setPointerCapture(e.pointerId);
@@ -1031,6 +1068,10 @@
   }
   window.addEventListener('wrcad:controls-loaded', refreshPreferences);
   window.addEventListener('storage', e => {
+    if (e.key === GAMEPAD_TOUCH_KEY || e.key === null) {
+      try { gamepadTouch = localStorage.getItem(GAMEPAD_TOUCH_KEY) === 'true'; } catch (_) {}
+      updateGamepadPresentation(); draw();
+    }
     if ([KEY, MUTE_KEY, DS_VIEW_KEY, N3DS_VIEW_KEY, DOCK_SIDE_KEY, TRANSLUCENCE_KEY, LAYOUT_KEY].includes(e.key)) refreshPreferences();
   });
   document.addEventListener('fullscreenchange', () => {
@@ -1039,7 +1080,38 @@
     if (!target || !['CANVAS','VIDEO','IFRAME'].includes(target.tagName)) (target || document.body).append(host);
     layoutStamp = ''; draw();
   });
+  function updateGamepadPresentation() {
+    // Freeze connection and mode together while editing: live hotplug must not
+    // move the picture or cancel an unsaved drag. Save/Cancel applies it below.
+    if (editing) return;
+    const mode = gamepadConnected && !gamepadTouch;
+    const changed = mode !== presentedGamepadMode || gamepadConnected !== presentedGamepadConnected;
+    presentedGamepadConnected = gamepadConnected; presentedGamepadMode = mode;
+    if (changed) {
+      // Disconnect can hide touch even when mode stays false: connected On may
+      // have temporarily overridden a normal Controls-off preference.
+      clear(); layoutStamp = ''; draw();
+      const emulator = window.app?.emulator;
+      if (emulator?.started) emulator.updateScreenSize?.();
+    }
+  }
+  function pollGamepads() {
+    try {
+      const pads = navigator.getGamepads?.();
+      if (pads) gamepadConnected = Array.from(pads).some(pad => pad && pad.connected !== false);
+    } catch (_) { /* Unavailable API: retain the last hotplug event. */ }
+    updateGamepadPresentation();
+  }
+  const eventGamepads = new Set();
+  window.addEventListener('gamepadconnected', event => {
+    eventGamepads.add(event.gamepad.index); gamepadConnected = true; pollGamepads();
+  });
+  window.addEventListener('gamepaddisconnected', event => {
+    eventGamepads.delete(event.gamepad.index); gamepadConnected = eventGamepads.size > 0; pollGamepads();
+  });
+  window.addEventListener('pageshow', pollGamepads);
   function attach() {
+    pollGamepads();
     const emulator = window.app?.emulator;
     if (system === 'psp' && emulator?.started && pspEmulator !== emulator) {
       pspEmulator = emulator;
@@ -1135,19 +1207,19 @@
       for (const method of ['isControlDown', 'isPadButtonDown']) {
         const original = controller[method];
         controller[method] = function(cid, analogToDigital = true) {
-          const touch = !editing && enabled && gameReady && !drawerOpen && held.has(cid);
+          const touch = !editing && touchEnabled() && gameReady && !drawerOpen && held.has(cid);
           return touch || original.call(this, cid, analogToDigital);
         };
       }
       const originalAxis = controller.getAxisValue;
       controller.getAxisValue = function(index, isX) {
         const value = axes[index * 2 + (isX ? 0 : 1)] || 0;
-        return enabled && gameReady && !drawerOpen && value ? value : originalAxis.call(this, index, isX);
+        return touchEnabled() && gameReady && !drawerOpen && value ? value : originalAxis.call(this, index, isX);
       };
       for (const [method, isX, sign] of [['isAxisLeft',true,-1],['isAxisRight',true,1],['isAxisUp',false,-1],['isAxisDown',false,1]]) {
         const original = controller[method];
         controller[method] = function(index) {
-          return (enabled && gameReady && !drawerOpen && axes[index * 2 + (isX ? 0 : 1)] * sign > 0.5) || original.call(this,index);
+          return (touchEnabled() && gameReady && !drawerOpen && axes[index * 2 + (isX ? 0 : 1)] * sign > 0.5) || original.call(this,index);
         };
       }
     }
