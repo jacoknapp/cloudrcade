@@ -95,7 +95,12 @@ The shared native heap is fixed at768MiB, with matching generated PPC module
 imports and memory growth disabled. Performance details sample native allocator
 usage and heap extent only while paused; browser and GPU allocations are separate.
 WASM state-buffer growth releases the obsolete allocation before replacement;
-LZ4 save compression uses4MiB blocks to bound scratch memory. The existing
+LZ4 save compression uses4MiB blocks to bound scratch memory. During restoration,
+the temporary rollback snapshot uses independent4MiB LZ4 chunks when these take
+at most half its raw size; the raw snapshot is released before decoding the
+incoming state. Poorly compressible snapshots retain the existing raw fallback.
+A rejected state restores the prior game and reports failure; rollback buffers
+are released after the transaction. The existing
 length-prefixed decoder reads these and previous larger blocks, preserving state
 serialization and failed-load recovery.
 `stateFormatId` preserves the previous verified save-state namespace when a native

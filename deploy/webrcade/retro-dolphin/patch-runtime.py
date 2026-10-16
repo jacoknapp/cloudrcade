@@ -72,7 +72,8 @@ def patch_runtime(app, native_core_sha=None):
     },''')
     replace('    getFrame: cwrap("GetFrame", "number", []),',
             '    getFrame: cwrap("GetFrame", "number", []),\n'
-            '    getHeapStats: optionalCwrap("GetHeapStats", "number", []),')
+            '    getHeapStats: optionalCwrap("GetHeapStats", "number", []),\n'
+            '    getStateLoadResult: cwrap("DolphinWeb_GetLastStateLoadResult", "number", []),')
     replace('function framePayload({ forceCausalTelemetry = false } = {}) {',
             'let gamecubeHeapSample=null;\n'
             'function gamecubeHeapStats() {\n'
@@ -286,5 +287,6 @@ def patch_runtime(app, native_core_sha=None):
             '        }')
     replace('      return { loaded: rc === 1, rc, beforeState, afterState,',
             '      if (!payload.fsPath) { try { moduleInstance.FS.unlink(path); } catch {} }\n'
-            '      return { loaded: rc === 1, rc, beforeState, afterState,')
+            '      const loaded = rc === 1 && api.getStateLoadResult() === 1;\n'
+            '      return { loaded, error: loaded ? null : "The state could not be loaded. Resume to continue your previous game.", rc, beforeState, afterState,')
     worker.write_text(text)
