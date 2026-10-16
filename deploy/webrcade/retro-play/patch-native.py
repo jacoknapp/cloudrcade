@@ -50,6 +50,13 @@ edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sEXPORTE
      'target_link_options(Play PRIVATE "-sEXPORTED_RUNTIME_METHODS=[\'ccall\', \'FS\', \'PThread\', \'HEAPU8\']")\n'
      'target_link_options(Play PRIVATE "--post-js=${CMAKE_CURRENT_SOURCE_DIR}/CloudAudio.js")')
 (root / 'Source/ui_js/CloudAudio.js').write_text('Module.cloudAudio = () => AL.currentCtx && AL.currentCtx.audioCtx;\n')
+# OpenAL restarts a stopped source from the beginning of its remaining queue.
+# The worker proxy recycles asynchronously, so completed buffers can still be
+# queued after an underrun. Reclaim only those completed buffers before restart;
+# the newly appended PCM buffer is not processed and must remain queued.
+edit('Source/sound/SH_OpenAL/SH_OpenAL.cpp',
+     '\tif(sourceState != AL_PLAYING)\n\t{\n\t\tm_source.Play();',
+     '\tif(sourceState != AL_PLAYING)\n\t{\n\t\tRecycleBuffers();\n\t\tm_source.Play();')
 edit('Source/ui_js/CMakeLists.txt', "'_main', '_initVm',", "'_main',")
 edit('Source/ui_js/CMakeLists.txt', 'target_link_options(Play PRIVATE "-sUSE_ES6_IMPORT_META=0")', '')
 # Compile only the device WebGPU GS frontend, without an OpenGL library/context.
