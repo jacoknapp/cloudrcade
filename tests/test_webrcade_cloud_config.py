@@ -10,17 +10,17 @@ function session_write_close(){return true;}
 function session_regenerate_id($delete=false){return true;}
 function curl_init($url){$GLOBALS['calls'][]=$url;return (object)['url'=>$url];}
 function curl_setopt_array($ch,$args){if(isset($args[CURLOPT_USERAGENT]))$GLOBALS['agents'][]=$args[CURLOPT_USERAGENT];if(isset($args[CURLOPT_TIMEOUT]))$GLOBALS['timeouts'][]=['method'=>$args[CURLOPT_CUSTOMREQUEST],'seconds'=>$args[CURLOPT_TIMEOUT]];return true;}
-function curl_setopt($ch,$key,$value){return true;}
+function curl_setopt($ch,$key,$value){if($key===CURLOPT_FILE){$ch->file=$value;$GLOBALS['streams'][]=$value;}return true;}
 function curl_close($ch){}
-function curl_getinfo($ch,$key){return 200;}
-function curl_exec($ch){$server=rtrim($GLOBALS['env']['NEXTCLOUD_URL'],'/');return json_encode(['login'=>$server.'/login/v2/flow/Fake','poll'=>['endpoint'=>$server.'/login/v2/poll','token'=>'fake']]);}
-register_shutdown_function(function(){echo "\n".json_encode(['status'=>http_response_code(),'session'=>$_SESSION,'calls'=>$GLOBALS['calls'],'agents'=>$GLOBALS['agents'] ?? [],'timeouts'=>$GLOBALS['timeouts'] ?? []]);});
+function curl_getinfo($ch,$key){return $GLOBALS['upstream_status'];}
+function curl_exec($ch){$server=rtrim($GLOBALS['env']['NEXTCLOUD_URL'],'/');$body=json_encode(['login'=>$server.'/login/v2/flow/Fake','poll'=>['endpoint'=>$server.'/login/v2/poll','token'=>'fake']]);if(isset($ch->file)){fwrite($ch->file,$body);return true;}return $body;}
+register_shutdown_function(function(){echo "\n".json_encode(['status'=>http_response_code(),'session'=>$_SESSION,'calls'=>$GLOBALS['calls'],'agents'=>$GLOBALS['agents'] ?? [],'timeouts'=>$GLOBALS['timeouts'] ?? [],'streams'=>count($GLOBALS['streams'] ?? []),'open_streams'=>count(array_filter($GLOBALS['streams'] ?? [],'is_resource'))]);});
 '''
 BASE={'NEXTCLOUD_URL':'https://cloud.example.com/subdir','WEBRCADE_PUBLIC_URL':'https://arcade.example.com','NEXTCLOUD_ENABLED':'true','NEXTCLOUD_AUTO_REDIRECT':'false'}
-def run(env,action='status',headers=None,session=None,path=None):
- values={'env':env,'server':{'REQUEST_METHOD':'GET' if action=='status' else 'POST','HTTP_ORIGIN':'https://arcade.example.com','HTTP_X_CSRF_TOKEN':'test',**(headers or {})},'session':session or {'csrf':'test'},'get':{'action':action,**({'path':path} if path else {})}}
+def run(env,action='status',headers=None,session=None,path=None,upstream_status=200):
+ values={'env':env,'upstream_status':upstream_status,'server':{'REQUEST_METHOD':'GET' if action=='status' else 'POST','HTTP_ORIGIN':'https://arcade.example.com','HTTP_X_CSRF_TOKEN':'test',**(headers or {})},'session':session or {'csrf':'test'},'get':{'action':action,**({'path':path} if path else {})}}
  encoded=json.dumps(json.dumps(values))
- code=SETUP+f'$v=json_decode({encoded},true);$GLOBALS["env"]=$v["env"];$GLOBALS["calls"]=[];$_SERVER=$v["server"];$_SESSION=$v["session"];$_GET=$v["get"];\n'+SOURCE
+ code=SETUP+f'$v=json_decode({encoded},true);$GLOBALS["env"]=$v["env"];$GLOBALS["upstream_status"]=$v["upstream_status"];$GLOBALS["calls"]=[];$_SERVER=$v["server"];$_SESSION=$v["session"];$_GET=$v["get"];\n'+SOURCE
  result=subprocess.run(shlex.split(os.getenv('WEBRCADE_PHP','php')),input=code,text=True,capture_output=True,check=True)
  lines=result.stdout.strip().splitlines();return json.loads(lines[0]),json.loads(lines[-1])
 def main():
@@ -54,7 +54,12 @@ def main():
  auth={'HTTP_X_NEXTCLOUD_AUTHORIZATION':'Basic ZmFrZTpmYWtl','HTTP_X_NEXTCLOUD_USER':'fake','HTTP_X_NEXTCLOUD_SERVER':BASE['NEXTCLOUD_URL']}
  _,state=run(BASE,'file',{**auth,'REQUEST_METHOD':'PUT','HTTP_IF_NONE_MATCH':'*'},path='ps2/fixture/states/1.zip')
  assert state['status']==200 and state['timeouts']==[{'method':'MKCOL','seconds':60}]*3+[{'method':'PUT','seconds':180}]
- _,state=run(BASE,'file',{**auth,'REQUEST_METHOD':'GET'},path='ps2/fixture/states/1.zip')
+ body,state=run(BASE,'file',{**auth,'REQUEST_METHOD':'GET'},path='ps2/fixture/states/1.zip')
  assert state['timeouts']==[{'method':'GET','seconds':60}], 'reads retain the original deadline'
+ assert body['poll']['token']=='fake' and state['streams']==1 and state['open_streams']==0
+ for status in [401,403,404,507]:
+  body,state=run(BASE,'file',{**auth,'REQUEST_METHOD':'GET'},path='ps2/fixture/states/1.zip',upstream_status=status)
+  assert state['status']==status and 'error' in body and 'poll' not in body
+  assert state['streams']==1 and state['open_streams']==0, 'failed provider response closes the spool before returning an error'
  print('PASS portable disabled defaults, strict env URL/booleans, independent auto flag/manual flow, optional handoff/access hint, denied access and cross-server credential protection')
 if __name__=='__main__':main()

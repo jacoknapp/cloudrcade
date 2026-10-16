@@ -24,10 +24,10 @@ function reply(int $status, array $body): void {
     echo json_encode($body, JSON_UNESCAPED_SLASHES);
     exit;
 }
-function upstream(string $method, string $path, ?array $auth = null, ?string $body = null, array $headers = []): array {
+function upstream(string $method, string $path, ?array $auth = null, ?string $body = null, array $headers = [], $output = null): array {
     $ch = curl_init(NC . $path);
     $etag = null;
-    curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true,
+    curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => $output === null,
         // Nextcloud may scan a large state after receiving the complete body.
         CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => $method === 'PUT' ? 180 : 60,
         CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => (trim((string)getenv('NEXTCLOUD_CLIENT_NAME')) ?: cloudConfig()['appName']) . ' cloud saves',
@@ -36,6 +36,7 @@ function upstream(string $method, string $path, ?array $auth = null, ?string $bo
             if (stripos($line, 'ETag:') === 0) $etag = trim(substr($line, 5));
             return strlen($line);
         }]);
+    if ($output !== null) curl_setopt($ch, CURLOPT_FILE, $output);
     if ($auth) curl_setopt_array($ch, [CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
         CURLOPT_USERPWD => $auth['login'] . ':' . $auth['password']]);
     if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -43,8 +44,11 @@ function upstream(string $method, string $path, ?array $auth = null, ?string $bo
     $result = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
-    if ($result === false) reply(502, ['error' => 'Nextcloud could not be reached. Your local saves have been kept.']);
-    return [$code, $result, $etag];
+    if ($result === false) {
+        if (is_resource($output)) fclose($output);
+        reply(502, ['error' => 'Nextcloud could not be reached. Your local saves have been kept.']);
+    }
+    return [$code, $output ?? $result, $etag];
 }
 function davRoot(array $auth): string {
     return '/remote.php/dav/files/' . rawurlencode($auth['uid']) . '/' . rawurlencode(cloudConfig()['saveFolder']);
@@ -201,9 +205,22 @@ foreach (['HTTP_IF_MATCH' => 'If-Match', 'HTTP_IF_NONE_MATCH' => 'If-None-Match'
 }
 // Release the session lock before long file transfers / parallel slot reads.
 session_write_close();
-[$code, $result, $etag] = upstream($method, $url, $auth, $body, $headers);
+// Spool downloads before replying: cURL's growing string and PHP's response
+// buffer can exceed the worker's memory limit for a valid 64 MiB state.
+// Checking the complete upstream result first also keeps provider errors out
+// of successful save bodies. tmpfile is removed when closed/request ends.
+$output = $method === 'GET' ? tmpfile() : null;
+if ($output === false) reply(502, ['error' => 'A temporary save download could not be prepared. Your local saves have been kept.']);
+[$code, $result, $etag] = upstream($method, $url, $auth, $body, $headers, $output);
+if (is_resource($output) && ($code < 200 || $code >= 300)) fclose($output);
 checkUpstream($code);
 if ($etag) header('ETag: ' . $etag);
 http_response_code($code);
 header('Content-Type: application/octet-stream');
-if ($method !== 'HEAD') echo $result;
+if (is_resource($result)) {
+    rewind($result);
+    // fpassthru can hand the entire mapped file to PHP's output buffer.
+    // Keep each write bounded as well as the cURL download.
+    while (($chunk = fread($result, 65536)) !== false && $chunk !== '') echo $chunk;
+    fclose($result);
+} elseif ($method !== 'HEAD') echo $result;
