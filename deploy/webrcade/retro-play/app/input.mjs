@@ -20,7 +20,8 @@ export function inputState(keys,pad,touch){
  for(const [cid,name]of TOUCH)if(touch?.isControlDown(cid))mask|=1<<BUTTONS[name];
  const axes=[0,1,2,3].map(index=>{
   const value=touch?.getAxisValue(Math.floor(index/2),index%2===0)||0;
-  return Math.abs(value)>.05?value:pad?.axes[index]||0;
+  // Touch already has a radial deadzone; preserve fine movement beyond it.
+  return value!==0?value:pad?.axes[index]||0;
  });
  // Upstream browser keyboard analog assignments.
  for(const [index,negative,positive]of [[0,'KeyF','KeyH'],[1,'KeyT','KeyG'],[2,'KeyJ','KeyL'],[3,'KeyI','KeyK']])if(keys.has(negative)||keys.has(positive))axes[index]=(keys.has(positive)?1:0)-(keys.has(negative)?1:0);

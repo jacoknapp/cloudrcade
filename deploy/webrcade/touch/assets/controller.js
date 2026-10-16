@@ -889,8 +889,10 @@
       if (ax < ay * DPAD_DIAGONAL_SLOPE) return [0, Math.sign(y)];
       return [Math.sign(x), Math.sign(y)];
     }
-    if (length > 1) { x /= length; y /= length; }
-    return [x, y];
+    // Keep a stable center without jumping straight to 10% when leaving it.
+    // Rescale the remaining radial travel to the full 0..1 analog range.
+    const magnitude = (Math.min(1, length) - 0.10) / 0.90;
+    return [x / length * magnitude, y / length * magnitude];
   }
   function directionInput(e, target) {
     return {direction: target, vector: position(e, target)};
