@@ -63,7 +63,7 @@ const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process
      WrcadPS2.module.pauseVm();while(WrcadPS2.module.operationStatus()===0){if(performance.now()>end)throw Error('Native pause timeout');await delay();}
      if(WrcadPS2.module.operationStatus()!==1)throw Error('Native pause failed');
      const time=WrcadPS2.module.cloudAudio().currentTime;
-     return {frames:WrcadPS2.module.getFrames(),time,state:WrcadPS2.module.cloudAudio().state,starts:audioReplayFixture.starts.length,duplicates:audioReplayFixture.duplicates.length,last:audioReplayFixture.starts.at(-1),active:audioReplayFixture.starts.filter(x=>x.scheduled+x.duration>time).length,queuedSpan:Math.max(...audioReplayFixture.starts.map(x=>x.scheduled+x.duration))-time};
+     return {frames:WrcadPS2.module.getFrames(),video:WrcadPS2.module.getVideoFrames(),time,state:WrcadPS2.module.cloudAudio().state,starts:audioReplayFixture.starts.length,duplicates:audioReplayFixture.duplicates.length,last:audioReplayFixture.starts.at(-1),active:audioReplayFixture.starts.filter(x=>x.scheduled+x.duration>time).length,queuedSpan:Math.max(...audioReplayFixture.starts.map(x=>x.scheduled+x.duration))-time};
     });
     if(paused.active>=1&&paused.queuedSpan>0)break;
     console.log('SETUP_RETRY',JSON.stringify({trial,attempt,active:paused.active}));await vmCall('resumeVm');
@@ -72,14 +72,14 @@ const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process
    assert.equal(paused.state,'running');assert(paused.last.duration>0&&paused.last.duration<.5);
    // MAX_BUFFERS25 *4500/44100 <2.552 seconds. Let every queued chunk finish.
    await page.waitForTimeout(2850);
-   const drained=await page.evaluate(()=>({frames:WrcadPS2.module.getFrames(),time:WrcadPS2.module.cloudAudio().currentTime,state:WrcadPS2.module.cloudAudio().state,starts:audioReplayFixture.starts.length}));
-   assert.equal(drained.frames,paused.frames);assert.equal(drained.state,'running');assert(drained.time-paused.time>2.6);
+   const drained=await page.evaluate(()=>({frames:WrcadPS2.module.getFrames(),video:WrcadPS2.module.getVideoFrames(),time:WrcadPS2.module.cloudAudio().currentTime,state:WrcadPS2.module.cloudAudio().state,starts:audioReplayFixture.starts.length}));
+   assert.equal(drained.video,paused.video,'native VM VBlank stays frozen; pending GS presentation may finish');assert.equal(drained.state,'running');assert(drained.time-paused.time>2.6);
    await vmCall('resumeVm');
    await page.waitForFunction(n=>audioReplayFixture.starts.length>n,drained.starts,{timeout:15000});
    await page.waitForTimeout(180);
-   const after=await page.evaluate(()=>({frames:WrcadPS2.module.getFrames(),time:WrcadPS2.module.cloudAudio().currentTime,starts:audioReplayFixture.starts.length,duplicates:audioReplayFixture.duplicates.length,last:audioReplayFixture.starts.at(-1)}));
-   assert(after.frames>paused.frames);assert(after.starts>drained.starts);
-   const result={trial,activeBuffers:paused.active,queuedSpan:paused.queuedSpan,startsBefore:paused.starts,scheduledWhileDraining:drained.starts-paused.starts,newStarts:after.starts-drained.starts,repeated:after.duplicates-paused.duplicates,lastBufferAge:paused.time-paused.last.now,lastBufferDuration:paused.last.duration};
+   const after=await page.evaluate(()=>({frames:WrcadPS2.module.getFrames(),video:WrcadPS2.module.getVideoFrames(),time:WrcadPS2.module.cloudAudio().currentTime,starts:audioReplayFixture.starts.length,duplicates:audioReplayFixture.duplicates.length,last:audioReplayFixture.starts.at(-1)}));
+   assert(after.video>paused.video);assert(after.frames>paused.frames);assert(after.starts>drained.starts);
+   const result={trial,nativeVideoWhilePaused:drained.video-paused.video,renderedWhilePaused:drained.frames-paused.frames,activeBuffers:paused.active,queuedSpan:paused.queuedSpan,startsBefore:paused.starts,scheduledWhileDraining:drained.starts-paused.starts,newStarts:after.starts-drained.starts,repeated:after.duplicates-paused.duplicates,lastBufferAge:paused.time-paused.last.now,lastBufferDuration:paused.last.duration};
    results.push(result);console.log('UNDERRUN',JSON.stringify(result));
   }
   // Normal user pause/resume must freeze/resume the AudioContext, and disposing
