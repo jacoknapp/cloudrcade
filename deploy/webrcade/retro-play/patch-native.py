@@ -64,6 +64,69 @@ text = text.replace('target_link_options(Play PRIVATE "-sOFFSCREEN_FRAMEBUFFER=1
 text = text.replace('target_link_options(Play PRIVATE "-sUSE_WEBGL2=1")', '')
 path.write_text(text)
 
+# Browsers cannot protect EE RAM pages to catch writes to compiled code. Games
+# replace executable overlays and call FlushCache before running the new code.
+# Compare only active instruction ranges at that safe point; unchanged blocks
+# keep their compiled functions and lookup entries.
+edit('Source/ee/EeExecutor.h', '#include <optional>', '#include <optional>\n#include <unordered_map>')
+edit('Source/ee/EeExecutor.h', '\tvoid Reset() override;', '''#ifdef __EMSCRIPTEN__
+ void SyncInstructionCache();
+#endif
+\tvoid Reset() override;''')
+edit('Source/ee/EeExecutor.h', '\tCachedBlockMap m_cachedBlocks;', '''\tCachedBlockMap m_cachedBlocks;
+#ifdef __EMSCRIPTEN__
+ std::unordered_map<uint32, uint128> m_instructionHashes;
+#endif''')
+edit('Source/ee/EeExecutor.cpp', '\tm_cachedBlocks.clear();', '''\tm_cachedBlocks.clear();
+#ifdef __EMSCRIPTEN__
+ m_instructionHashes.clear();
+#endif''')
+edit('Source/ee/EeExecutor.cpp', '\tmemcpy(&hash, &xxHash, sizeof(xxHash));', '''\tmemcpy(&hash, &xxHash, sizeof(xxHash));
+#ifdef __EMSCRIPTEN__
+ if(end < PS2::EE_RAM_SIZE) m_instructionHashes[start] = hash;
+#endif''')
+with (root / 'Source/ee/EeExecutor.cpp').open('a') as stream:
+    stream.write('''
+#ifdef __EMSCRIPTEN__
+void CEeExecutor::SyncInstructionCache()
+{
+ std::vector<std::pair<uint32, uint32>> changed;
+ for(const auto& block : m_blocks)
+ {
+  const auto start = block->GetBeginAddress(), end = block->GetEndAddress();
+  if(end >= PS2::EE_RAM_SIZE) continue;
+  const auto found = m_instructionHashes.find(start);
+  const auto actual = XXH3_128bits(m_ram + start, end - start + 4);
+  uint128 hash;
+  memcpy(&hash, &actual, sizeof(actual));
+  if(found == m_instructionHashes.end() || !(found->second == hash))
+   changed.emplace_back(start, end + 4);
+ }
+ // Merge overlaps before unlinking, including blocks spanning a changed range.
+ std::sort(changed.begin(), changed.end());
+ for(size_t i = 0; i < changed.size();)
+ {
+  auto range = changed[i++];
+  while(i < changed.size() && changed[i].first <= range.second)
+   range.second = std::max(range.second, changed[i++].second);
+  ClearActiveBlocksInRange(range.first, range.second, false);
+ }
+ // Inactive hashes are unnecessary; a new block always records its source.
+ for(auto it = m_instructionHashes.begin(); it != m_instructionHashes.end();)
+ {
+  if(!HasBlockAt(it->first)) it = m_instructionHashes.erase(it);
+  else ++it;
+ }
+}
+#endif
+''')
+edit('Source/ee/PS2OS.cpp',
+     '\tFRAMEWORK_MAYBE_UNUSED uint32 operationType = m_ee.m_State.nGPR[SC_PARAM0].nV[0];',
+     '''\tFRAMEWORK_MAYBE_UNUSED uint32 operationType = m_ee.m_State.nGPR[SC_PARAM0].nV[0];
+#ifdef __EMSCRIPTEN__
+ static_cast<CEeExecutor*>(m_ee.m_executor.get())->SyncInstructionCache();
+#endif''')
+
 # Snapshot source offsets with the rest of each display circuit (GS-thread safe).
 edit('Source/gs/GSHandler.h', '\t\t\tuint32 bufWidth = 0;', '\t\t\tuint32 bufWidth = 0;\n\t\t\tuint32 bufOffsetX = 0, bufOffsetY = 0;')
 path = root / 'Source/gs/GSHandler.cpp'

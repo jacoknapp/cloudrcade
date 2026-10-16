@@ -25,6 +25,13 @@ The CPU module initially reserves256MiB and graphics module64MiB; both can grow.
 Compatibility, rendering and speed remain experimental. Homebrew tests do not
 establish commercial compatibility or physical-phone performance.
 
+The browser CPU keeps executable overlays coherent at guest `FlushCache` calls.
+It checks the instruction bytes of active compiled blocks and invalidates changed
+ranges, including overlapping entry points, while retaining unchanged functions.
+This replaces the protected-memory write detection unavailable in WebAssembly;
+without it, Kingdom Hearts could stop rendering after New Game settings while
+its emulated video counter continued advancing and disc I/O was idle.
+
 The emulated PS2 system language follows the browser's preferred supported
 language, with English as the fallback. Chinese script/region selects Simplified
 or Traditional Chinese. A game can only use languages included on its disc;
@@ -86,6 +93,11 @@ node tests/test_webrcade_ps2_native_disc.cjs
 node tests/test_webrcade_ps2_language.cjs
 python3 tests/fixtures/ps2_homebrew.py /tmp/ps2-homebrew
 ```
+
+Generate with `--code-cache` and run `tests/browser_webrcade_ps2.cjs` with
+`PS2_TEST_CODE_CACHE=1 PS2_TEST_SKIP_PIXEL_CHANGE=1` to verify word and byte
+instruction replacement across overlapping entry points in the real WASM core.
+The probe paints a fixed success color; the normal fixture verifies animation.
 
 The builder requires Docker, Git, Node22+, npm and Python3.10+. `WORK` is owned
 disposable scratch; `OUT` must be a new directory (default `release/ps2`).

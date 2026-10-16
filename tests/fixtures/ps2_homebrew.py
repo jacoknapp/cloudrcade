@@ -10,7 +10,7 @@ from pathlib import Path
 import struct
 import sys
 
-def generate(directory, language_probe=False):
+def generate(directory, language_probe=False, code_cache_probe=False):
     directory.mkdir(parents=True, exist_ok=True)
     words, labels, fixups = [], {}, []
     def emit(word): words.append(word & 0xffffffff)
@@ -46,12 +46,29 @@ def generate(directory, language_probe=False):
         emit(19 << 16 | 19 << 11 | 4 << 6)  # sll s3,s3,4
         i(13, 19, 19, 1)
         li(9, 0x80304000); emit(19 << 21 | 9 << 16 | 19 << 11 | 0x25)
+    if code_cache_probe:
+        # Compile two overlapping entry points, then replace their instructions.
+        # A browser cannot use protected RAM faults to invalidate these blocks.
+        li(25, 0x101000)
+        for target in [0x101000, 0x101004]:
+            emit(3 << 26 | target >> 2); emit(0)
+        li(9, 0x24020055); i(43, 25, 9, 4)
+        li(4, 2); li(3, 0x64); emit(0x0c)  # FlushCache(2)
+        emit(3 << 26 | 0x101000 >> 2); emit(0)
+        i(14, 2, 20, 0x55)  # Remember a stale word replacement.
+        li(9, 0x66); i(40, 25, 9, 4)  # Replace just the immediate's low byte.
+        li(4, 0); li(3, 0x64); emit(0x0c)  # FlushCache(0)
+        emit(3 << 26 | 0x101004 >> 2); emit(0)
+        branch(4, 20, 0, 'code_cache_color')
+        li(2, 0x11)  # Failure red; success red is0x66 from the new code.
+        label('code_cache_color')
+        li(19, 0x80304000); emit(19 << 21 | 2 << 16 | 19 << 11 | 0x25)
     li(8, 0x1000e000); i(9, 0, 9, 1); i(43, 8, 9, 0) # DMAC master enable
     label('frame')
     # Poll VSync, acknowledge it, then submit a color-changing sprite.
     i(35, 16, 9, 0x1000); i(12, 9, 9, 8); branch(4, 9, 0, 'frame')
     i(9, 0, 9, 8); i(43, 16, 9, 0x1000)
-    if not language_probe:
+    if not language_probe and not code_cache_probe:
         i(9, 19, 19, 1)
     i(43, 17, 19, 16 * 6)
     i(43, 18, 17, 0x10); i(9, 0, 9, 9); i(43, 18, 9, 0x20)
@@ -68,6 +85,9 @@ def generate(directory, language_probe=False):
                  (0, 0x05), (640 * 16 | (448 * 16 << 16), 0x05)]
     packet = struct.pack('<QQ', 8 | 1 << 15 | 1 << 60, 0xe)
     packet += b''.join(struct.pack('<QQ', value, register) for value, register in registers)
+    if code_cache_probe:
+        function = struct.pack('<4I', 0, 0x24020011, 0x03e00008, 0)
+        code = code.ljust(0x1000, b'\0') + function
     payload = code.ljust(0x2000, b'\0') + packet
     ident = b'\x7fELF\x01\x01\x01' + bytes(9)
     header = ident + struct.pack('<HHIIIIIHHHHHH', 2, 8, 1, 0x100000, 52, 0, 0x20924001, 52, 32, 1, 0, 0, 0)
@@ -98,4 +118,5 @@ def generate(directory, language_probe=False):
     print('Generated original PS2 ELF and 256MiB sparse ISO in ' + str(directory))
 
 if __name__ == '__main__':
-    generate(Path(sys.argv[1]), language_probe='--language' in sys.argv[2:])
+    generate(Path(sys.argv[1]), language_probe='--language' in sys.argv[2:],
+             code_cache_probe='--code-cache' in sys.argv[2:])

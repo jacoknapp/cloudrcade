@@ -14,7 +14,7 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
  const page=await context.newPage(),errors=[],logs=[];
  page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{logs.push(message.text());if(process.env.PS2_TEST_DEBUG)console.log(message.type(),message.text());});
  const prefix=process.env.PS2_TEST_PREFIX||'cloudrcade';
- await context.addInitScript(namespace=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){if(/webgl/i.test(kind))throw new Error('PS2 must not create a WebGL context');return original.call(this,kind,...args);};localStorage.setItem(namespace+'.ps2.enabled.v1','1');localStorage.setItem(namespace+'.ps2.perf.v1','1');},prefix);
+ await context.addInitScript(namespace=>{let config;Object.defineProperty(window,'WrcadCloudConfig',{configurable:true,get:()=>config,set:value=>{config={...value,enabled:false,autoRedirect:false,storagePrefix:namespace};}});const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){if(/webgl/i.test(kind))throw new Error('PS2 must not create a WebGL context');return original.call(this,kind,...args);};localStorage.setItem(namespace+'.ps2.enabled.v1','1');localStorage.setItem(namespace+'.ps2.perf.v1','1');},prefix);
  const props={title:'PS2 qualification fixture',type:'play-ps2',rom:new URL(rom,origin).href,uid:'ps2-browser-qualification'};
  const url=origin+'/experimental/ps2/?ctx=standalone&props='+encodeURIComponent(Buffer.from(encodeURIComponent(JSON.stringify(props))).toString('base64'));
  async function loaded(){
@@ -25,6 +25,15 @@ const engine=process.env.WEBRCADE_TEST_BROWSER==='webkit'?webkit:chromium;
  try{
   await page.goto(url);await loaded();assert(await page.evaluate(()=>!window.WrcadCoreCrash||JSON.parse(sessionStorage.getItem('wrcad.core.active.v1')).phase==='playing'),'crash journal tracks an active game');await page.locator('.kt-pad').waitFor({state:'visible'});
   if(process.env.PS2_TEST_WARMUP_MS)await page.waitForTimeout(Number(process.env.PS2_TEST_WARMUP_MS));
+  if(process.env.PS2_TEST_CODE_CACHE){
+   const pixel=await page.evaluate(async()=>{
+    await WrcadPS2.pause();const gpu=WrcadPS2.module.cloudGpu;await gpu.chain;
+    const m=gpu.module,p=m._malloc(4*1024*1024);
+    try{await m.ccall('gpu_download',null,['number'],[p],{async:true});return Array.from(m.HEAPU8.subarray(p,p+4));}
+    finally{m._free(p);await WrcadPS2.resume();}
+   });
+   assert.deepEqual(pixel,[102,64,48,128],'FlushCache executes replaced word/byte instructions at overlapping entry points');
+  }
   const before=await page.locator('#outputCanvas').screenshot();await page.waitForTimeout(800);const after=await page.locator('#outputCanvas').screenshot();
   if(!process.env.PS2_TEST_SKIP_PIXEL_CHANGE)assert(!before.equals(after),'native homebrew pixels advance, not just a frame counter');
   const resources=await page.evaluate(()=>({adapter:WrcadPS2.module.cloudGpu.adapter,gpuHeap:WrcadPS2.module.cloudGpu.module.HEAPU8.length,frames:WrcadPS2.module.getFrames(),heap:WrcadPS2.module.HEAPU8.length,workers:WrcadPS2.module.PThread.runningWorkers.length+WrcadPS2.module.PThread.unusedWorkers.length,audio:WrcadPS2.module.cloudAudio()?.state,cache:WrcadPS2.disc.cachedBytes||0,transferred:WrcadPS2.disc.transferred||0,size:WrcadPS2.disc.size}));
