@@ -68,6 +68,8 @@ A **save state** is an emulator snapshot stored through the native state slots w
 
 Nextcloud and Dropbox support regular saves and native state slots through the configured cloud folder. State-slot data and its listing/thumbnail information are separate transfers; do not assume the regular-save recovery procedure guarantees an offline slot will appear or upload later. Controllers, Recently Played and shaders use their own settings/data paths. Linking cloud storage does not create a ROM backup.
 
+Large Nextcloud states can take extra time while the server scans the upload. PS2 and GameCube allow up to three minutes for a Nextcloud upload, while reads retain their one-minute deadline. Keep the game open until its upload status finishes. The per-file limit remains 64 MiB; the operator's reverse proxy must also accept that size and allow server processing to finish.
+
 ## Find your Nextcloud files
 
 Open Nextcloud itself and choose **Files**. Find the folder named by your operator's `NEXTCLOUD_SAVE_FOLDER` (the root example uses **CloudRcade**). The arcade creates game save/state files beneath that folder using emulator/game identities, plus `settings/touch-controller.v1.json` and `settings/recently-played.v1.json` for preferences/history.

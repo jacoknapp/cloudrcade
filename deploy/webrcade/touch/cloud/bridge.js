@@ -191,7 +191,7 @@
       throw e;
     }
   }
-  async function upload(blob, path, uid = account(), condition, timeoutMs = 0) {
+  async function upload(blob, path, uid = account(), condition, timeoutMs = 0, uploadTimeoutMs) {
     requireAccount(uid);
     const key = versionKey(uid, path);
     if (condition === undefined) {
@@ -204,7 +204,8 @@
       }
       condition = versions.get(key);
     }
-    const response = await request('file', {method:'PUT', path, body:blob, uid, timeoutMs,
+    const response = await request('file', {method:'PUT', path, body:blob, uid,
+      timeoutMs:provider === 'nextcloud' ? uploadTimeoutMs ?? timeoutMs : timeoutMs,
       extra: condition ? {'If-Match':condition} : {'If-None-Match':'*'}});
     if (response.headers.get('ETag')) versions.set(key, response.headers.get('ETag'));
     else versions.delete(key);
@@ -294,7 +295,7 @@
       record.sync = {dirty:true, base:record.sync.base ?? null, attempt:digest};
       await write(manager, path, record.files, record.sync);
       const zip = await manager.createZip(record.files);
-      try { await upload(zip, zipPath, uid, record.sync.base, manager.cloudRequestTimeoutMs); }
+      try { await upload(zip, zipPath, uid, record.sync.base, manager.cloudRequestTimeoutMs, manager.cloudUploadTimeoutMs); }
       catch (e) {
         if (e.status !== 409) throw e;
         // Also recover pre-upgrade pending records without an attempt marker.
@@ -319,7 +320,7 @@
     };
     proto.saveCloud = async function(path, files) {
       const uid = owner(this); requireAccount(uid);
-      return upload(await this.createZip(files), this.getZipFileName(path), uid, undefined, this.cloudRequestTimeoutMs);
+      return upload(await this.createZip(files), this.getZipFileName(path), uid, undefined, this.cloudRequestTimeoutMs, this.cloudUploadTimeoutMs);
     };
     proto.loadCloudSingleFile = function(path) { return download(path, owner(this)); };
     proto.saveCloudSingleFile = function(path, content) { return upload(content, path, owner(this)); };

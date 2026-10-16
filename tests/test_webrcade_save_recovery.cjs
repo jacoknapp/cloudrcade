@@ -6,6 +6,7 @@ const copy = files => files && files.map(f => ({name:f.name,content:f.content in
 let offline = false, beforeFetch = null, revision = 0, loseAck = false, afterGet = null, hangPut = false;
 let csrfToken='test', csrfRejections=0, rotateAfterStatus=false, denyPut=false, invalidStatus=false, putRequests=0;
 const errors = [], writes = [];
+const deadlines=[],signalDeadlines=new WeakMap();
 function connect(uid) { storage.set('wrcad.nextcloud.connection.v1', JSON.stringify({uid,login:uid,password:'fake'})); }
 connect('alice');
 function fixture(server='https://nextcloud.test') {
@@ -13,6 +14,7 @@ function fixture(server='https://nextcloud.test') {
  const fetch = async (url, options = {}) => {
   if (beforeFetch) { const fn = beforeFetch;beforeFetch = null;await fn(); }
   const query = new URL(url, 'https://games.test').searchParams;
+  deadlines.push({method:options.method||'GET',action:query.get('action'),timeout:signalDeadlines.get(options.signal)});
   if (query.get('action') === 'status') {
    const response=Response.json(invalidStatus?{}:{csrf:csrfToken});
    if(rotateAfterStatus){rotateAfterStatus=false;csrfToken+='-rotated';}
@@ -35,7 +37,7 @@ function fixture(server='https://nextcloud.test') {
   if (method === 'GET' && afterGet) { const fn=afterGet;afterGet=null;fn(); }
   return new Response(method === 'HEAD' ? null : old.body,{headers:{ETag:old.etag}});
  };
- vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,AbortSignal,btoa,unescape,encodeURIComponent,console});
+ vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,AbortSignal:{timeout(ms){const signal=AbortSignal.timeout(ms);signalDeadlines.set(signal,ms);return signal;}},btoa,unescape,encodeURIComponent,console});
  class Saves {
   constructor() {this.errorCallback = e=>errors.push(e);}
   getZipFileName(p) { return p.endsWith('.zip') ? p : p+'.zip'; }
@@ -55,6 +57,15 @@ const files = n => [{name:'sav',content:new Uint8Array([n])}];
 const value = f => f?.find(f=>f.name==='sav')?.content[0];
 const savePath = '/wrc/test/sav';
 (async()=>{
+ const bounded=fixture();bounded.manager.cloudRequestTimeoutMs=60000;bounded.manager.cloudUploadTimeoutMs=180000;
+ const startDeadlines=deadlines.length;
+ assert.equal(await bounded.manager.save('/large-state-deadline',files(1)),true);
+ assert.equal(await bounded.manager.saveCloud('/large-state-head',files(2)),true);
+ await bounded.manager.loadCloud('/large-state-deadline');
+ const observed=deadlines.slice(startDeadlines);
+ assert(observed.some(v=>v.method==='PUT'&&v.timeout===180000),'large uploads can finish server-side scanning');
+ assert(observed.some(v=>v.method==='HEAD'&&v.timeout===60000),'metadata reads retain their deadline');
+ assert(observed.some(v=>v.method==='GET'&&v.action==='file'&&v.timeout===60000),'downloads retain their deadline');
  // Renew an expired PHP session before transmitting a save body. A session
  // changed during the upload may still retry once, preserving its revision.
  const session=fixture();await session.manager.load('/session-prime');

@@ -10,6 +10,7 @@ export class Ps2Saves {
   WrcadCloud.install(sdk);await sdk.settings.load();
   this.manager=new sdk.SaveManager({getTitle:()=>this.props.title||'PlayStation 2',getProps:()=>this.props},text=>{this.lastCloudError=text;this.report(text);});
   this.manager.cloudRequestTimeoutMs=60000;
+  this.manager.cloudUploadTimeoutMs=180000;
   this.manager.createZip=sdk.createSaveZip;this.manager.getFiles=blob=>sdk.readSaveZip(blob);
   this.manager.getSaveMetadata=blob=>sdk.readSaveZip(blob,true);
   this.prefix=`ps2/${id}/`;this.states=this.prefix+'states/'+this.format+'/';

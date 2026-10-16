@@ -41,9 +41,10 @@ const bundle=process.env.WEBRCADE_PS2_UI_ROOT||path.resolve(__dirname,'../releas
    serverCsrf='renewed-after-gameplay';
    const saved=await adapter.save(1,bytes,'data:image/png;base64,fixture');
    const loaded=await adapter.load(1),slots=await adapter.slots();
-   return {saved,rejected,size:loaded.length,equal:loaded.every((v,i)=>v===bytes[i]),slot:!!slots[1],status:adapter.status};
+   return {saved,rejected,size:loaded.length,equal:loaded.every((v,i)=>v===bytes[i]),slot:!!slots[1],status:adapter.status,readTimeout:adapter.manager.cloudRequestTimeoutMs,uploadTimeout:adapter.manager.cloudUploadTimeoutMs};
   });
   assert.equal(result.saved,true);assert.equal(result.rejected,0);assert.equal(result.size,16*1024*1024);assert.equal(result.equal,true);assert.equal(result.slot,true);
+  assert.equal(result.readTimeout,60000);assert.equal(result.uploadTimeout,180000);
   await page.evaluate(()=>{denied=true;});
   assert.equal(await page.evaluate(()=>adapter.save(2,stateBytes,null)),false);
   assert.match(await page.evaluate(()=>adapter.status),/saved locally; Cloud permission denied/);
