@@ -13,13 +13,14 @@
     "0005-bounded-state-buffers.patch": "ffaeee8346ffe69f98335f73750273d6a813ba867810043d3d85b14ee79666cb",
     "0006-release-completed-load-undo.patch": "05d452956558a58176b2265ce3e1c0191a50d5affffd80e020d9bea56ce0414f",
     "0007-pixel-depth-convention.patch": "efdfaf2ca5a109f701037c8b5c1b57042c971a34d0c170a0a9e8457f40bc51b1",
-    "0008-destination-alpha-shader.patch": "444b658224309f4c36bc3769a935fb56c09c64acba2073932eaffd421f5d153c"
+    "0008-destination-alpha-shader.patch": "444b658224309f4c36bc3769a935fb56c09c64acba2073932eaffd421f5d153c",
+    "0009-compress-restore-rollback.patch": "7de837843d57f5f22dc5505f14fa3b5df8408d4da79a57953df9889da8012dd3"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "4cf6684be430e0e095311f39151c326fc3800879f0dced3827bfeb444102b637",
-    "dolphin-core-upstream.js": "fd35e8cf330c91e6d24e5c8d8891b3f32815c8dd499c158dce07ce4d59e3711e"
+    "dolphin-core-upstream.wasm": "7015d099f34e9a2d49985e4833299fc99fb772d58a4dd1b162824e2ac320c4b5",
+    "dolphin-core-upstream.js": "22be771ad61265ed58520b1550655f99cef8da7d5111c8508311f35c93f52cea"
   },
   "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
-  "sourceTreeSha256": "41675e7c827179f9dc2e8551100f7c35682a2480173952d002592a377b8c863e",
+  "sourceTreeSha256": "db78df09bb2f6620457b462439ea5a10cb79746da8f2beb0b83460d61fbbba09",
   "stateFormatId": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0"
 }
