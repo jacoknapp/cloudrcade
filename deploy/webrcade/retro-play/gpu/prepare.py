@@ -120,6 +120,12 @@ s += '\nnamespace ps2::gs::gpu { void shutdown() { if(g_surface) wgpuSurfaceUnco
 p.write_text(s)
 p = out / 'gs.wgsl'
 shader = p.read_text()
+# CLUT entries selected with CPSM24 still occupy all 32 bits, including alpha.
+# Match Play!'s ReadCLUT4/ReadCLUT8 PSMCT32 indexor for both CPSM32 and CPSM24.
+# Ordinary 24-bit texture/framebuffer reads must keep their existing masks.
+old = '        let cpsm = data[r + 3u];'
+assert shader.count(old) == 1
+shader = shader.replace(old, '        let cpsm = select(data[r + 3u], PSMCT32, data[r + 3u] == PSMCT24);')
 start = shader.index('@compute @workgroup_size(64)\nfn decode(')
 end = shader.index('\n@compute', start + 1)
 shader = shader[:start] + Path(__file__).with_name('decode.wgsl').read_text() + shader[end:]
