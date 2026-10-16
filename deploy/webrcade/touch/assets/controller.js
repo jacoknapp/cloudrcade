@@ -26,6 +26,34 @@
   // A master gain silences every output (including achievements) without causing
   // the upstream "enable audio" screen to block a game launched while muted.
   const audioGates = new Map();
+  let audioSessionRecoveryNeeded = true, audioSessionTimer = null;
+  function applyAudioSession(recover = false) {
+    try {
+      const session = navigator.audioSession;
+      if (!session) return;
+      if (audioSessionTimer !== null) {
+        if (!muted) return; // Coalesce context/focus events into one reset.
+        clearTimeout(audioSessionTimer); audioSessionTimer = null;
+      }
+      // Safari can retain the JS "playback" value after losing the native
+      // category. An unchanged assignment is ignored; cross a task boundary
+      // with a different category to restore actual media playback.
+      if (!muted && recover && session.type === 'playback') {
+        session.type = 'ambient';
+        audioSessionTimer = setTimeout(() => {
+          audioSessionTimer = null; applyAudioSession();
+        }, 0);
+      } else session.type = muted ? 'ambient' : 'playback';
+    } catch (_) { /* Older browsers or unavailable audio-session control. */ }
+  }
+  function recoverAudioSession() {
+    if (muted || !audioSessionRecoveryNeeded || document.hidden ||
+        ![...audioGates.keys()].some(context => context.state === 'running')) return;
+    audioSessionRecoveryNeeded = false; applyAudioSession(true);
+  }
+  function foregroundAudio() {
+    audioSessionRecoveryNeeded = true; recoverAudioSession();
+  }
   const audioNode = window.AudioNode?.prototype;
   if (audioNode) {
     const connect = audioNode.connect, disconnect = audioNode.disconnect;
@@ -39,7 +67,9 @@
           audioGates.set(context, gate);
           context.addEventListener('statechange', () => {
             if (context.state === 'closed') audioGates.delete(context);
+            else if (context.state === 'running') foregroundAudio();
           });
+          foregroundAudio();
         }
         connect.call(this, gate, ...args);
         return destination;
@@ -54,10 +84,20 @@
   function applyMute() {
     // Unmuted games use media playback so iOS's silent switch does not mute
     // them. Muted games release exclusive playback while gain keeps audio off.
-    try { if (navigator.audioSession) navigator.audioSession.type = muted ? 'ambient' : 'playback'; } catch (_) { /* Older browsers. */ }
+    applyAudioSession();
     for (const gate of audioGates.values()) gate.gain.value = muted ? 0 : 1;
+    audioSessionRecoveryNeeded = true; recoverAudioSession();
   }
   applyMute();
+  window.addEventListener('focus', foregroundAudio);
+  window.addEventListener('pageshow', foregroundAudio);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) foregroundAudio();
+  });
+  // This does not resume a suspended core or change its audio clock. The
+  // core's own gesture/resume path will trigger the statechange above.
+  document.addEventListener('pointerdown', recoverAudioSession, true);
+  document.addEventListener('keydown', recoverAudioSession, true);
   try { enabled = localStorage.getItem(KEY) !== 'false'; } catch (_) { /* Private browsing. */ }
   try { translucence = parseTranslucence(localStorage.getItem(TRANSLUCENCE_KEY)); } catch (_) { /* Use default appearance. */ }
   const host = document.createElement('div');
