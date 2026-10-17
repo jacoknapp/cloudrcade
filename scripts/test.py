@@ -5,10 +5,11 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-# These three tests require actual patched build sources; retain them for core
+# These tests require actual patched build sources; retain them for core
 # maintainers but do not pretend a standard overlay build exercises native code.
+# The GameCube texture-decode test needs GAMECUBE_PATCHED_WORKER from prepare.py.
 native = {'test_webrcade_3ds_cache.cjs', 'test_webrcade_3ds_keyboard.cjs',
-          'test_webrcade_3ds_state_info.cjs'}
+          'test_webrcade_3ds_state_info.cjs', 'test_webrcade_gamecube_texture_decode.cjs'}
 for path in sorted((ROOT / 'tests').glob('test_webrcade*.cjs')):
     if path.name not in native:
         subprocess.run(['node', str(path)], cwd=ROOT, check=True)
