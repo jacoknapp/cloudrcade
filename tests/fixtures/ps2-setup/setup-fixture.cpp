@@ -12,6 +12,7 @@
 namespace ps2::gs {
 void write(std::uint32_t, std::uint64_t);
 extern std::uint32_t cbp0, cbp1;
+extern std::uint64_t g_primitives, g_writes[128];
 }
 namespace ps2::gs::gpu {
 static std::uint64_t setupMisses=0, draws=0, clutLoads=0, imageBegins=0, imageData=0, copies=0;
@@ -64,6 +65,17 @@ static constexpr std::size_t stateSize=16+sizeof(State)+kMemorySize+512*4+512;
 static void w(std::uint32_t r,std::uint64_t v){write(r,v);}
 static void xyz(unsigned n,bool drawing=true){w(drawing?0x05:0x0d,std::uint64_t(16+n*16)|(std::uint64_t(32+n*16)<<16)|(std::uint64_t(123+n)<<32));}
 static void primitive(unsigned type,std::uint64_t attr=0){w(0,type|attr);const int count=type==0?1:(type==1||type==2||type==6)?2:3;for(int i=0;i<count;i++)xyz(i);}
+static void hashState(){
+ using ps2::gs::gpu::hash;const auto& s=g_state;
+ const std::uint64_t global[]={s.prim,s.prmode,s.prmodecont,s.rgbaq,s.st,s.uv,s.fog,s.texclut,s.scanmsk,s.texa,s.fogcol,s.dimx,s.dthe,s.colclamp,s.pabe,s.bitbltbuf,s.trxpos,s.trxreg,s.trxdir};
+ for(auto value:global)hash(value);
+ for(const auto& c:s.ctx){const std::uint64_t context[]={c.tex0,c.clamp,c.tex1,c.tex2,c.xyoffset,c.miptbp1,c.miptbp2,c.scissor,c.alpha,c.test,c.fba,c.frame,c.zbuf};for(auto value:context)hash(value);}
+ std::uint32_t q;std::memcpy(&q,&s.q,sizeof q);hash(q);hash(s.count);
+ for(const auto& v:s.queue){hash(v.x);hash(v.y);hash(v.z);hash(v.r);hash(v.g);hash(v.b);hash(v.a);hash(v.u);hash(v.v);hash(v.f);std::uint32_t bits[3];std::memcpy(bits,&v.q,sizeof bits);for(auto value:bits)hash(value);}
+ for(auto value:s.clut){hash(value);}
+ hash(cbp0);hash(cbp1);hash(g_primitives);
+ for(auto value:g_writes){hash(value);}
+}
 static void initialize(){
  gpu_reset();w(0x1a,1);w(1,0x3f80000080402010ull);w(2,0x3f0000003f000000ull);w(3,0x00200010);
  for(unsigned ctx=0;ctx<2;ctx++){
@@ -117,5 +129,6 @@ int main(){
  }
  // Transfer/event dispatches still run exactly as on control.
  w(0x52,4|(std::uint64_t(4)<<32));w(0x53,0);w(0x54,0x0123456789abcdefull);w(0x53,2);w(0x60,0x1234);w(0x61,0x5678);w(0x62,0);
+ hashState();
  std::printf("{\"digest\":\"%016llx\",\"draws\":%llu,\"setupMisses\":%llu,\"clutLoads\":%llu,\"imageBegins\":%llu,\"imageData\":%llu,\"copies\":%llu,\"texflushes\":%u}\n",(unsigned long long)digest,(unsigned long long)draws,(unsigned long long)setupMisses,(unsigned long long)clutLoads,(unsigned long long)imageBegins,(unsigned long long)imageData,(unsigned long long)copies,g_texflushes);
 }
