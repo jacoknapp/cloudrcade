@@ -77,7 +77,7 @@ async function close({leave=false}={}){
 }
 async function perform(action){
  if(busy||exiting)return;busy=true;
- if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
+ if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,nativeTimingEnabled:perfEnabled(),onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
  const owned=session,current=generation;controls();
  try{await action(owned);}
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}

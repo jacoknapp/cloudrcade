@@ -99,6 +99,11 @@ def patch_runtime(app, native_core_sha=None):
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
             'const gamecubeGpuFrames = new GpuFrameQueue({onError:error => markWgpuReplayFatal("gpu-completion", error?.message || error)});\n'
             'const gamecubeRenderStats = new RenderStats();\n'
+            'let gamecubeNativeTimingEnabled = false;\n'
+            'function gamecubeReadNativeTiming() {\n'
+            '  if (!gamecubeNativeTimingEnabled) return null;\n'
+            '  try { const value=api?.getSliceTimingTotals?.(); return value ? JSON.parse(value) : null; } catch { return null; }\n'
+            '}\n'
             'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0,completionWakes:0,completionUsefulDrains:0,completionNoWorkWakes:0,completionToDrainTotalMs:0,completionToDrainMaxMs:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
     # Queue writes consume a snapshot before returning. Reuse the already
@@ -136,6 +141,8 @@ def patch_runtime(app, native_core_sha=None):
     replace('    getFrame: cwrap("GetFrame", "number", []),',
             '    getFrame: cwrap("GetFrame", "number", []),\n'
             '    getHeapStats: optionalCwrap("GetHeapStats", "number", []),\n'
+            '    getSliceTimingTotals: optionalCwrap("GetSliceTimingTotals", "string", []),\n'
+            '    setSliceTimingEnabled: optionalCwrap("SetSliceTimingEnabled", null, ["number"]),\n'
             '    getStateLoadResult: cwrap("DolphinWeb_GetLastStateLoadResult", "number", []),')
     replace('function framePayload({ forceCausalTelemetry = false } = {}) {',
             'let gamecubeHeapSample=null;\n'
@@ -223,6 +230,7 @@ def patch_runtime(app, native_core_sha=None):
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
             '    gamecubeDiagnostics: {fpsLimit:60,gpuQueue:gamecubeGpuFrames.snapshot(),render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapSample,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '      nativeTiming:gamecubeReadNativeTiming(),\n'
             '      uploads:{transport:wgpuUploadTransport,stagingBytes:wgpuMappedStagingPool ? wgpuMappedStagingSlotCount*WGPU_MAPPED_STAGING_SLOT_BYTES : 0,scratchBytes:wgpuImmediateBufferScratch.byteLength,pendingRemaps:wgpuMappedRemapPromises.size},\n'
             '      rendererError:rendererDiagnostics.errors.at(-1) || null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
@@ -255,6 +263,12 @@ def patch_runtime(app, native_core_sha=None):
             '    case "mountFile":\n      return mountFile(payload.file);\n'
             '    case "mountUrl":\n      return mountFile({...payload, remote:true});\n'
             '    case "heapStats":\n      return {heap:gamecubeHeapStats()};\n'
+            '    case "nativeTiming": {\n'
+            '      const available=typeof api?.setSliceTimingEnabled === "function" && typeof api?.getSliceTimingTotals === "function";\n'
+            '      gamecubeNativeTimingEnabled=available && payload.enabled === true;\n'
+            '      api?.setSliceTimingEnabled?.(gamecubeNativeTimingEnabled ? 1 : 0);\n'
+            '      return {available,enabled:gamecubeNativeTimingEnabled};\n'
+            '    }\n'
             '    case "streamStats":\n      return {stream:streamedDisc?.stats() || null};')
     replace('    case "setInputMask":', '''    case "importCards": {
       if (coreBoot.accepted) throw new Error("Load memory cards before boot");
