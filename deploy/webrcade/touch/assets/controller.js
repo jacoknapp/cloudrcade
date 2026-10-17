@@ -1096,10 +1096,9 @@
       if (emulator?.started) emulator.updateScreenSize?.();
     }
   }
-  // Only a recognized layout can safely replace the touch controls. Native
-  // PS2/GameCube accept standard pads, and the legacy SDK assumes that mapping
-  // even for unknown devices. Leave its input handling and manual toggle intact.
-  const replacesTouchControls = pad => pad && pad.connected !== false && pad.mapping === 'standard';
+  // Any connected controller selects the centered picture without touch controls.
+  // The drawer button lets the player restore touch regardless of pad mapping.
+  const replacesTouchControls = pad => pad && pad.connected !== false;
   function pollGamepads() {
     try {
       const pads = navigator.getGamepads?.();

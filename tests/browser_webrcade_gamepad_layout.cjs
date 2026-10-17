@@ -91,21 +91,28 @@ const fixture = `
     assert.equal(await page.evaluate(()=>pauseCalls),0,label+' presentation does not pause');
    };
    for(const core of cores){
-    // An unknown device retains the normal touch preference and manual button.
-    // Both choices persist across reload without changing the gamepad override.
+    // Any connected mapping hides touch, with the same manual override available.
     await page.goto('http://gamepad.test/play/app/'+core+'/?unmapped');
-    await page.locator('.kt-pad').waitFor({state:'visible'});
-    assert.equal(await page.locator('.kt-toggle').textContent(),'Touch controls: On',core+' unknown mapping cannot auto-hide touch');
+    await centered(core+' unknown mapping');
+    await page.locator('.kt-tab').tap();
+    await page.getByRole('button',{name:'Touch controls: Off',exact:true}).tap();
+    await page.locator('.kt-close').tap();await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.reload();await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.locator('.kt-tab').tap();
+    await page.getByRole('button',{name:'Touch controls: On',exact:true}).tap();
+    await page.locator('.kt-close').tap();await centered(core+' unknown mapping manual Off');
     // Mixed devices, polling without events, then the event-only API fallback.
     await page.evaluate(()=>setPads([{index:0,mapping:''},1]));await centered(core+' supported plus unknown pad');
-    await page.evaluate(()=>setPads([{index:0,mapping:''}],false));await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.evaluate(()=>setPads([{index:0,mapping:''}],false));await centered(core+' unknown pad remains');
+    await page.evaluate(()=>setPads([{index:0,mapping:'',connected:false}],false));await page.locator('.kt-pad').waitFor({state:'visible'});
     await page.evaluate(()=>setPads([]));
     await page.evaluate(()=>{padApiUnavailable=true;setPads([{index:2,mapping:''}])});
-    await page.waitForTimeout(180);assert(await page.locator('.kt-pad').isVisible(),core+' unknown hotplug fallback retains touch');
+    await centered(core+' unknown hotplug fallback');
     await page.evaluate(()=>setPads([{index:2,mapping:''},3]));await centered(core+' supported hotplug fallback');
-    await page.evaluate(()=>setPads([{index:2,mapping:''}]));await page.locator('.kt-pad').waitFor({state:'visible'});
-    await page.evaluate(()=>{padApiUnavailable=false;setPads([{index:0,mapping:''}])});
-    assert.deepEqual(await page.evaluate(()=>cloudWrites),[],core+' capability detection does not save preferences');
+    await page.evaluate(()=>setPads([{index:2,mapping:''}]));await centered(core+' fallback unknown pad remains');
+    await page.evaluate(()=>{padApiUnavailable=false;setPads([])});
+    assert.deepEqual(await page.evaluate(()=>cloudWrites),[],core+' connection detection and override do not save cloud preferences');
+    await page.goto('http://gamepad.test/play/app/'+core+'/');
     await page.locator('.kt-pad').waitFor({state:'visible'});await page.locator('.kt-tab').tap();
     assert.equal(await page.locator('.kt-toggle,.kt-gamepad-touch').count(),1,'one touch controls button in the drawer');
     const controls=page.getByRole('button',{name:'Touch controls: On',exact:true});
