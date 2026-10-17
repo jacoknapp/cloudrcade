@@ -66,4 +66,17 @@ public:
  Scope(const Scope&) = delete;
  Scope& operator=(const Scope&) = delete;
 };
+
+// Hot paths call Timed: when collection is off the body runs inline with no
+// destructor in the caller's frame. Emscripten's JS exception lowering routes
+// every call inside a frame holding a Scope through an invoke_* trampoline, so
+// a Scope must only exist on the enabled path.
+template<class F> __attribute__((noinline)) auto TimedEnabled(Category category, bool every, F&& body) -> decltype(body()) {
+ Scope scope(category, every);
+ return body();
+}
+template<class F> inline auto Timed(Category category, bool every, F&& body) -> decltype(body()) {
+ if(!(State().load(std::memory_order_relaxed) & 1)) return body();
+ return TimedEnabled(category, every, static_cast<F&&>(body));
+}
 }

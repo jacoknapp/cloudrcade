@@ -1,4 +1,5 @@
 #include "Js_DiscImageDeviceStream.h"
+#include "CloudCpuTiming.h"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -28,12 +29,14 @@ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIREC
 uint64 CJsDiscImageDeviceStream::Tell() { return m_position; }
 void CJsDiscImageDeviceStream::ReadAt(void* buffer, uint64 position, uint32 amount)
 {
- MAIN_THREAD_EM_ASM({
-  let position = ($1 >>> 0) + (($2 >>> 0) * 4294967296);
-  Module.discImageDevice.read($0, position, $3);
- }, buffer, static_cast<uint32>(position), static_cast<uint32>(position >> 32), amount);
- while(!MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.isDone()})) usleep(100);
- int result = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.result()});
+ const int result = CloudCpuTiming::Timed(CloudCpuTiming::DiscWait, true, [&]() -> int {
+  MAIN_THREAD_EM_ASM({
+   let position = ($1 >>> 0) + (($2 >>> 0) * 4294967296);
+   Module.discImageDevice.read($0, position, $3);
+  }, buffer, static_cast<uint32>(position), static_cast<uint32>(position >> 32), amount);
+  while(!MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.isDone()})) usleep(100);
+  return MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.result()});
+ });
  if(result < 0 || static_cast<uint32>(result) != amount) throw std::runtime_error("PS2 disc read failed.");
 }
 uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)

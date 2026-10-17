@@ -3,6 +3,8 @@
 #include <chrono>
 #include <emscripten/bind.h>
 #include "Ps2VmJs.h"
+#include "CloudCpuTiming.h"
+#include "CloudMovieMetrics.h"
 #include "GSH_WebGPU.h"
 #include "sound/SH_OpenAL/SH_OpenALProxy.h"
 #include "PS2VM_Preferences.h"
@@ -77,6 +79,39 @@ int operationStatus()
 EMSCRIPTEN_BINDINGS(CloudRcade)
 {
  using namespace emscripten;
+ function("setNativeTimingEnabled", &CloudCpuTiming::SetEnabled);
+ function("nativeCpuTiming", optional_override([]() {
+  auto snapshot = val::object();
+  const auto state = CloudCpuTiming::State().load(std::memory_order_relaxed);
+  snapshot.set("epoch", state); snapshot.set("enabled", bool(state & 1));
+  auto categories = val::array();
+  for(unsigned i = 0; i < CloudCpuTiming::Count; ++i) {
+   const auto& counters = CloudCpuTiming::Counters()[i];
+   auto category = val::object(); category.set("name", CloudCpuTiming::Name(i));
+   category.set("calls", double(counters.calls.load(std::memory_order_relaxed)));
+   category.set("samples", double(counters.samples.load(std::memory_order_relaxed)));
+   category.set("microseconds", double(counters.microseconds.load(std::memory_order_relaxed)));
+   categories.call<void>("push", category);
+  }
+  snapshot.set("categories", categories); return snapshot;
+ }));
+ function("nativeMovieTiming", optional_override([]() {
+  const auto snapshot = CloudMovieMetrics::Read();
+  auto result = val::object();
+  result.set("epoch", snapshot.epoch);
+  result.set("codedBlocks", snapshot.codedBlocks);
+  result.set("uncodedBlocks", snapshot.uncodedBlocks);
+  result.set("idctCalls", snapshot.idctCalls);
+  result.set("zeroBlocks", snapshot.zeroBlocks);
+  result.set("dcOnlyBlocks", snapshot.dcOnlyBlocks);
+  result.set("acBlocks", snapshot.acBlocks);
+  result.set("idctSamples", snapshot.idctSamples);
+  result.set("idctMicroseconds", snapshot.idctMicroseconds);
+  result.set("cscBlocks", snapshot.cscBlocks);
+  result.set("cscSamples", snapshot.cscSamples);
+  result.set("cscMicroseconds", snapshot.cscMicroseconds);
+  return result;
+ }));
  function("initialize", &initialize);
  function("setSystemLanguage", optional_override([](unsigned language) {
   if(!vm || language > 11) throw std::runtime_error("Invalid PS2 system language.");
