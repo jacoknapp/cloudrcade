@@ -11,7 +11,7 @@ const validDelta = (now, before, name) => {
  return Number.isFinite(value) && value >= 0 ? value : null;
 };
 export function sampleNativeTiming(module) {
- if(!module.nativeCpuTiming) return {line:'Native timing unavailable',details:'This core has no native timing counters.'};
+ if(!module.nativeCpuTiming) return {line:'',details:'Native emulation CPU time is not measured.'};
  const cpu=module.nativeCpuTiming(), movie=module.nativeMovieTiming?.();
  const old=baselines.get(module);baselines.set(module,{cpu,movie});
  if(!cpu.enabled || !old || cpu.epoch!==old.cpu.epoch)

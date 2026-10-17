@@ -9,6 +9,6 @@ const assert=require('node:assert/strict');
  const sample=sampleNativeTiming(module);assert.match(sample.line,/0.12 ms\/sample \(100\/6400 calls\)/);assert.match(sample.details,/not CPU utilization/);
  setNativeTimingEnabled(module,true,true);assert.match(sampleNativeTiming(module).line,/collecting/);
  setNativeTimingEnabled(module,false);assert.match(sampleNativeTiming(module).line,/collecting/);
- assert.match(sampleNativeTiming({}).line,/unavailable/);
+ assert.equal(sampleNativeTiming({}).line,'');assert.match(sampleNativeTiming({}).details,/not measured/);
  console.log('PASS native timing UI epoch reset, sparse denominator, off and missing-core fallback');
 })().catch(error=>{console.error(error);process.exitCode=1;});
