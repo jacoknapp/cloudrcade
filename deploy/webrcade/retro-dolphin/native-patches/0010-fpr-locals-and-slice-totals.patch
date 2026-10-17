@@ -1,0 +1,479 @@
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -504,6 +504,8 @@
+ // JIT cache cap is already 49152 (§28u) so memory headroom exists.
+ constexpr u32 MAX_WASM_MIXED_COMPILED_BLOCKS = 32768;
+ bool s_ppc_block_profile_enabled = false;
++std::atomic<bool> s_ppc_timing_requested{false};
++std::atomic<bool> s_slice_timing_requested{false};
+ u32 s_ppc_profile_total_blocks = 0;
+ u32 s_ppc_profile_sample_blocks = 0;
+ u32 s_ppc_profile_total_us = 0;
+@@ -2573,6 +2575,64 @@
+ };
+ static WasmGprRegCache s_gpr_rc;
+ 
++// Narrow FPR cache: contiguous register-only arithmetic/merge runs use raw
++// i64 locals, preserving NaN payloads and both PairedSingle lanes exactly.
++// Memory, partial-word operations, FPSCR and unknown instructions end a run.
++// Dirty bits stay sticky across emitted conditional helper paths, just as GPRs
++// do: a helper must see prior writes and its changes must be reloaded.
++constexpr u32 WASM_FPR_LOCAL_BASE = 41;  // 40 remains the optional hoist flag
++struct WasmFprRegCache
++{
++  bool active = false;
++  u32 ps_base = 0;
++  bool present[64] = {};
++  bool dirty[64] = {};
++};
++static WasmFprRegCache s_fpr_rc;
++
++bool RegCacheFprIndex(u32 offset, u32* index)
++{
++  if (!s_fpr_rc.active || offset < s_fpr_rc.ps_base)
++    return false;
++  const u32 relative = offset - s_fpr_rc.ps_base;
++  if (relative >= 64 * sizeof(u64) || relative % sizeof(u64) != 0)
++    return false;
++  *index = relative / sizeof(u64);
++  return s_fpr_rc.present[*index];
++}
++
++void EmitFprCacheFlushDirty(std::vector<u8>& body)
++{
++  if (!s_fpr_rc.active)
++    return;
++  for (u32 i = 0; i < 64; ++i)
++  {
++    if (!s_fpr_rc.present[i] || !s_fpr_rc.dirty[i])
++      continue;
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, WASM_FPR_LOCAL_BASE + i);
++    body.push_back(0x37);  // i64.store: no arithmetic or NaN canonicalization
++    body.push_back(0x03);
++    EmitU32Leb(body, s_fpr_rc.ps_base + i * sizeof(u64));
++  }
++}
++
++void EmitFprCacheReloadAll(std::vector<u8>& body)
++{
++  if (!s_fpr_rc.active)
++    return;
++  for (u32 i = 0; i < 64; ++i)
++  {
++    if (!s_fpr_rc.present[i])
++      continue;
++    EmitLocalGet(body, 0);
++    body.push_back(0x29);  // i64.load
++    body.push_back(0x03);
++    EmitU32Leb(body, s_fpr_rc.ps_base + i * sizeof(u64));
++    EmitLocalSet(body, WASM_FPR_LOCAL_BASE + i);
++  }
++}
++
+ // §28cz fastmem bounds-check hoist plan. Built per block (gated on the enable
+ // bit) BEFORE the emit loop by AnalyzeFastmemHoistPlan, which re-runs the exact
+ // s_fmh_ grouping logic and records, per CodeOp, whether the op is the first
+@@ -2618,6 +2678,7 @@
+ // block-end return. Dirty stays set on purpose (see struct comment).
+ void EmitRegCacheFlushDirty(std::vector<u8>& body)
+ {
++  EmitFprCacheFlushDirty(body);
+   if (!s_gpr_rc.active)
+     return;
+   for (u32 i = 0; i < 32; ++i)
+@@ -2636,6 +2697,7 @@
+ // arbitrary GPRs (interpret/system/HLE helpers). Stack-neutral.
+ void EmitRegCacheReloadAll(std::vector<u8>& body)
+ {
++  EmitFprCacheReloadAll(body);
+   if (!s_gpr_rc.active)
+     return;
+   for (u32 i = 0; i < 32; ++i)
+@@ -2655,6 +2717,7 @@
+ // fp-heavy path doesn't pay a full reload per call.
+ void EmitRegCacheReloadMask(std::vector<u8>& body, BitSet32 gprs)
+ {
++  EmitFprCacheReloadAll(body);
+   if (!s_gpr_rc.active)
+     return;
+   for (int bit : gprs)
+@@ -2735,6 +2798,13 @@
+ 
+ void EmitStateLoadF64(std::vector<u8>& body, u32 offset)
+ {
++  u32 index;
++  if (RegCacheFprIndex(offset, &index))
++  {
++    EmitLocalGet(body, WASM_FPR_LOCAL_BASE + index);
++    body.push_back(0xbf);  // f64.reinterpret_i64
++    return;
++  }
+   ++s_wasm_emit_state_load_f64_count;
+   EmitLocalGet(body, 0);
+   body.push_back(0x2b);
+@@ -2744,6 +2814,12 @@
+ 
+ void EmitStateLoadI64(std::vector<u8>& body, u32 offset)
+ {
++  u32 index;
++  if (RegCacheFprIndex(offset, &index))
++  {
++    EmitLocalGet(body, WASM_FPR_LOCAL_BASE + index);
++    return;
++  }
+   ++s_wasm_emit_state_load_i64_count;
+   EmitLocalGet(body, 0);
+   body.push_back(0x29);
+@@ -2793,6 +2869,15 @@
+ 
+ void EmitStateStoreF64Suffix(std::vector<u8>& body, u32 offset)
+ {
++  u32 index;
++  if (RegCacheFprIndex(offset, &index))
++  {
++    body.push_back(0xbd);  // i64.reinterpret_f64
++    EmitLocalSet(body, WASM_FPR_LOCAL_BASE + index);
++    body.push_back(0x1a);  // drop the prefix's state pointer
++    s_fpr_rc.dirty[index] = true;
++    return;
++  }
+   ++s_wasm_emit_state_store_f64_count;
+   body.push_back(0x39);
+   body.push_back(0x03);
+@@ -2801,6 +2886,14 @@
+ 
+ void EmitStateStoreI64Suffix(std::vector<u8>& body, u32 offset)
+ {
++  u32 index;
++  if (RegCacheFprIndex(offset, &index))
++  {
++    EmitLocalSet(body, WASM_FPR_LOCAL_BASE + index);
++    body.push_back(0x1a);  // drop the prefix's state pointer
++    s_fpr_rc.dirty[index] = true;
++    return;
++  }
+   ++s_wasm_emit_state_store_i64_count;
+   body.push_back(0x37);
+   body.push_back(0x03);
+@@ -7463,6 +7556,75 @@
+   flush_group();
+ }
+ 
++// Account exact lanes touched by the existing emitters, rather than relying
++// on analyst liveness (test ops and interpreted prefixes can omit it).
++bool CountFprCacheLaneUses(UGeckoInstruction inst, std::array<u32, 64>& uses)
++{
++  if (inst.Rc)
++    return false;
++  const auto use = [&](u32 reg, u32 lane) { ++uses[reg * 2 + lane]; };
++  if (inst.OPCD == 4 && IsPairedSingleMergeSubop(inst.SUBOP10))
++  {
++    use(inst.FA, inst.SUBOP10 >= 592 ? 1 : 0);
++    use(inst.FB, inst.SUBOP10 == 560 || inst.SUBOP10 == 624 ? 1 : 0);
++    use(inst.FD, 0);
++    use(inst.FD, 1);
++    return true;
++  }
++  if (inst.OPCD == 63 && (inst.SUBOP10 == 72 || inst.SUBOP10 == 12))
++  {
++    use(inst.FB, 0);
++    use(inst.FD, 0);
++    if (inst.SUBOP10 == 12)
++      use(inst.FD, 1);
++    return true;
++  }
++  const bool paired = inst.OPCD == 4 && IsPairedSingleArithmeticSubop(inst.SUBOP5);
++  const bool single = inst.OPCD == 59 && IsSinglePrecisionArithmeticSubop(inst.SUBOP5);
++  const bool dual = inst.OPCD == 63 && IsDoublePrecisionArithmeticSubop(inst.SUBOP5);
++  if (!paired && !single && !dual)
++    return false;
++  for (u32 lane = 0; lane < (paired ? 2u : 1u); ++lane)
++  {
++    use(inst.FA, lane);
++    const bool scalar = paired && inst.SUBOP5 >= 12 && inst.SUBOP5 <= 15;
++    if (scalar || inst.SUBOP5 == 25 || inst.SUBOP5 >= 28)
++      use(inst.FC, scalar ? (inst.SUBOP5 == 13 || inst.SUBOP5 == 15 ? 1 : 0) : lane);
++    if (inst.SUBOP5 != 25 && (!scalar || inst.SUBOP5 >= 14))
++      use(inst.FB, lane);
++    use(inst.FD, lane);
++  }
++  if (single)
++    use(inst.FD, 1);
++  return true;
++}
++
++// A run needs repeated uses to repay its eager loads. Only repeated lanes are
++// cached; untouched/single-use lanes retain the original memory emission.
++std::size_t BeginFprCacheRun(std::vector<u8>& body, const WasmStateLayout& layout,
++                            std::span<const PPCAnalyst::CodeOp> ops)
++{
++  s_fpr_rc = {};
++  if (DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_REGALLOC))
++    return 0;
++  std::array<u32, 64> uses{};
++  std::size_t count = 0;
++  for (const auto& op : ops)
++  {
++    if (op.skip || !CountFprCacheLaneUses(op.inst, uses))
++      break;
++    ++count;
++  }
++  if (count < 4)
++    return 0;
++  s_fpr_rc.active = true;
++  s_fpr_rc.ps_base = layout.ps_offset;
++  for (u32 i = 0; i < 64; ++i)
++    s_fpr_rc.present[i] = uses[i] >= 2;
++  EmitFprCacheReloadAll(body);
++  return count;
++}
++
+ std::vector<u8> BuildWasmCachedInterpreterBlock(std::span<const PPCAnalyst::CodeOp> ops,
+                                                 const WasmStateLayout& layout, u32 next_pc,
+                                                 bool write_npc,
+@@ -7528,18 +7690,34 @@
+   EmitU32Leb(exports, WASM_IMPORT_FAST_MELEE_SERVICE_POLL_CALL_INDEX + 1);
+   EmitSection(bytes, 7, exports);
+ 
+-  // §28by — `0x01, 0x7f` group adds a 4th i32 local at index 7 (regalloc
+-  // scratch). §28cx C1 — appended `0x20, 0x7f` group adds 32 i32 locals at
+-  // indices 8..39 (WASM_GPR_LOCAL_BASE + GPR index), one per PowerPC GPR.
+-  // Leading local-group count bumped 4 → 5. WASM locals are zero-initialised;
+-  // the prologue below overwrites the referenced ones with their live values.
+-  // §28cz — when the fastmem-hoist plan is active for this block, append a 6th
+-  // group `0x01, 0x7f` (one i32 at index WASM_FMH_FLAG_LOCAL=40, the per-group
+-  // range-check flag) and bump the leading group count 5 → 6. When the plan is
+-  // inactive the locals section is byte-identical to today (no extra local).
+-  std::vector<u8> body = s_fmh_plan.active
+-      ? std::vector<u8>{0x06, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c, 0x01, 0x7f, 0x20, 0x7f, 0x01, 0x7f}
+-      : std::vector<u8>{0x05, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c, 0x01, 0x7f, 0x20, 0x7f};
++  bool has_fpr_run = false;
++  if (!DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_REGALLOC))
++  {
++    std::array<u32, 64> lane_uses{};
++    u32 run_length = 0;
++    for (const auto& op : ops)
++    {
++      if (op.skip || !CountFprCacheLaneUses(op.inst, lane_uses))
++        run_length = 0;
++      else if (++run_length >= 4)
++      {
++        has_fpr_run = true;
++        break;
++      }
++    }
++  }
++  // Reserve the hoist flag at 40 when FPR locals are needed, keeping raw-bit
++  // locals at stable indices 41..104. Other blocks keep their old locals.
++  // These are internal to generated blocks; the state/save ABI is unchanged.
++  std::vector<u8> body = has_fpr_run
++      ? std::vector<u8>{0x07, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
++                        0x01, 0x7f, 0x20, 0x7f, 0x01, 0x7f, 0x40, 0x7e}
++      : s_fmh_plan.active
++          ? std::vector<u8>{0x06, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
++                            0x01, 0x7f, 0x20, 0x7f, 0x01, 0x7f}
++          : std::vector<u8>{0x05, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
++                            0x01, 0x7f, 0x20, 0x7f};
++  s_fpr_rc = {};
+ 
+   // §28cx C1: set up the GPR register cache for this block, then eagerly load
+   // every GPR the block reads or writes into its local. Eager (not lazy) load
+@@ -7571,8 +7749,18 @@
+   }
+ 
+   u32 downcount = 0;
+-  for (const PPCAnalyst::CodeOp& op : ops)
++  std::size_t fpr_run_end = 0;
++  for (std::size_t op_index = 0; op_index < ops.size(); ++op_index)
+   {
++    const PPCAnalyst::CodeOp& op = ops[op_index];
++    if (op_index == fpr_run_end)
++    {
++      EmitFprCacheFlushDirty(body);
++      s_fpr_rc = {};
++      fpr_run_end = op_index + BeginFprCacheRun(body, layout, ops.subspan(op_index));
++      if (fpr_run_end == op_index)
++        ++fpr_run_end;
++    }
+     downcount += op.opinfo->num_cycles;
+     if (op.skip)
+       continue;
+@@ -7589,6 +7777,7 @@
+           if (s_wasm_emit_fail_sample_pcs[key] == 0)
+             s_wasm_emit_fail_sample_pcs[key] = op.address;
+         }
++        s_fpr_rc = {};
+         s_gpr_rc.active = false;  // §28cx C1: don't leak cache state on abort
+         s_fmh_plan.active = false;  // §28cz: don't leak hoist plan on abort
+         s_fmh_plan.ops.clear();
+@@ -7618,6 +7807,7 @@
+   code.insert(code.end(), body.begin(), body.end());
+   EmitSection(bytes, 10, code);
+ 
++  s_fpr_rc = {};
+   s_gpr_rc.active = false;  // §28cx C1: cache state is per-block; clear on exit
+   s_fmh_plan.active = false;  // §28cz: hoist plan is per-block; clear on exit
+   s_fmh_plan.ops.clear();
+@@ -11298,7 +11488,38 @@
+   if (next_enabled && !s_ppc_block_profile_enabled)
+     ResetPpcBlockProfile();
+   s_ppc_block_profile_enabled = next_enabled;
+-  DolphinWeb::WasmTimingProfile::SetEnabled(next_enabled);
++  s_ppc_timing_requested.store(next_enabled, std::memory_order_release);
++  DolphinWeb::WasmTimingProfile::SetEnabled(
++      next_enabled || s_slice_timing_requested.load(std::memory_order_acquire));
++}
++
++// Lightweight timing is independent of per-block PPC profiling and the broad
++// worker collectMetrics gate. Exports survive LTO without a recipe export list.
++extern "C" EMSCRIPTEN_KEEPALIVE void SetSliceTimingEnabled(int enabled)
++{
++  const bool next_enabled = enabled != 0;
++  s_slice_timing_requested.store(next_enabled, std::memory_order_release);
++  DolphinWeb::WasmTimingProfile::SetEnabled(
++      next_enabled || s_ppc_timing_requested.load(std::memory_order_acquire));
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE const char* GetSliceTimingTotals()
++{
++  const auto totals = DolphinWeb::WasmTimingProfile::CaptureSliceTotals();
++  std::ostringstream out;
++  out << "{\"v\":1,\"enabled\":"
++      << (DolphinWeb::WasmTimingProfile::s_enabled.load(std::memory_order_acquire) ? "true" : "false")
++      << ",\"epoch\":" << DolphinWeb::WasmTimingProfile::s_enable_epoch.load(std::memory_order_acquire)
++      << ",\"slices\":" << totals.slices
++      << ",\"totalUs\":" << totals.total_us
++      << ",\"advanceInclUs\":" << totals.advance_inclusive_us
++      << ",\"executeInclUs\":" << totals.execute_inclusive_us
++      << ",\"compileSubsetUs\":" << totals.compile_subset_us
++      << ",\"throttleBlockedSubsetUs\":" << totals.throttle_blocked_subset_us
++      << ",\"dvdBlockedSubsetUs\":" << totals.dvd_blocked_subset_us << "}";
++  static thread_local std::string json;
++  json = out.str();
++  return json.c_str();
+ }
+ 
+ extern "C" const char* GetPpcProfileStats()
+@@ -11526,6 +11747,17 @@
+   {
+     out << "fbmap:off ";
+   }
++  // All totals cover completed profiling-enabled slices since process start.
++  // advance/execute are inclusive; compile and waits are their named subsets.
++  // Never sum them as independent occupancy or treat runOnlyMax as CPU time.
++  const auto slice_totals = DolphinWeb::WasmTimingProfile::CaptureSliceTotals();
++  out << "slicetotals:v=1,slices=" << slice_totals.slices
++      << ",totalUs=" << slice_totals.total_us
++      << ",advanceInclUs=" << slice_totals.advance_inclusive_us
++      << ",executeInclUs=" << slice_totals.execute_inclusive_us
++      << ",compileSubsetUs=" << slice_totals.compile_subset_us
++      << ",throttleBlockedSubsetUs=" << slice_totals.throttle_blocked_subset_us
++      << ",dvdBlockedSubsetUs=" << slice_totals.dvd_blocked_subset_us << " ";
+   const DolphinWeb::WasmTimingProfile::WorstSlice worst_slice =
+       DolphinWeb::WasmTimingProfile::CaptureWorstSlice();
+   out << "sliceprof:total=" << worst_slice.total_us << ",advance=" << worst_slice.advance_us
+--- a/Source/Core/Core/WasmTimingProfile.h
++++ b/Source/Core/Core/WasmTimingProfile.h
+@@ -161,7 +161,84 @@
+   std::atomic<std::int32_t> overshoot_us{0};
+ };
+ 
++// Process-lifetime totals of profiling-enabled completed slices. Fields are
++// inclusive phases or named subsets, never additive CPU-occupancy categories.
++// The CPU pthread is the only writer; readers use a coherent sequence snapshot.
++struct SliceTotals
++{
++  std::uint64_t slices = 0;
++  std::uint64_t total_us = 0;
++  std::uint64_t advance_inclusive_us = 0;
++  std::uint64_t execute_inclusive_us = 0;
++  std::uint64_t compile_subset_us = 0;
++  std::uint64_t throttle_blocked_subset_us = 0;
++  std::uint64_t dvd_blocked_subset_us = 0;
++};
++struct SliceTotalsStorage
++{
++  std::atomic<std::uint32_t> sequence{0};
++  std::atomic<std::uint64_t> slices{0};
++  std::atomic<std::uint64_t> total_us{0};
++  std::atomic<std::uint64_t> advance_inclusive_us{0};
++  std::atomic<std::uint64_t> execute_inclusive_us{0};
++  std::atomic<std::uint64_t> compile_subset_us{0};
++  std::atomic<std::uint64_t> throttle_blocked_subset_us{0};
++  std::atomic<std::uint64_t> dvd_blocked_subset_us{0};
++};
++inline SliceTotalsStorage s_slice_totals{};
++
++inline void AddSliceTotal(std::atomic<std::uint64_t>& field, std::uint64_t value)
++{
++  const std::uint64_t old = field.load(std::memory_order_relaxed);
++  const std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
++  field.store(value > max - old ? max : old + value, std::memory_order_relaxed);
++}
++
++inline void RecordSliceTotals(std::uint32_t total_us, std::uint32_t advance_us,
++                              std::uint32_t execute_us, const CurrentSlice& slice)
++{
++  advance_us = std::min(advance_us, total_us);
++  execute_us = std::min(execute_us, total_us);
++  s_slice_totals.sequence.fetch_add(1, std::memory_order_acq_rel);
++  std::atomic_thread_fence(std::memory_order_release);
++  AddSliceTotal(s_slice_totals.slices, 1);
++  AddSliceTotal(s_slice_totals.total_us, total_us);
++  AddSliceTotal(s_slice_totals.advance_inclusive_us, std::min(advance_us, total_us));
++  AddSliceTotal(s_slice_totals.execute_inclusive_us, std::min(execute_us, total_us));
++  AddSliceTotal(s_slice_totals.compile_subset_us, std::min(slice.compile_us, execute_us));
++  AddSliceTotal(s_slice_totals.throttle_blocked_subset_us,
++                std::min(slice.throttle_wait_us, advance_us));
++  AddSliceTotal(s_slice_totals.dvd_blocked_subset_us, std::min(slice.dvd_wait_us, advance_us));
++  s_slice_totals.sequence.fetch_add(1, std::memory_order_release);
++}
++
++inline SliceTotals CaptureSliceTotals()
++{
++  SliceTotals snapshot;
++  std::uint32_t before = 0;
++  std::uint32_t after = 0;
++  do
++  {
++    before = s_slice_totals.sequence.load(std::memory_order_acquire);
++    if ((before & 1U) != 0)
++      continue;
++    snapshot.slices = s_slice_totals.slices.load(std::memory_order_relaxed);
++    snapshot.total_us = s_slice_totals.total_us.load(std::memory_order_relaxed);
++    snapshot.advance_inclusive_us = s_slice_totals.advance_inclusive_us.load(std::memory_order_relaxed);
++    snapshot.execute_inclusive_us = s_slice_totals.execute_inclusive_us.load(std::memory_order_relaxed);
++    snapshot.compile_subset_us = s_slice_totals.compile_subset_us.load(std::memory_order_relaxed);
++    snapshot.throttle_blocked_subset_us =
++        s_slice_totals.throttle_blocked_subset_us.load(std::memory_order_relaxed);
++    snapshot.dvd_blocked_subset_us = s_slice_totals.dvd_blocked_subset_us.load(std::memory_order_relaxed);
++    // Keep payload loads before the validating sequence read on ARM as well.
++    std::atomic_thread_fence(std::memory_order_acquire);
++    after = s_slice_totals.sequence.load(std::memory_order_acquire);
++  } while (before != after || (after & 1U) != 0);
++  return snapshot;
++}
++
+ inline std::atomic<bool> s_enabled{false};
++inline std::atomic<std::uint32_t> s_enable_epoch{0};
+ inline thread_local CurrentSlice s_current_slice{};
+ inline thread_local CurrentDvdCompletion s_current_dvd_completion{};
+ inline thread_local ThrottleSite s_current_throttle_site = ThrottleSite::None;
+@@ -257,6 +334,8 @@
+ inline void SetEnabled(bool enabled)
+ {
+   const bool was_enabled = s_enabled.exchange(enabled, std::memory_order_acq_rel);
++  if (enabled != was_enabled)
++    s_enable_epoch.fetch_add(1, std::memory_order_release);
+   s_current_slice = {};
+   s_current_dvd_completion = {};
+   s_current_throttle_site = ThrottleSite::None;
+@@ -548,6 +627,7 @@
+   if (!s_current_slice.active)
+     return;
+   s_current_slice.active = false;
++  RecordSliceTotals(total_us, advance_us, execute_us, s_current_slice);
+ 
+   if (total_us <= s_worst_slice.total_us.load(std::memory_order_relaxed))
+     return;
