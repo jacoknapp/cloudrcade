@@ -203,3 +203,7 @@ for name in ['dispFb', 'dispFb1', 'dispFb2']:
     assert text.count(old) == 1
     text = text.replace(old, old + f'\n\t\t\tlayer.bufOffsetX = {name}.nX; layer.bufOffsetY = {name}.nY;')
 path.write_text(text)
+
+# Movie code generation and opt-in classification/timing have separate ownership.
+import subprocess
+subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=True)
