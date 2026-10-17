@@ -54,6 +54,13 @@ class CoreCacheTest(unittest.TestCase):
         self.assertEqual(self.changed('deploy/webrcade/retro-azahar/patches/new.patch'), {'3ds'})
         self.assertEqual(self.changed('deploy/webrcade/touch/assets/controller.css'), {'gamecube', 'ps2'})
         self.assertEqual(self.changed('deploy/webrcade/retro-play/native/CloudRcade.cpp'), {'ps2', 'ps2-native'})
+        # Newly added native patch helpers must invalidate both the compiler
+        # receipt and the adapter package; otherwise old binaries can be reused.
+        before = cache.ps2_native_key(self.root)
+        self.assertEqual(self.changed('deploy/webrcade/retro-play/patch-extra-native.py'), {'ps2', 'ps2-native'})
+        self.assertNotEqual(before, cache.ps2_native_key(self.root))
+        prepare = runpy.run_path(str(self.root / cache.BASE / 'retro-play/prepare.py'))
+        self.assertEqual(prepare['native_key'](), cache.ps2_native_key(self.root))
         self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/sdk/pause.jsx'), {'gamecube', 'ps2'})
         self.assertEqual(self.changed('deploy/webrcade/touch/cloud/bridge.js'), set())
         self.assertEqual(self.changed('README.md'), set())

@@ -29,7 +29,7 @@ INPUTS = {
     'gamecube-native': [BASE + 'retro-dolphin/' + name for name in
         ('core.json', 'native-build.json', 'native-build.py', 'build-linux.sh', 'native-patches')],
     'ps2-native': [BASE + 'retro-play/' + name for name in
-        ('core.json', 'native-build.json', 'patch-native.py', 'build-linux.sh', 'Dockerfile.build', 'native', 'gpu')],
+        ('core.json', 'native-build.json', 'patch-*.py', 'build-linux.sh', 'Dockerfile.build', 'native', 'gpu')],
 }
 # These two operator guides are neither read by their builders nor shipped in
 # their corresponding-source archives. Other documentation (e.g. GC adapter
@@ -153,7 +153,8 @@ def inventory(output):
 
 def ps2_native_key(root=ROOT):
     here = root / BASE / 'retro-play'
-    files = [here / name for name in ('core.json', 'patch-native.py', 'build-linux.sh', 'Dockerfile.build')]
+    files = [here / name for name in ('core.json', 'build-linux.sh', 'Dockerfile.build')]
+    files += sorted(here.glob('patch-*.py'))
     files += sorted((here / 'native').glob('*'))
     files += sorted(p for p in (here / 'gpu').rglob('*') if p.is_file() and '__pycache__' not in p.parts)
     return hashlib.sha256(''.join(sha(p) for p in files).encode()).hexdigest()

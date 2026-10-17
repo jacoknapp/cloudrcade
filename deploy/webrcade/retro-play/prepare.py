@@ -31,7 +31,10 @@ def sha(path):
     return digest.hexdigest()
 
 def native_key():
-    files = [HERE / name for name in ['core.json', 'patch-native.py', 'build-linux.sh', 'Dockerfile.build']]
+    files = [HERE / name for name in ['core.json', 'build-linux.sh', 'Dockerfile.build']]
+    # Native patch helpers are compiler inputs too. Hash the complete helper
+    # set so adding a CPU/movie patch cannot reuse an older native receipt.
+    files += sorted(HERE.glob('patch-*.py'))
     files += sorted((HERE / 'native').glob('*'))
     files += sorted(path for path in (HERE / 'gpu').rglob('*') if path.is_file() and '__pycache__' not in path.parts)
     return hashlib.sha256(''.join(sha(path) for path in files).encode()).hexdigest()
@@ -55,7 +58,9 @@ def prepare(work, out):
     run('git', 'fetch', '--depth', '1', '--no-tags', 'origin', LOCK['commit'], cwd=source)
     # Only this builder's marked disposable tree is reset, never a source repo.
     run('git', 'reset', '--hard', LOCK['commit'], cwd=source)
-    run('git', 'submodule', 'update', '--init', '--recursive', '--depth', '1', cwd=source)
+    # This marked builder-owned checkout is patched after every reset. Restore
+    # tracked submodule inputs before applying our patches again on a repeat run.
+    run('git', 'submodule', 'update', '--init', '--recursive', '--depth', '1', '--force', cwd=source)
     run('git', 'submodule', 'foreach', '--recursive', 'git diff --quiet && git diff --cached --quiet', cwd=source)
     run('python3', str(HERE / 'patch-native.py'), str(source))
     gpu_source = work / 'gpu-upstream'
