@@ -16,7 +16,7 @@ index f1ecf61..e13a88f 100644
 @@ -1075,6 +1079,26 @@ u32 WebGPUCommandStream::PushCreateTexture(u32 w, u32 h, u32 wgpu_format, u32 us
    return id;
  }
- 
+
 +bool WebGPUCommandStream::PushDecodeTexture(u32 id, u32 src_heap_ptr, u32 bytes,
 +                                            u32 w, u32 h, u32 mip_level, u32 aligned_width)
 +{
@@ -52,7 +52,7 @@ index 7564fc1..5743a86 100644
 +  // u6=aligned width. Packet: {format,tlutFormat,dataBytes,paletteBytes}, GX bytes.
 +  DecodeTexture = 26,
  };
- 
+
  // Stable producer attribution for UploadBuffer records. The value is carried
 @@ -363,6 +366,8 @@ public:
                          BufferUploadRole role);
@@ -73,7 +73,7 @@ index 8ba515c..eda2181 100644
    void ReleaseTextureResource(u32 id);
 +  // Decode writes must follow any recorded draws that may reference a recycled texture.
 +  void PrepareTextureDecode() { EndPassIfOpen(); }
- 
+
    std::unique_ptr<AbstractTexture> CreateTexture(const TextureConfig& config,
                                                   std::string_view name) override;
 diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
@@ -81,13 +81,13 @@ index a0371a1..2168aba 100644
 --- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
 +++ b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
 @@ -8,6 +8,9 @@
- 
+
  #include "VideoBackends/WebGPU/WebGPUCommandStream.h"
  #include "VideoBackends/WebGPU/WebGPUGfx.h"
 +#include "VideoCommon/VideoConfig.h"
 +
 +extern "C" unsigned int DolphinWeb_GetRendererFeatureMask();
- 
+
  namespace WebGPU
  {
 @@ -47,6 +50,7 @@ static constexpr u32 kTexUsage = 1u | 2u | 4u | 0x10u;
@@ -132,7 +132,7 @@ index a0371a1..2168aba 100644
 @@ -196,13 +206,85 @@ void WebGPUTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const
    EmitUpload(level, width, height, layer);
  }
- 
+
 +bool WebGPUTexture::LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
 +                                u32 aligned_height, const u8* data, u32 data_size,
 +                                TextureFormat format, const u8* palette, TLUTFormat palette_format)
@@ -208,13 +208,13 @@ index a0371a1..2168aba 100644
 +  MaterializeShadow(layer, level);
    return m_data[layer][level].data();
  }
- 
+
  u8* WebGPUTexture::GetData(u32 layer, u32 level)
  {
 +  MaterializeShadow(layer, level);
    return m_data[layer][level].data();
  }
- 
+
 diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h
 index 396fe8e..77bfbb2 100644
 --- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h
@@ -222,17 +222,17 @@ index 396fe8e..77bfbb2 100644
 @@ -40,6 +40,9 @@ public:
    void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer, size_t buffer_size,
              u32 layer) override;
- 
+
 +  bool LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
 +                   u32 aligned_height, const u8* data, u32 data_size,
 +                   TextureFormat format, const u8* palette, TLUTFormat palette_format) override;
    const u8* GetData(u32 layer, u32 level) const;
    u8* GetData(u32 layer, u32 level);
- 
+
 @@ -53,7 +56,17 @@ private:
    u32 EnsureBridgeId();
    bool EmitUpload(u32 level, u32 width, u32 height, u32 layer);
- 
+
 -  std::vector<std::vector<std::vector<u8>>> m_data;
 +  struct EncodedMip
 +  {
@@ -247,7 +247,7 @@ index 396fe8e..77bfbb2 100644
 +  mutable std::vector<std::vector<std::vector<u8>>> m_data;
    u32 m_bridge_id = 0;
  };
- 
+
 diff --git a/Source/Core/VideoCommon/AbstractTexture.h b/Source/Core/VideoCommon/AbstractTexture.h
 index 3abd535..98e7749 100644
 --- a/Source/Core/VideoCommon/AbstractTexture.h
@@ -257,13 +257,13 @@ index 3abd535..98e7749 100644
  #include "Common/MathUtil.h"
  #include "VideoCommon/TextureConfig.h"
 +#include "VideoCommon/TextureDecoder.h"
- 
+
  struct ImTextureRef;
- 
+
 @@ -32,6 +33,15 @@ public:
    virtual void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer,
                      size_t buffer_size, u32 layer = 0) = 0;
- 
+
 +  // Optional native tiled upload. False preserves the exact software conversion path.
 +  // The backend must snapshot source/palette before returning, including for deferred replay.
 +  virtual bool LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
@@ -283,7 +283,7 @@ index bbcd114..a17a10f 100644
 @@ -1673,12 +1673,18 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
      // Initialized to null because only software loading uses this buffer
      u8* dst_buffer = nullptr;
- 
+
 -    if (!decode_on_gpu ||
 +    const bool native_tiled_upload =
 +        !(texture_info.IsFromTmem() && texture_info.GetTextureFormat() == TextureFormat::RGBA8);
@@ -300,11 +300,11 @@ index bbcd114..a17a10f 100644
 +            texture_info.GetTlutAddress(), texture_info.GetTlutFormat())))
      {
        size_t decoded_texture_size = expanded_width * sizeof(u32) * expanded_height;
- 
+
 @@ -1731,16 +1737,30 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
          continue;
        }
- 
+
 -      if (!decode_on_gpu ||
 +      // If the base used software, keep every mip on software so the arbitrary mip
 +      // detector has a complete chain. A malformed/unsupported base never partially opts in.
@@ -338,20 +338,20 @@ index bbcd114..a17a10f 100644
 @@ -1750,14 +1770,16 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
                               mip_level.GetRawHeight(), mip_level.GetExpandedWidth(), dst_buffer,
                               decoded_mip_size);
- 
+
 -        arbitrary_mip_detector.AddLevel(mip_level.GetRawWidth(), mip_level.GetRawHeight(),
 -                                        mip_level.GetExpandedWidth(), dst_buffer);
 +        if (!native_base_decoded)
 +          arbitrary_mip_detector.AddLevel(mip_level.GetRawWidth(), mip_level.GetRawHeight(),
 +                                          mip_level.GetExpandedWidth(), dst_buffer);
- 
+
          dst_buffer += decoded_mip_size;
        }
      }
- 
+
 -    entry->has_arbitrary_mips = arbitrary_mip_detector.HasArbitraryMipmaps(dst_buffer);
 +    entry->has_arbitrary_mips = !native_base_decoded &&
 +        arbitrary_mip_detector.HasArbitraryMipmaps(dst_buffer);
- 
+
      if (g_ActiveConfig.bDumpTextures && !skip_texture_dump && texLevels > 0)
      {
