@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{execFileSync}=require('node:child_process');
 const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/native'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'ps2-native-disc-'));
 try{
+ fs.copyFileSync(path.join(root,'CpuTiming.h'),path.join(dir,'CloudCpuTiming.h'));
  fs.copyFileSync(path.join(root,'DiscImageDeviceStream.h'),path.join(dir,'Js_DiscImageDeviceStream.h'));
  fs.writeFileSync(path.join(dir,'Stream.h'),`#pragma once
 #include <cstdint>
