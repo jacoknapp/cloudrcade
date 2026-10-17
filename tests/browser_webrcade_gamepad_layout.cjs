@@ -28,10 +28,12 @@ const fixture = `
   if(matchMedia('(pointer: coarse)').matches) Object.defineProperty(navigator,'maxTouchPoints',{value:5});
   window.WrcadCloudConfig={storagePrefix:'gamepad-fixture'};
   window.cloudWrites=[]; window.WrcadCloud={controlsChanged:patch=>cloudWrites.push(patch)};
-  window.pads=new URL(location.href).searchParams.has('connected')?[{index:0,connected:true}]:[];
-  Object.defineProperty(navigator,'getGamepads',{value:()=>window.pads});
+  window.pads=new URL(location.href).searchParams.has('connected')?[{index:0,connected:true,mapping:'standard'}]:[];
+  if(new URL(location.href).searchParams.has('unmapped'))window.pads=[{index:0,connected:true,mapping:''}];
+  window.padApiUnavailable=false;
+  Object.defineProperty(navigator,'getGamepads',{value:()=>{if(padApiUnavailable)throw new Error('Gamepad API unavailable');return window.pads}});
   window.setPads=(indices,event=true)=>{
-    const previous=window.pads; window.pads=indices.map(index=>({index,connected:true}));
+    const previous=window.pads; window.pads=indices.map(index=>typeof index==='number'?{index,connected:true,mapping:'standard'}:{connected:true,...index});
     if(event) for(const [kind,list,other] of [['gamepaddisconnected',previous,window.pads],['gamepadconnected',window.pads,previous]])
       for(const pad of list) if(!other.some(p=>p.index===pad.index)) {const e=new Event(kind);e.gamepad=pad;dispatchEvent(e);}
   };
@@ -89,9 +91,21 @@ const fixture = `
     assert.equal(await page.evaluate(()=>pauseCalls),0,label+' presentation does not pause');
    };
    for(const core of cores){
-    // One actual button exists with no physical controller too, saves the
-    // existing normal preference and survives reload in either state.
-    await page.goto('http://gamepad.test/play/app/'+core+'/');
+    // An unknown device retains the normal touch preference and manual button.
+    // Both choices persist across reload without changing the gamepad override.
+    await page.goto('http://gamepad.test/play/app/'+core+'/?unmapped');
+    await page.locator('.kt-pad').waitFor({state:'visible'});
+    assert.equal(await page.locator('.kt-toggle').textContent(),'Touch controls: On',core+' unknown mapping cannot auto-hide touch');
+    // Mixed devices, polling without events, then the event-only API fallback.
+    await page.evaluate(()=>setPads([{index:0,mapping:''},1]));await centered(core+' supported plus unknown pad');
+    await page.evaluate(()=>setPads([{index:0,mapping:''}],false));await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.evaluate(()=>setPads([]));
+    await page.evaluate(()=>{padApiUnavailable=true;setPads([{index:2,mapping:''}])});
+    await page.waitForTimeout(180);assert(await page.locator('.kt-pad').isVisible(),core+' unknown hotplug fallback retains touch');
+    await page.evaluate(()=>setPads([{index:2,mapping:''},3]));await centered(core+' supported hotplug fallback');
+    await page.evaluate(()=>setPads([{index:2,mapping:''}]));await page.locator('.kt-pad').waitFor({state:'visible'});
+    await page.evaluate(()=>{padApiUnavailable=false;setPads([{index:0,mapping:''}])});
+    assert.deepEqual(await page.evaluate(()=>cloudWrites),[],core+' capability detection does not save preferences');
     await page.locator('.kt-pad').waitFor({state:'visible'});await page.locator('.kt-tab').tap();
     assert.equal(await page.locator('.kt-toggle,.kt-gamepad-touch').count(),1,'one touch controls button in the drawer');
     const controls=page.getByRole('button',{name:'Touch controls: On',exact:true});
@@ -154,7 +168,7 @@ const fixture = `
     await page.evaluate(()=>setPads([],false));await page.locator('.kt-pad').waitFor({state:'visible'});
     await page.evaluate(()=>setPads([0],false));await centered(core+' polling fallback');
     assert.deepEqual(await page.evaluate(()=>cloudWrites),[],'automatic presentation/override never changes cloud settings');
-    console.log('PASS',engine.name(),core,'normal-button/off/on/cloud/persistence + connect/rotate/override/reload/multiple/disconnect/held-input/poll');
+    console.log('PASS',engine.name(),core,'normal-button/off/on/cloud/persistence + mapping/fallback/connect/rotate/override/reload/multiple/disconnect/held-input/poll');
    }
    // Connected On temporarily overrides a normal Controls-off preference.
    // Last disconnect must release a held touch even though gamepadMode stays off.

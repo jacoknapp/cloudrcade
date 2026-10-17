@@ -1096,16 +1096,27 @@
       if (emulator?.started) emulator.updateScreenSize?.();
     }
   }
+  // Only a recognized layout can safely replace the touch controls. Native
+  // PS2/GameCube accept standard pads, and the legacy SDK assumes that mapping
+  // even for unknown devices. Leave its input handling and manual toggle intact.
+  const replacesTouchControls = pad => pad && pad.connected !== false && pad.mapping === 'standard';
   function pollGamepads() {
     try {
       const pads = navigator.getGamepads?.();
-      if (pads) gamepadConnected = Array.from(pads).some(pad => pad && pad.connected !== false);
+      if (pads) {
+        // Keep the event fallback consistent after a snapshot-only disconnect.
+        eventGamepads.clear();
+        for (const pad of Array.from(pads).filter(replacesTouchControls)) eventGamepads.add(pad.index);
+        gamepadConnected = eventGamepads.size > 0;
+      }
     } catch (_) { /* Unavailable API: retain the last hotplug event. */ }
     updateGamepadPresentation();
   }
   const eventGamepads = new Set();
   window.addEventListener('gamepadconnected', event => {
-    eventGamepads.add(event.gamepad.index); gamepadConnected = true; pollGamepads();
+    if (replacesTouchControls(event.gamepad)) eventGamepads.add(event.gamepad.index);
+    else eventGamepads.delete(event.gamepad.index);
+    gamepadConnected = eventGamepads.size > 0; pollGamepads();
   });
   window.addEventListener('gamepaddisconnected', event => {
     eventGamepads.delete(event.gamepad.index); gamepadConnected = eventGamepads.size > 0; pollGamepads();
