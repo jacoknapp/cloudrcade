@@ -85,6 +85,15 @@ text = text.replace('target_link_options(Play PRIVATE "-sOFFSCREEN_FRAMEBUFFER=1
 text = text.replace('target_link_options(Play PRIVATE "-sUSE_WEBGL2=1")', '')
 path.write_text(text)
 
+# Keep code-cache hashes bit-identical while enabling upstream's Wasm SIMD
+# implementation in the xxhash translation unit only. No other core compiler
+# flags change; this pinned SDK selects XXH_NEON via its SIMDe arm_neon.h.
+edit('Source/CMakeLists.txt', 'LIST(APPEND PROJECT_LIBS xxHash::xxhash)',
+     'LIST(APPEND PROJECT_LIBS xxHash::xxhash)\n'
+     'if(EMSCRIPTEN)\n'
+     ' target_compile_options(xxhash PRIVATE "-msimd128")\n'
+     'endif()')
+
 # Browsers cannot protect EE RAM pages to catch writes to compiled code. Games
 # replace executable overlays and call FlushCache before running the new code.
 # Compare only active instruction ranges at that safe point; unchanged blocks
