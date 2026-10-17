@@ -28,7 +28,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  assert.equal((await disc.read(size-3,16)).length,3);assert.equal((await disc.read(size,10)).length,0);
  for(let i=0;i<20;i++)await disc.read(i*CHUNK,64);
  assert(disc.cachedBytes<=CHUNK*LIMIT);assert(disc.transferred<size,'no complete DVD read');
- const module={HEAPU8:new Uint8Array(CHUNK*5)},errors=[];
+ const module={_gpu_set_timing(){},HEAPU8:new Uint8Array(CHUNK*5)},errors=[];
  const device=new DiscDevice(module,disc,error=>errors.push(error));device.read(0,CHUNK-8,CHUNK+32);
  while(!device.isDone())await new Promise(resolve=>setTimeout(resolve,1));assert.equal(device.result(),CHUNK+32);
  assert.equal(module.HEAPU8[0],(CHUNK-8)%251);assert.deepEqual(errors,[]);
@@ -94,13 +94,14 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  for(let i=1;i<=400;i++){clock+=i;metrics.present(metrics.epoch);}const bounded=metrics.take();assert.equal(metrics.intervals.length,240);assert.equal(bounded.max,400);assert.equal(bounded.p95,388);
  metrics.setEnabled(false);const disabledReads=clockReads;metrics.begin();metrics.present(metrics.epoch);metrics.take();assert.equal(clockReads,disabledReads);
  let rendered=10,video=20;
- const monitor=new Ps2Performance({getFrames:()=>rendered,getVideoFrames:()=>video,getVideoRate:()=>60,HEAPU8:{length:256*1024**2}},{});
- assert(monitor.element.hidden,'readout off by default');monitor.sample(1000);rendered+=30;video+=60;monitor.sample(2000);
+ const monitorGates=[];
+ const monitor=new Ps2Performance({cloudGpu:{setTimingEnabled:(...args)=>monitorGates.push(args)},getFrames:()=>rendered,getVideoFrames:()=>video,getVideoRate:()=>60,HEAPU8:{length:256*1024**2}},{});
+ assert(monitor.element.hidden,'readout off by default');assert.equal(monitorGates.at(-1)[0],false);monitor.sample(1000);rendered+=30;video+=60;monitor.sample(2000);
  assert(monitor.details.includes('30.0 FPS')&&monitor.details.includes('100% normal speed'),'rendered presents and emulated timing stay separate');
  preferences.set('metric_test.ps2.perf.v1','1');rendered+=30;video+=60;monitor.sample(3000);assert(!monitor.element.hidden);
  assert.equal(monitor.element.textContent,'PS2 measuring…');rendered+=30;video+=60;monitor.sample(4000);
  assert(monitor.element.textContent.includes('Frame')&&monitor.details.includes('not additive'));
- monitor.reset(true);monitor.sample(4000);assert.equal(monitor.element.textContent,'PS2 paused');monitor.dispose();
+ assert.equal(monitorGates.at(-1)[0],true);const priorEpoch=monitorGates.at(-1)[1];monitor.reset();assert(monitorGates.at(-1)[1]>priorEpoch,'state reset starts a new native timing epoch');monitor.reset(true);assert.equal(monitorGates.at(-1)[0],false);monitor.sample(4000);assert.equal(monitor.element.textContent,'PS2 paused');monitor.dispose();
  const {pictureBounds,viewportKey}=await import(pathToFileURL(path.join(root,'viewport.mjs')));
  const windowOf=(width,height)=>{const value={innerWidth:width,innerHeight:height};value.top=value;return value;};
  for(const [width,height]of [[320,568],[390,844],[768,1024],[844,390]]){
@@ -119,7 +120,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  const gpu=new Ps2Gpu(core,error=>gpuErrors.push(error.message));
  let batchFlags=1;
  let presented=0;const gpuCalls=[];
- gpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_write(pointer,count){assert.equal(count,3);assert.deepEqual([...this.HEAPU8.subarray(pointer,pointer+12)],Array.from({length:12},(_,i)=>i));},_gpu_batch(){return batchFlags;},_gpu_present(){presented++;return 1;},_gpu_destroy(){gpuCalls.push('destroy');},async ccall(name){gpuCalls.push(name);assert(['gpu_wait','gpu_reset'].includes(name));await new Promise(resolve=>setTimeout(resolve,2));}};
+ gpu.module={_gpu_set_timing(){},HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_write(pointer,count){assert.equal(count,3);assert.deepEqual([...this.HEAPU8.subarray(pointer,pointer+12)],Array.from({length:12},(_,i)=>i));},_gpu_batch(){return batchFlags;},_gpu_present(){presented++;return 1;},_gpu_destroy(){gpuCalls.push('destroy');},async ccall(name){gpuCalls.push(name);assert(['gpu_wait','gpu_reset'].includes(name));await new Promise(resolve=>setTimeout(resolve,2));}};
  core.HEAPU8.set(Array.from({length:12},(_,i)=>i),16);
  gpu.nativeCall(1,16,12,0,128);await gpu.chain;assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),1);
  core.HEAPU8=new Uint8Array(new SharedArrayBuffer(2048));
@@ -140,11 +141,20 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  gpu.nativeCall(99,0,0,0,128);await gpu.chain;assert.equal(Atomics.load(new Int32Array(core.HEAPU8.buffer),32),-1);assert.match(gpuErrors[0],/Invalid PS2 graphics command/);
  await gpu.dispose();assert.equal(gpu.module,null);assert.doesNotThrow(()=>gpu.nativeCall(1,0,12,0,128));
  assert.equal(gpuCalls.at(-1),'destroy');assert.equal(gpuCalls.filter(name=>name==='gpu_wait').length,6,'all submitted displays drain before failure/disposal');
+ // Collection toggles reset native epochs once, including a reset with the
+ // same enabled preference. Closing prevents late preference changes.
+ const gates=[],gateGpu=new Ps2Gpu({},()=>{});
+ gateGpu.setTimingEnabled(true,1); // Preference can arrive before initialization.
+ gateGpu.module={_gpu_set_timing:enabled=>gates.push(enabled),_gpu_destroy(){}};
+ gateGpu.setTimingEnabled(true,2);gateGpu.setTimingEnabled(true,2);
+ gateGpu.setTimingEnabled(false,3);gateGpu.setTimingEnabled(true,4);
+ assert.deepEqual(gates,[1,0,1]);await gateGpu.dispose();
+ gateGpu.setTimingEnabled(true,5);assert.deepEqual(gates,[1,0,1,0]);
  // Real adapter accounting separates synchronous submission from async wait.
  const timedCore={HEAPU8:new Uint8Array(new SharedArrayBuffer(1024)),cloudTimings:new FrameTimings(()=>clock)};
  const tracked=timedCore.cloudTimings;tracked.setEnabled(true);
  const timedGpu=new Ps2Gpu(timedCore,error=>{throw error;});
- timedGpu.module={HEAPU8:new Uint8Array(1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_batch(){clock+=4;return 7;},async ccall(){clock+=12;}};
+ timedGpu.module={_gpu_set_timing(){},HEAPU8:new Uint8Array(1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_batch(){clock+=4;return 7;},async ccall(){clock+=12;}};
  timedGpu.nativeCall(8,0,0,0,128);clock+=3;await timedGpu.chain;
  const gpuTiming=tracked.take();assert.equal(gpuTiming.gpuSubmit,4);assert.equal(gpuTiming.gpuWait,12);assert.equal(gpuTiming.bridge,3);assert.equal(gpuTiming.frames,1);assert.equal(gpuTiming.calls,1);
  await timedGpu.dispose();
@@ -154,7 +164,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  const growingCore={HEAPU8:new Uint8Array(memory.buffer)},payload=Uint8Array.from({length:4096},(_,i)=>(i*37+11)&255);
  growingCore.HEAPU8.set(payload,1024);
  const growingGpu=new Ps2Gpu(growingCore,error=>{throw error;});let consumed=false,release;
- growingGpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,1024);assert.deepEqual(this.HEAPU8.subarray(pointer,pointer+4096),payload);consumed=true;}};
+ growingGpu.module={_gpu_set_timing(){},HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,1024);assert.deepEqual(this.HEAPU8.subarray(pointer,pointer+4096),payload);consumed=true;}};
  growingGpu.chain=new Promise(resolve=>{release=resolve;});
  growingGpu.nativeCall(1,1024,4096,0,128);
  const oldSharedBuffer=growingCore.HEAPU8.buffer;memory.grow(1);growingCore.HEAPU8=new Uint8Array(memory.buffer);
@@ -167,7 +177,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  // later overlapping request must not overwrite the first staged payload.
  const queuedCore={HEAPU8:new Uint8Array(new SharedArrayBuffer(16384))},queuedGpu=new Ps2Gpu(queuedCore,error=>{throw error;});
  const firstPacket=Uint8Array.from({length:1024},(_,i)=>i&255),secondPacket=Uint8Array.from({length:1024},(_,i)=>(i+73)&255),received=[];let openQueue;
- queuedGpu.module={HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,256);received.push(this.HEAPU8.slice(pointer,pointer+1024));}};
+ queuedGpu.module={_gpu_set_timing(){},HEAPU8:new Uint8Array(8*1024*1024),_malloc:()=>16,_free(){},_gpu_destroy(){},_gpu_write(pointer,count){assert.equal(count,256);received.push(this.HEAPU8.slice(pointer,pointer+1024));}};
  queuedGpu.chain=new Promise(resolve=>{openQueue=resolve;});
  queuedCore.HEAPU8.set(firstPacket,1024);queuedGpu.nativeCall(1,1024,1024,0,128);queuedCore.HEAPU8.fill(0,1024,2048);
  queuedCore.HEAPU8.set(secondPacket,2048);queuedGpu.nativeCall(1,2048,1024,0,132);queuedCore.HEAPU8.fill(0,2048,3072);
@@ -178,7 +188,7 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  // Synchronous staging failures must reach the native acknowledgement rather
  // than escaping the main-thread proxy and leaving the worker blocked.
  const copyFailures=[],copyCore={HEAPU8:new Uint8Array(new SharedArrayBuffer(4096))},copyFailure=new Ps2Gpu(copyCore,error=>copyFailures.push(error.message));
- copyFailure.module={HEAPU8:new Uint8Array(4096),_malloc(){throw new Error('Owned allocation failure');},_gpu_destroy(){}};
+ copyFailure.module={_gpu_set_timing(){},HEAPU8:new Uint8Array(4096),_malloc(){throw new Error('Owned allocation failure');},_gpu_destroy(){}};
  assert.doesNotThrow(()=>copyFailure.nativeCall(1,1024,12,0,128));await copyFailure.chain;
  assert.deepEqual(copyFailures,['Owned allocation failure']);assert.equal(Atomics.load(new Int32Array(copyCore.HEAPU8.buffer),32),-1);assert.equal(copyFailure.pending,0);await copyFailure.dispose();
  const nativeFailure=new Ps2Gpu(core,error=>assert.match(error.message,/WebGPU operation failed/));nativeFailure.fail(17);await nativeFailure.dispose();

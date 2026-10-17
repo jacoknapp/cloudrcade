@@ -10,13 +10,14 @@ void write(std::uint32_t, std::uint64_t);
 extern std::uint32_t cbp0, cbp1;
 }
 namespace ps2::gs::gpu { void shutdown(); bool present_layers(const std::uint32_t*); void save_transfer(std::uint32_t*); void load_transfer(const std::uint32_t*); }
-namespace ps2::gs::gpu { bool timestamp_queries(); double compute_samples(); double compute_ms(); }
+namespace ps2::gs::gpu { void reset_timestamp_collection(); void set_timestamp_collection(bool); bool timestamp_queries(); double compute_samples(); double compute_ms(); }
 namespace ps2 { extern unsigned long long cloudGpuFrames; }
 using namespace ps2::gs;
 static std::vector<std::uint8_t> snapshot;
 static constexpr std::uint32_t magic = 0x32534757;
 static constexpr size_t stateSize = 16 + sizeof(State) + kMemorySize + 512 * 4 + 512;
 extern "C" {
+EMSCRIPTEN_KEEPALIVE void gpu_set_timing(int enabled) { gpu::set_timestamp_collection(enabled != 0); }
 EMSCRIPTEN_KEEPALIVE int gpu_has_timestamps() { return gpu::timestamp_queries(); }
 EMSCRIPTEN_KEEPALIVE double gpu_compute_samples() { return gpu::compute_samples(); }
 EMSCRIPTEN_KEEPALIVE double gpu_compute_ms() { return gpu::compute_ms(); }
@@ -62,12 +63,14 @@ EMSCRIPTEN_KEEPALIVE void gpu_load(const std::uint8_t* data, unsigned size) {
  if(next.count<0 || next.count>3) throw std::runtime_error("Invalid GS vertex queue.");
  std::memcpy(vram.data(),data+16+sizeof(State),kMemorySize);
  std::memcpy(clut.data(),data+16+sizeof(State)+kMemorySize,512*4);
+ gpu::reset_timestamp_collection();
  gpu::write_state(vram,1,clut);
  std::uint32_t transfer[128]; std::memcpy(transfer,data+stateSize-512,512); gpu::load_transfer(transfer);
  g_state=next; cbp0=header[2]; cbp1=header[3]; ++g_setup_generation;
 }
 EMSCRIPTEN_KEEPALIVE void gpu_reset() {
  std::vector<std::uint32_t> vram(kMemorySize/4),clut(512);
+ gpu::reset_timestamp_collection();
  gpu::write_state(vram,1,clut);
  std::uint32_t transfer[128]{}; transfer[9]=32; gpu::load_transfer(transfer);
  g_state={}; cbp0=cbp1=~0u; ++g_setup_generation;

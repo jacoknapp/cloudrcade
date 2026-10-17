@@ -87,11 +87,42 @@ s = s.replace('    g_commands.push_back({kDisplay, (src.width * g_scale + 7) / 8
       std::copy(cloud_layers+2,cloud_layers+26,record.begin()+4);
     }
     g_commands.push_back({cloud_composite?kComposite:kDisplay, (src.width * g_scale + 7) / 8, (src.height * g_scale + 7) / 8, param});''', 1)
+# The upstream file profiler has a blocking map reachable from submit even
+# when its environment variable is unset. This browser bridge has no file
+# profiling API. Remove that unused suspension path; conservative EH and
+# virtual-call analysis can still instrument submission. keep all real queue fences, state and VRAM readback waits.
+start = s.index('void profile_submit() {')
+end = s.index('// Browsers copy writes', start)
+s = s[:start] + s[end:]
+start = s.index('    if (g_profile_out && !present_view')
+end = s.index('    ensure_capacity();', start)
+s = s[:start] + s[end:]
+start = s.index('    if (const char *spec = std::getenv("PS2_GPU_PROFILE"))')
+end = s.index('    if (const char *scale', start)
+s = s[:start] + s[end:]
+# Both counters and the sole mapped buffer belong to a collection epoch.
+s = s.replace('bool g_query_pending = false, g_query_ready = false;', 'TimestampSampling g_sampling;')
+s = s.replace('#include <emscripten.h>', '#include <emscripten.h>\n#include "timestamp-sampling.hpp"', 1)
+start = s.index('    if (g_query_ready) {')
+end = s.index('    WGPUCommandEncoder enc', start)
+s = s[:start] + '''    g_sampling.collect([](std::uint64_t& start, std::uint64_t& end) {
+        const auto* mapped = wgpuBufferGetConstMappedRange(g_query_read, 0, 16);
+        if (!mapped) return false;
+        std::uint64_t t[2]; std::memcpy(t, mapped, sizeof t); start=t[0]; end=t[1]; return true;
+    }, [] { wgpuBufferUnmap(g_query_read); });
+    const bool measure = g_sampling.can_begin(g_timestamps);
+''' + s[end:]
+s = s.replace('        g_query_pending = true;', '        g_sampling.begin();')
+s = s.replace('            if (status == WGPUMapAsyncStatus_Success) g_query_ready = true;\n            else g_query_pending = false;', '''            g_sampling.complete(status == WGPUMapAsyncStatus_Success,
+                [] { wgpuBufferUnmap(g_query_read); });''')
+shutil.copy2(Path(__file__).with_name('timestamp-sampling.hpp'), out / 'timestamp-sampling.hpp')
 s += '''
 namespace ps2::gs::gpu {
 bool timestamp_queries() { return g_timestamps; }
-double compute_samples() { return static_cast<double>(g_measured); }
-double compute_ms() { return static_cast<double>(g_measured_ns) / 1e6; }
+void set_timestamp_collection(bool enabled) { g_sampling.reset(enabled, [] { wgpuBufferUnmap(g_query_read); }); }
+void reset_timestamp_collection() { set_timestamp_collection(g_sampling.enabled); }
+double compute_samples() { return static_cast<double>(g_sampling.samples); }
+double compute_ms() { return static_cast<double>(g_sampling.ns) / 1e6; }
 bool present_layers(const std::uint32_t* p) {
  if(!p[0]||!p[1]) { flush(); return false; }
  if(p[0]>2048||p[1]>1024||std::uint64_t(p[0])*p[1]>g_field_words) throw std::runtime_error("PS2 display exceeds renderer dimensions.");
@@ -116,7 +147,7 @@ void load_transfer(const std::uint32_t* p) {
 }
 }
 '''
-s += '\nnamespace ps2::gs::gpu { void shutdown() { if(g_surface) wgpuSurfaceUnconfigure(g_surface); if(g_device) wgpuDeviceDestroy(g_device); } }\n'
+s += '\nnamespace ps2::gs::gpu { void shutdown() { set_timestamp_collection(false); if(g_surface) wgpuSurfaceUnconfigure(g_surface); if(g_device) wgpuDeviceDestroy(g_device); } }\n'
 p.write_text(s)
 p = out / 'gs.wgsl'
 shader = p.read_text()
