@@ -1,4 +1,13 @@
+// Pre-include the gate, then substitute only the movie scope's sampler call.
+// Production headers stay unchanged; the crossing test must select its timer.
+#include "CloudCpuTiming.h"
+static bool forceMovieSample = false;
+namespace CloudCpuTiming {
+inline bool MovieTestSelectSample() { return forceMovieSample || SelectSample(); }
+}
+#define SelectSample MovieTestSelectSample
 #include "CloudMovieMetrics.h"
+#undef SelectSample
 #include <cassert>
 #include <thread>
 int main()
@@ -20,7 +29,11 @@ int main()
  assert(s.cscBlocks == 10000 && s.cscSamples > 50 && s.cscSamples < 300);
  assert(s.idctSamples > 200 && s.idctSamples < 800);
  assert(s.idctMicroseconds > 0 && s.cscMicroseconds > 0);
- // A timer spanning a toggle must not add a sample to either epoch.
+ // Force this timer to be sampled: probabilistic selection could miss exactly
+ // the destructor branch this regression test needs to exercise.
+ forceMovieSample = true;
+ const auto oldSamples = Data().idctSamples.load();
+ const auto oldNanoseconds = Data().idctNanoseconds.load();
  {
   Scope crossed(zero);
   CloudCpuTiming::SetEnabled(false);
@@ -28,9 +41,18 @@ int main()
   assert(disabled.idctCalls == 0 && disabled.idctSamples == 0);
   CloudCpuTiming::SetEnabled(true);
  }
+ // The sampled crossing scope must contribute to neither epoch. Inspect the
+ // previous epoch before Begin() resets it so Read() cannot hide a bad write.
+ assert(Data().idctSamples.load() == oldSamples);
+ assert(Data().idctNanoseconds.load() == oldNanoseconds);
  s = Read();
- assert(s.epoch != firstEpoch && s.idctCalls == 0 && s.idctSamples == 0);
- // Exercise a worker publishing counters while the main thread toggles/reads.
+ assert(s.epoch != firstEpoch && s.idctCalls == 0 && s.idctSamples == 0 && s.idctMicroseconds == 0);
+ { Scope fresh(zero); }
+ s = Read();
+ assert(s.idctCalls == 1 && s.idctSamples == 1);
+ forceMovieSample = false;
+ // Race exercise: a worker publishes while main toggles/reads. This does not
+ // assert a transactionally coherent tuple across independently atomic fields.
  std::thread worker([&] { for(int i = 0; i < 30000; ++i) { Block(true); Scope sample(ac); } });
  for(int i = 0; i < 1000; ++i) { CloudCpuTiming::SetEnabled(i & 1); (void)Read(); }
  worker.join();
