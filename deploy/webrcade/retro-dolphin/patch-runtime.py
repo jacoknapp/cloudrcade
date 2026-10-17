@@ -3,6 +3,69 @@ from pathlib import Path
 import re
 
 
+def patch_replay_pump(text):
+    """Adapt the pinned pump separately so its actual scheduler is testable."""
+    def replace(old, new):
+        nonlocal text
+        if text.count(old) != 1:
+            raise RuntimeError(f'Unexpected pinned Dolphin pump anchor: {old[:70]}')
+        text = text.replace(old, new)
+
+    replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
+            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked || gamecubeGpuFrames.blocked() ? 4 : 0)')
+    # Wake only after this pump observed the two-frame GPU gate with ring work.
+    # Keep a single timer, the cap deadline, and the mapped-capacity retry. A
+    # completion never drains inline (or notifies for ordinary producer writes).
+    replace('function startWgpuReplayPump() {', '''let gamecubeReplayPumpCallback = null;
+let gamecubeReplayPumpGeneration = 0;
+let gamecubeReplayCompletionAt = null;
+
+function wakeGamecubeReplayPump() {
+  const pump = gamecubeReplayPumpCallback;
+  if (!pump || !wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal ||
+      wgpuMappedCapacityBlocked) return;
+  gamecubeReplayCompletionAt = performance.now();
+  gamecubeReplayTiming.completionWakes++;
+  if (wgpuReplayPumpTimer !== null) clearTimeout(wgpuReplayPumpTimer);
+  scheduleWgpuReplayPump(pump, gamecubeFrameLimit.timerDelay(performance.now()));
+}
+
+function startWgpuReplayPump() {''')
+    replace('  const pump = () => {\n    wgpuReplayPumpTimer = null;\n    if (!wgpuReplayPumpEnabled || !webGpuCmdRing) return;', '''  const generation = gamecubeReplayPumpGeneration;
+  const pump = () => {
+    if (generation !== gamecubeReplayPumpGeneration) return;
+    wgpuReplayPumpTimer = null;
+    if (!wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal) return;
+    const completionAt = gamecubeReplayCompletionAt;
+    gamecubeReplayCompletionAt = null;
+    const replayStartedAt = completionAt === null ? 0 : performance.now();''')
+    replace('    scheduleWgpuReplayPump(\n      pump,', '''    if (completionAt !== null) {
+      if (webGpuCmdRing && currentWgpuReadIndex(webGpuCmdRing) !== read) {
+        const elapsed = Math.max(0, replayStartedAt - completionAt);
+        gamecubeReplayTiming.completionUsefulDrains++;
+        gamecubeReplayTiming.completionToDrainTotalMs += elapsed;
+        gamecubeReplayTiming.completionToDrainMaxMs = Math.max(gamecubeReplayTiming.completionToDrainMaxMs, elapsed);
+      } else gamecubeReplayTiming.completionNoWorkWakes++;
+    }
+    // A failed drain can synchronously cancel the pump through emergencyFail.
+    if (generation !== gamecubeReplayPumpGeneration || !wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal) return;
+    if (gamecubeGpuFrames.blocked() &&
+        (Atomics.load(webGpuCmdRing.headerI32, 0) >>> 0) !== currentWgpuReadIndex(webGpuCmdRing))
+      gamecubeGpuFrames.waitForCapacity(wakeGamecubeReplayPump);
+    else gamecubeGpuFrames.cancelWait();
+    scheduleWgpuReplayPump(
+      pump,''')
+    replace('  wgpuReplayPumpTimer = setTimeout(callback, delay);',
+            '  gamecubeReplayPumpCallback = callback;\n'
+            '  wgpuReplayPumpTimer = setTimeout(callback, delay);')
+    replace('function cancelWgpuReplayPump() {', '''function cancelWgpuReplayPump() {
+  gamecubeReplayPumpGeneration++;
+  gamecubeReplayPumpCallback = null;
+  gamecubeReplayCompletionAt = null;
+  gamecubeGpuFrames.cancelWait();''')
+    return text
+
+
 def patch_runtime(app, native_core_sha=None):
     if native_core_sha is not None:
         if not re.fullmatch(r'[0-9a-f]{64}', native_core_sha):
@@ -36,7 +99,7 @@ def patch_runtime(app, native_core_sha=None):
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
             'const gamecubeGpuFrames = new GpuFrameQueue({onError:error => markWgpuReplayFatal("gpu-completion", error?.message || error)});\n'
             'const gamecubeRenderStats = new RenderStats();\n'
-            'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
+            'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0,completionWakes:0,completionUsefulDrains:0,completionNoWorkWakes:0,completionToDrainTotalMs:0,completionToDrainMaxMs:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
     # Queue writes consume a snapshot before returning. Reuse the already
     # bounded immediate-buffer scratch for ordinary texture writes too; held
@@ -89,8 +152,9 @@ def patch_runtime(app, native_core_sha=None):
             '  if (!ring || !renderGpu) return;\n'
             '  if (gamecubeGpuFrames.blocked()) return;\n'
             '  if (gamecubeFrameLimit.remaining(performance.now()) > 0) { gamecubeFrameLimit.delayed++; return; }')
-    replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
-            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked || gamecubeGpuFrames.blocked() ? 4 : 0)')
+    text = patch_replay_pump(text)
+    replace('function clearWgpuReplayStateAfterDeviceLoss() {',
+            'function clearWgpuReplayStateAfterDeviceLoss() {\n  gamecubeGpuFrames.reset();')
     replace('          webGpuExecStats.present++;',
             '          webGpuExecStats.present++;\n'
             '          gamecubeGpuFrames.submitted(q);\n'
