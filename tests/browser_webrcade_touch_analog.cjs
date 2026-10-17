@@ -84,11 +84,15 @@ const adapter={${method(adapter,'applyInput')},lastInput:{}};Object.assign(adapt
   getScreenSize:()=>0,getProps:()=>({}),getDefaultAspectRatio:()=>4/3,updateScreenSize(){},
   getPrefs:()=>({getScreenLayout:()=>0}),getScreenLayout:()=>0,pause(v){pauseCalls++;this.paused=v;return true}}};
  window.WrcadGameCube={menuOpen(){}};window.WrcadPS2={menuOpen(){}};
- const {inputState}=await import('/ps2.mjs');const {BUTTONS,padState}=await import('/gc.mjs');
+ const {inputState,inputWriter}=await import('/ps2.mjs');const {BUTTONS,padState}=await import('/gc.mjs');
+ window.ps2Native=null;const writePS2=inputWriter((...args)=>{ps2Native=args});
+ window.rawPS2=(axes,touchAxes=[0,0,0,0],keys=[])=>{const state=inputState(new Set(keys),{axes,buttons:[]},
+  {getAxisValue:(index,isX)=>touchAxes[index*2+(isX?0:1)],isControlDown:()=>false});writePS2(0,state);return ps2Native;};
  ${merge}\n${consumers}
  window.sample=()=>{pollNative();const state=padState(keyboard,{mapping:'standard',axes:[0,0,0,0],buttons:[]});mergeTouchInput(state);
+  const ps2=inputState(keyboard,{axes:[0,0,0,0],buttons:[]},controller);writePS2(0,ps2);
   return {axes:[controller.getAxisValue(0,true),controller.getAxisValue(0,false),controller.getAxisValue(1,true),controller.getAxisValue(1,false)],
-   ps2:inputState(keyboard,{axes:[0,0,0,0],buttons:[]},controller),gc:[state.stickX,state.stickY,state.cStickX,state.cStickY],
+   ps2,ps2Native,gc:[state.stickX,state.stickY,state.cStickX,state.cStickY],
    digital:[0,1,2,3].map(cid=>controller.isControlDown(cid)),native:nativeCalls,nativeAxes};};
  const script=document.createElement('script');script.src='/controller.js';document.body.append(script);
  `;
@@ -110,6 +114,8 @@ const adapter={${method(adapter,'applyInput')},lastInput:{}};Object.assign(adapt
      await page.locator('.kt-pad').dispatchEvent('pointermove',{clientX:point.x,clientY:point.y,pointerId:1,pointerType:'touch',bubbles:true});}active=true;};
    const release=async()=>{if(!active)return;if(cdp)await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});else await page.mouse.up();active=false;};
    const near=(a,b,label,tolerance=.0001)=>assert(Math.abs(a-b)<=tolerance,label+': '+a+' expected '+b);
+   const ps2Bytes=axes=>[0,1].flatMap(index=>{const x=axes[index*2],y=axes[index*2+1],extent=Math.max(Math.abs(x),Math.abs(y));
+    const magnitude=Math.min(1,Math.hypot(x,y));return [x,y].map(v=>Math.round(128+127*(extent?v*(magnitude/extent):0)));});
    for(const core of ['n64','3ds','psp','psx','ps2','gamecube']){
     await page.goto('http://analog.test/play/app/'+core+'/');await page.locator('.kt-pad').waitFor({state:'visible'});await page.waitForTimeout(220);
     const sticks=page.locator('[data-direction="analog"]');const count=await sticks.count();assert.equal(count,['3ds','psx','ps2','gamecube'].includes(core)?2:1);
@@ -118,7 +124,9 @@ const adapter={${method(adapter,'applyInput')},lastInput:{}};Object.assign(adapt
      const point=(x,y)=>({x:center.x+rect.width*.34*x,y:center.y+rect.height*.34*y});
      const check=async(x,y,label)=>{
       const actual=await page.evaluate(()=>sample()),expected=[0,0,0,0];expected[index*2]=x;expected[index*2+1]=y;
-      expected.forEach((v,i)=>{near(actual.axes[i],v,label+' axis '+i);assert.equal(actual.ps2[i+1],Math.round(128+127*actual.axes[i]),label+' PS2 byte '+i);assert.equal(actual.gc[i],Math.round(128+96*(i%2?-actual.axes[i]:actual.axes[i])),label+' GC byte '+i);});
+      const bytes=ps2Bytes(actual.axes);
+      expected.forEach((v,i)=>{near(actual.axes[i],v,label+' axis '+i);assert.equal(actual.ps2[i+1],bytes[i],label+' PS2 byte '+i);assert.equal(actual.gc[i],Math.round(128+96*(i%2?-actual.axes[i]:actual.axes[i])),label+' GC byte '+i);});
+      assert.deepEqual(actual.ps2Native,[0,...actual.ps2],label+' actual PS2 inputWriter/setInput boundary');
       assert(actual.digital.every(v=>!v),label+' analog remains separate from D-pad');
       if(consumers&&['n64','psx','psp','3ds'].includes(core)){
        const values=core==='n64'?expected.slice(0,2).map(v=>(v*32767)|0):expected;
@@ -141,7 +149,25 @@ const adapter={${method(adapter,'applyInput')},lastInput:{}};Object.assign(adapt
      for(const raw of [.099,.1,.1001,.101,.11,.12]){await move(point(raw,0));await check(Math.max(0,(raw-.1)/.9),0,core+' no center jump '+raw);}
      for(const [x,y]of [[.8,.6],[-.8,-.6],[1.6,1.2],[.9,.15]]){
       const length=Math.hypot(x,y),magnitude=Math.max(0,(Math.min(length,1)-.1)/.9);
-      await move(point(x,y));await check(x/length*magnitude,y/length*magnitude,core+' radial diagonal');
+      await move(point(x,y));await check(x/length*magnitude,y/length*magnitude,core+' diagonal');
+     }
+     if(core==='ps2'){
+      // Every quadrant, cardinals, exact and shallow diagonals: circular finger
+      // travel must continuously reach the independent PS2 axis range.
+      for(const degrees of [0,15,30,45,60,75,90,135,180,225,270,315]){
+       const angle=degrees*Math.PI/180,dx=Math.cos(angle),dy=Math.sin(angle),extent=Math.max(Math.abs(dx),Math.abs(dy));
+       let previous=[128,128];
+       for(const magnitude of [0,.001,.01,.05,.1,.25,.5,.75,1]){
+        const raw=magnitude ? .1+.9*magnitude : 0;
+        await move(point(dx*raw,dy*raw));const sample=await check(dx*magnitude,dy*magnitude,'PS2 '+degrees+'deg '+magnitude);
+        const bytes=sample.ps2.slice(1+index*2,3+index*2);
+        bytes.forEach((byte,i)=>assert(Math.abs(byte-128)>=Math.abs(previous[i]-128),'PS2 diagonal byte progression'));previous=bytes;
+        if(magnitude===1){const expected=[dx/extent,dy/extent].map(v=>Math.round(128+127*v));assert.deepEqual(bytes,expected,'PS2 full-range native diagonal');}
+       }
+      }
+      // Captured drags beyond the circular surface keep the same full range.
+      for(const [x,y]of [[2,2],[-2,2],[-2,-2],[2,-2]]){await move(point(x,y));const sample=await check(Math.sign(x)*Math.SQRT1_2,Math.sign(y)*Math.SQRT1_2,'PS2 beyond-radius diagonal');
+       assert.deepEqual(sample.ps2.slice(1+index*2,3+index*2),[x,y].map(v=>v>0?255:1),'PS2 saturated native corner');}
      }
      await release();await check(0,0,core+' release');
      await move(point(.55,0),true);await page.evaluate(()=>dispatchEvent(new Event('blur')));await check(0,0,core+' blur');await release();
@@ -157,17 +183,42 @@ const adapter={${method(adapter,'applyInput')},lastInput:{}};Object.assign(adapt
     }
     if(cdp&&count===2){
      const rects=await sticks.evaluateAll(nodes=>nodes.map(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}}));
-     const touches=rects.map((r,i)=>({id:i+1,x:r.x+r.width/2+r.width*.34*(i?-.55:.325),y:r.y+r.height/2}));
+     const touches=rects.map((r,i)=>{const raw=i?(core==='ps2'?-.64:-.55):.325,diagonal=core==='ps2'?Math.SQRT1_2:1;
+      return {id:i+1,x:r.x+r.width/2+r.width*.34*raw*diagonal,y:r.y+r.height/2+(core==='ps2'?r.height*.34*raw*diagonal:0)};});
      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:touches});
-     let both=await page.evaluate(()=>sample());near(both.axes[0],.25,core+' simultaneous left');near(both.axes[2],-.5,core+' simultaneous right');
+     let both=await page.evaluate(()=>sample());near(both.axes[0],core==='ps2'?.25*Math.SQRT1_2:.25,core+' simultaneous left');near(both.axes[2],core==='ps2'?-.6*Math.SQRT1_2:-.5,core+' simultaneous right');
+     if(core==='ps2'){near(both.axes[1],.25*Math.SQRT1_2,'PS2 simultaneous left Y');near(both.axes[3],-.6*Math.SQRT1_2,'PS2 simultaneous right Y');assert.deepEqual(both.ps2Native,[0,0,160,160,52,52]);}
      await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[touches[0]]});
-     both=await page.evaluate(()=>sample());near(both.axes[0],0,core+' left independently released');near(both.axes[2],-.5,core+' right still held');
+     both=await page.evaluate(()=>sample());near(both.axes[0],0,core+' left independently released');near(both.axes[2],core==='ps2'?-.6*Math.SQRT1_2:-.5,core+' right still held');
+     if(core==='ps2')assert.deepEqual(both.ps2Native,[0,0,128,128,52,52],'PS2 diagonal independent release');
      await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
      assert((await page.evaluate(()=>sample())).axes.every(v=>v===0),core+' native touch cancellation releases both');
     }
     const dpad=page.locator('[data-direction="digital"]'),r=await dpad.boundingBox();
     await move({x:r.x+r.width*.84,y:r.y+r.height/2},true);let s=await page.evaluate(()=>sample());assert.equal(s.digital[3],true,core+' D-pad right');assert(s.axes.every(v=>v===0),core+' D-pad never becomes analog');await release();
     await page.evaluate(()=>physical=[-.73,.38,.64,-.27]);s=await page.evaluate(()=>sample());assert.deepEqual(s.axes,[-.73,.38,.64,-.27],core+' untouched physical fractions');
+    assert.deepEqual(s.ps2.slice(1),ps2Bytes(s.axes),core+' PS2 calibrated physical bytes');
+    if(core==='ps2'){
+     // Actual PS2 physical source stays separate from the dedicated touch
+     // controller. Full circular diagonals and existing square corners agree.
+     for(const [x,y]of [[1,1],[-1,1],[-1,-1],[1,-1]]){
+      const corner=[x,y,x,y].map(v=>v>0?255:1),circle=[x,y,x,y].map(v=>v*Math.SQRT1_2);
+      for(const axes of [[x,y,x,y],circle]){const result=await page.evaluate(axes=>rawPS2(axes),axes);assert.deepEqual(result,[0,0,...corner],'PS2 physical full corner');}
+     }
+     const physicalOutputs=[];
+     for(const magnitude of [0,.001,.01,.05,.1,.25,.5,.75,1]){
+      const axes=[1,1,-1,-1].map(v=>v*Math.SQRT1_2*magnitude),result=await page.evaluate(axes=>rawPS2(axes),axes);
+      // Cross-engine hypot can differ by one ulp at an ideal half-byte tie.
+      // Compare to the independent requested radial strength within one byte;
+      // exact measured-float conversion is checked in each pointer sample.
+      result.slice(2).forEach((byte,i)=>near(byte,Math.round(128+127*(i<2?1:-1)*magnitude),'PS2 physical nuanced diagonal',1));
+      physicalOutputs.push({magnitude,bytes:result.slice(2)});
+     }
+     console.log('PS2',engine.name(),'physical diagonal native',JSON.stringify(physicalOutputs));
+     const calibrated=await page.evaluate(()=>rawPS2([.5,.5,0,0]));assert.deepEqual(calibrated,[0,0,218,218,128,128],'PS2 partial square diagonal calibration');
+     const merged=await page.evaluate(()=>rawPS2([0,.5,.5,0],[.25,0,0,-.25]));assert.deepEqual(merged,[0,0,160,192,192,96],'PS2 calibrate each source before component merge');
+     const overridden=await page.evaluate(()=>rawPS2([Math.SQRT1_2,Math.SQRT1_2,0,0],[0,0,0,0],['KeyF','KeyG']));assert.deepEqual(overridden,[0,0,1,255,128,128],'PS2 keyboard overrides calibrated sources');
+    }
     await page.evaluate(()=>physical=[0,0,0,0]);assert.equal(await page.evaluate(()=>pauseCalls),0,core+' no extra pause calls');assert.deepEqual(errors,[]);
    }
   }finally{await browser.close()}

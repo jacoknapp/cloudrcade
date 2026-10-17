@@ -57,7 +57,19 @@ const root=path.resolve(__dirname,'../deploy/webrcade/retro-play/app');
  assert(canceled>=0);assert(bodyReads>0);
  const axes=inputState(new Set(['CROSS','L2','KeyH','KeyI']),null,{isControlDown:cid=>cid===13,getAxisValue:()=>0});
  assert(axes[0]&(1<<BUTTONS.CROSS));assert(axes[0]&(1<<BUTTONS.L2));assert(axes[0]&(1<<BUTTONS.START));assert.deepEqual(axes.slice(1),[255,128,128,1]);
- const pad=inputState(new Set(),{buttons:[{pressed:true}],axes:[-.5,.25,1,-1]});assert(pad[0]&(1<<BUTTONS.CROSS));assert.deepEqual(pad.slice(1),[65,160,255,1]);
+ const pad=inputState(new Set(),{buttons:[{pressed:true}],axes:[-.5,.25,1,-1]});assert(pad[0]&(1<<BUTTONS.CROSS));assert.deepEqual(pad.slice(1),[57,163,255,1]);
+ const analog=values=>({isControlDown:()=>false,getAxisValue:(index,isX)=>values[index*2+(isX?0:1)]});
+ for(const [x,y]of [[1,1],[-1,1],[-1,-1],[1,-1]])for(const radius of [1,Math.SQRT1_2]){
+  const values=[x,y,-x,-y].map(v=>v*radius),expected=[x,y,-x,-y].map(v=>v>0?255:1);
+  assert.deepEqual(inputState(new Set(),{buttons:[],axes:values}).slice(1),expected,'physical circular/square full diagonals');
+  assert.deepEqual(inputState(new Set(),null,analog(values)).slice(1),expected,'touch circular/square full diagonals');
+ }
+ assert.deepEqual(inputState(new Set(),{buttons:[],axes:[.5,.5,0,0]}).slice(1),[218,218,128,128],'partial diagonal radial strength');
+ assert.deepEqual(inputState(new Set(),{buttons:[],axes:[.8,.6,1,.5]}).slice(1),[255,223,255,192],'asymmetric angle and square edge extent');
+ const edge=[.999,1,1.001].map(radius=>inputState(new Set(),{buttons:[],axes:[.8*radius,.6*radius,0,0]}).slice(1));
+ for(let sample=1;sample<edge.length;sample++)edge[sample].forEach((value,index)=>assert(Math.abs(value-edge[sample-1][index])<=1,'continuous circle/square boundary'));
+ assert.deepEqual(inputState(new Set(),{buttons:[],axes:[0,.5,.5,0]},analog([.25,0,0,-.25])).slice(1),[160,192,192,96],'calibrate sources separately before existing per-axis merge');
+ assert.deepEqual(inputState(new Set(['KeyF','KeyG','KeyJ','KeyK']),{buttons:[],axes:[1,1,1,1]}).slice(1),[1,255,1,255],'keyboard remains exact');
  const inputs=[],writeInput=inputWriter((...state)=>inputs.push(state)),released=inputState(new Set());
  for(let frame=0;frame<120;frame++){writeInput(0,[...released]);writeInput(1,[...released]);}
  assert.equal(inputs.length,2,'unchanged controllers do not repeatedly cross the native boundary');
