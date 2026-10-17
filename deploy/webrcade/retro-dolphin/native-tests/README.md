@@ -81,7 +81,10 @@ redispatch and generated-block eligibility, and coexists with explicit
 {"v":1,"enabled":true,"epoch":1,"slices":0,"totalUs":0,"advanceInclUs":0,"executeInclUs":0,"compileSubsetUs":0,"throttleBlockedSubsetUs":0,"dvdBlockedSubsetUs":0}
 ```
 
-`epoch` advances on enabled/disabled state transitions. Totals persist across
-those epochs; consumers reset their measurement window on a toggle/pause/load.
+`epoch` is control-transition metadata, advancing on enabled/disabled changes.
+Totals persist across epochs; the counter tuple is coherent, but enabled/epoch
+metadata is read separately. An already-active CPU slice can finish after a
+toggle; epoch does not isolate samples. Consumers reset their measurement window
+on toggle/pause/load and allow a fresh sample boundary before comparing deltas.
 The host ABI fixture compiles the actual setters/getter and checks field names,
 JSON parsing, epochs, lightweight opt-in and PPC-profile coexistence.
