@@ -4,6 +4,8 @@
  * PS2_AUDIO_REQUIRE_NONZERO=1 waits for real nonzero native PCM before trials.
  * PS2_AUDIO_CORE optionally overlays ONLY source candidate Play.js/Play.wasm.
  * PS2_AUDIO_EXPECT_BASELINE=1 requires observed replay (negative control).
+ * PS2_AUDIO_SCHEDULER_TRIALS=4 additionally blocks the main thread inside native
+ * PCM buffer allocation; PS2_AUDIO_EXPECT_FRESH_LOSS=1 requires the9b loss control.
  * Pauses only the VM to model producer starvation while the audio clock runs;
  * this deliberately differs from the normal user pause, which suspends audio.
  */
@@ -12,6 +14,7 @@ const {chromium}=require('playwright');
 const origin=process.env.WEBRCADE_TEST_ORIGIN,rom=process.env.PS2_TEST_LOCAL_FILE,romUrl=process.env.PS2_AUDIO_ROM_URL;
 assert(origin&&(rom||romUrl),'Set WEBRCADE_TEST_ORIGIN and PS2_TEST_LOCAL_FILE or PS2_AUDIO_ROM_URL');
 const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process.env.PS2_AUDIO_TRIALS||16);
+const schedulerTrials=Number(process.env.PS2_AUDIO_SCHEDULER_TRIALS||0),expectFreshLoss=process.env.PS2_AUDIO_EXPECT_FRESH_LOSS==='1';
 (async()=>{
  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'ps2-audio-replay-'));
  const context=await chromium.launchPersistentContext(profile,{headless:true,ignoreHTTPSErrors:true,serviceWorkers:'block',viewport:{width:844,height:390},args:['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--use-angle=vulkan','--disable-vulkan-surface','--ignore-gpu-blocklist']});
@@ -28,14 +31,31 @@ const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process
    let config;Object.defineProperty(window,'WrcadCloudConfig',{configurable:true,get:()=>config,set:v=>{config={...v,enabled:false,accessAllowed:false,autoRedirect:false,storagePrefix:'ps2-audio-replay',dropbox:{enabled:false}};}});
    localStorage.setItem('ps2-audio-replay.ps2.enabled.v1','1');
    const ids=new WeakMap(),counts=new WeakMap();let next=0;
-   window.audioReplayFixture={starts:[],duplicates:[],nonzero:0};
+   window.audioReplayFixture={starts:[],duplicates:[],nonzero:0,created:[],stalls:[],armStall:false};
+   const create=AudioContext.prototype.createBuffer;
+   AudioContext.prototype.createBuffer=function(...args){
+    const b=create.apply(this,args);if(!ids.has(b))ids.set(b,++next);
+    audioReplayFixture.created.push({id:ids.get(b),time:this.currentTime,duration:b.duration});
+    if(audioReplayFixture.armStall&&this===window.WrcadPS2?.module?.cloudAudio()){
+     const time=this.currentTime,active=audioReplayFixture.starts.filter(x=>x.scheduled+x.duration>time).length;
+     if(active&&this.state==='running'){
+      audioReplayFixture.armStall=false;
+      const video=WrcadPS2.module.getVideoFrames(),wall=performance.now(),end=wall+2850;
+      // This is inside the real native alBufferData allocation, before its new
+      // buffer has been queued. The audio device runs while the JS scheduler is blocked.
+      while(performance.now()<end){}
+      audioReplayFixture.stalls.push({id:ids.get(b),active,time,end:this.currentTime,wallMs:performance.now()-wall,video,duration:b.duration});
+     }
+    }
+    return b;
+   };
    const original=AudioBufferSourceNode.prototype.start;
    AudioBufferSourceNode.prototype.start=function(...args){
     const b=this.buffer;if(b){
      if(!ids.has(b))ids.set(b,++next);
      const count=(counts.get(b)||0)+1;counts.set(b,count);
      const data=b.getChannelData(0);let nonzero=false;for(let i=0;i<data.length;i++)if(data[i]!==0){nonzero=true;break;}
-     const event={id:ids.get(b),count,now:this.context.currentTime,scheduled:args[0]||0,duration:b.duration,nonzero};
+     const event={id:ids.get(b),count,now:this.context.currentTime,scheduled:args[0]||0,duration:b.duration,offset:args[1]||0,nonzero};
      audioReplayFixture.starts.push(event);if(count>1)audioReplayFixture.duplicates.push(event);if(nonzero)audioReplayFixture.nonzero++;
     }
     return original.apply(this,args);
@@ -82,6 +102,17 @@ const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process
    const result={trial,nativeVideoWhilePaused:drained.video-paused.video,renderedWhilePaused:drained.frames-paused.frames,activeBuffers:paused.active,queuedSpan:paused.queuedSpan,startsBefore:paused.starts,scheduledWhileDraining:drained.starts-paused.starts,newStarts:after.starts-drained.starts,repeated:after.duplicates-paused.duplicates,lastBufferAge:paused.time-paused.last.now,lastBufferDuration:paused.last.duration};
    results.push(result);console.log('UNDERRUN',JSON.stringify(result));
   }
+  for(let trial=0;trial<schedulerTrials;trial++){
+   await page.evaluate(()=>{audioReplayFixture.armStall=true;});
+   await page.waitForFunction(n=>audioReplayFixture.stalls.length>n,trial,{timeout:30000});
+   const stalled=await page.evaluate(()=>audioReplayFixture.stalls.at(-1));
+   assert(stalled.active>=1);assert(stalled.end-stalled.time>2.6,'real AudioContext advances during main-thread stall');
+   await page.waitForFunction(({s,loss})=>WrcadPS2.module.getVideoFrames()>s.video+20&&(loss?audioReplayFixture.created:audioReplayFixture.starts).some(x=>x.id>s.id+2),{s:stalled,loss:expectFreshLoss},{timeout:30000});
+   const result=await page.evaluate(s=>({...s,fresh:audioReplayFixture.starts.filter(x=>x.id===s.id),postStarts:audioReplayFixture.starts.filter(x=>x.id>s.id).length,postCreated:audioReplayFixture.created.filter(x=>x.id>s.id).length,videoAfter:WrcadPS2.module.getVideoFrames()}),stalled);
+   if(expectFreshLoss)assert.equal(result.fresh.length,0,'9b negative control must lose the fresh native PCM buffer');
+   else{assert.equal(result.fresh.length,1,'fresh native PCM buffer is scheduled exactlyonce after main-thread stall');assert.equal(result.fresh[0].offset,0,'fresh PCM starts at its beginning');}
+   console.log('SCHEDULER_STALL',JSON.stringify(result));
+  }
   // Normal user pause/resume must freeze/resume the AudioContext, and disposing
   // must close it without leaving running native workers.
   await page.evaluate(()=>WrcadPS2.pause());await page.waitForFunction(()=>WrcadPS2.module.cloudAudio().state==='suspended');
@@ -94,6 +125,6 @@ const baseline=process.env.PS2_AUDIO_EXPECT_BASELINE==='1',trials=Number(process
   if(process.env.PS2_TEST_SCREENSHOT)await page.screenshot({path:process.env.PS2_TEST_SCREENSHOT});
   await page.evaluate(async()=>{window.testModule=WrcadPS2.module;window.testAudio=testModule.cloudAudio();await WrcadPS2.exit({leave:false});});
   assert.equal(await page.evaluate(()=>testAudio.state),'closed');assert.equal(await page.evaluate(()=>testModule.PThread.runningWorkers.length+testModule.PThread.unusedWorkers.length),0);
-  assert.deepEqual(errors,[]);console.log('PASS',JSON.stringify({baseline,artificialProducerStall:true,trials,summary}));
- }catch(error){console.error('NATIVE_DIAGNOSTIC',await page.evaluate(()=>({ready:window.WrcadPS2?.ready,frames:window.WrcadPS2?.module?.getFrames(),starts:window.audioReplayFixture?.starts.length,audio:window.WrcadPS2?.module?.cloudAudio()?.state,failure:document.getElementById('failure-detail')?.textContent,isolated:crossOriginIsolated})).catch(()=>null));throw error;}finally{await context.close();fs.rmSync(profile,{recursive:true,force:true});}
+  assert.deepEqual(errors,[]);console.log('PASS',JSON.stringify({baseline,artificialProducerStall:true,trials,schedulerTrials,expectFreshLoss,summary}));
+ }catch(error){console.error('NATIVE_DIAGNOSTIC',await page.evaluate(()=>({ready:window.WrcadPS2?.ready,frames:window.WrcadPS2?.module?.getFrames(),starts:window.audioReplayFixture?.starts.length,created:window.audioReplayFixture?.created.length,stalls:window.audioReplayFixture?.stalls,video:window.WrcadPS2?.module?.getVideoFrames(),audio:window.WrcadPS2?.module?.cloudAudio()?.state,failure:document.getElementById('failure-detail')?.textContent,isolated:crossOriginIsolated})).catch(()=>null));throw error;}finally{await context.close();fs.rmSync(profile,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

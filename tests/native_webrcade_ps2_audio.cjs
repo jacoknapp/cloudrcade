@@ -42,10 +42,11 @@ function runtime(){
    env.HEAP16.fill(b,512,512+9000);env._alBufferData(a,4355,1024,18000,44100);
   }else if(op==='queue'){heap[2]=a;env._alSourceQueueBuffers(id,1,8);}
   else if(op==='unqueue'){env._alSourceUnqueueBuffers(id,1,8);assert.equal(heap[2],a,'native frees precisely the actual AL processed buffer');}
-  else if(op==='state'||op==='processed'){env._alGetSourcei(id,op==='state'?4112:4118,12);assert.equal(heap[3],a,`native observed ${op} matches shipped AL`);}
+  else if(op==='state'||op==='processed'||op==='queued'){env._alGetSourcei(id,op==='state'?4112:op==='queued'?4117:4118,12);assert.equal(heap[3],a,`native observed ${op} matches shipped AL`);}
   else if(op==='play')env._alSourcePlay(id);
   else if(op==='stop')env._alSourceStop(id);
   else if(op==='clear')env._alSourcei(id,4105,0);
+  else if(op==='stall'){ac.currentTime+=3;}
   else if(op==='drain'){const until=ac.currentTime+3;while(ac.currentTime<until)tick(ac.currentTime+.025);assert.equal(src.state,4116);}
   else throw Error(op);
   assert.equal(ctx.err,0,`AL error after ${op}`);
@@ -63,9 +64,9 @@ try{
  execFileSync('g++',['-std=c++17','-O2','-Wall','-Wextra','-Werror','-I'+dir,path.join(dir,'sound/SH_OpenAL/SH_OpenAL.cpp'),path.join(dir,'test.cpp'),'-o',exe],{stdio:'inherit'});
  const trace=execFileSync(exe,baseline?['baseline']:[],{encoding:'utf8'});
  const r=runtime();for(const line of trace.trim().split('\n')){const[op,a,b]=line.split(' ');r.event(op,+a,+b);}
- const heard=r.starts.map(x=>x.marker),expected=[...Array.from({length:20},(_,i)=>i+1),41,42];
+ const heard=r.starts.map(x=>x.marker),expected=[...Array.from({length:20},(_,i)=>i+1),41,42,51,52,61,62,81,105];
  if(baseline){assert.deepEqual(heard.slice(0,21),[...expected.slice(0,10),...expected.slice(0,11)]);console.log('PASS negative control: actual pinned native Write + shipped AL replays ten heard chunks (1.020408 s) on restart');}
- else {assert.deepEqual(heard,expected);assert.equal(r.src.bufQueue.length,1);assert.equal(r.src.bufQueue[0].id,0);console.log('PASS actual native Write + shipped AL: underrun restarts fresh PCM only, repeated recovery/free pool/reset all pass');}
+ else {assert.deepEqual(heard,expected);assert.equal(r.src.bufQueue.length,1);assert.equal(r.src.bufQueue[0].id,0);console.log('PASS actual native Write + shipped AL: producer/scheduler/bufferData stalls retain fresh PCM; capacity/free pool/reset pass');}
  // Continuous production, including processed buffers still retained, must not
  // lose or repeat PCM. AudioContext suspension freezes its clock and the queue.
  const c=runtime();c.event('data',100,100);c.event('queue',100);c.event('play');
@@ -74,4 +75,13 @@ try{
  c.event('data',102,102);c.event('queue',102);c.event('drain');
  assert.deepEqual(c.starts.map(x=>x.marker),[100,101,102]);
  console.log('PASS shipped AL continuous playback and suspended-clock resume preserve PCM ordering');
+ // Explicit limit: while AL remains PLAYING, its catch-up path can skip a
+ // prefix of fresh PCM. Capped stopped-source recovery must not claim to fix it.
+ const gap=runtime();gap.event('data',200,200);gap.event('queue',200);gap.event('play');
+ gap.ac.currentTime=.15;gap.event('data',201,201);gap.event('queue',201);
+ gap.event('state',4114);gap.event('processed',1);
+ assert.equal(gap.starts.at(-1).marker,201);
+ assert(Math.abs(gap.starts.at(-1).offset-(.15-4500/44100))<1e-9);
+ console.log('KNOWN LIMIT shipped AL partial timeline gap while PLAYING skips fresh prefix',gap.starts.at(-1).offset);
+
 }finally{fs.rmSync(dir,{recursive:true,force:true});}

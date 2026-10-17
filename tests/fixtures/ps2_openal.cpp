@@ -17,4 +17,13 @@ int main(int argc,char** argv){
  write(41);handler.Reset();assert(handler.GetFreeBufferCount()==25);
  write(42);drain();handler.RecycleBuffers();assert(handler.GetFreeBufferCount()==25);
  handler.Reset();assert(handler.GetFreeBufferCount()==25);
+ // The AudioContext clock can advance while the main scheduler is blocked.
+ // Unlike drain(), stall() does not pre-update the OpenAL source state.
+ write(51);stall();write(52);drain();handler.RecycleBuffers();handler.Reset();
+ // Model the same elapsed time inside PCM conversion/allocation (e.g. GC).
+ write(61);audio.stallOnData=true;write(62);drain();handler.RecycleBuffers();handler.Reset();
+ // At capacity,24 old queued chunks still leave room for exactlyone fresh chunk.
+ for(int i=81;i<=104;i++)write(i);
+ assert(handler.GetFreeBufferCount()==1);stall();write(105);drain();
+ handler.RecycleBuffers();assert(handler.GetFreeBufferCount()==25);handler.Reset();
 }
