@@ -4,6 +4,9 @@ On the PS2 beta, open **Settings → Experimental Settings**, turn on **Enable
 PlayStation 2 (experimental)** and press **OK**. The separate **PS2 performance
 readout** switch shows rendered FPS, emulation speed and WASM heap usage. Both
 switches default off, persist per browser/storage namespace, and honor Cancel.
+Native GPU timestamp collection runs only while the performance readout is on
+and the game is running. Supported hardware exposes sampled compute-pass time;
+turning the readout off releases completed mappings and starts no new queries.
 There is no Docker enable flag. Disabling PS2 hides its library entries and
 blocks direct launches while retaining its saves and control layouts.
 

@@ -90,7 +90,8 @@ s = s.replace('    g_commands.push_back({kDisplay, (src.width * g_scale + 7) / 8
 # The upstream file profiler has a blocking map reachable from submit even
 # when its environment variable is unset. This browser bridge has no file
 # profiling API. Remove that unused suspension path; conservative EH and
-# virtual-call analysis can still instrument submission. keep all real queue fences, state and VRAM readback waits.
+# virtual-call analysis can still instrument submission. Keep all real queue
+# fences, state and VRAM readback waits.
 start = s.index('void profile_submit() {')
 end = s.index('// Browsers copy writes', start)
 s = s[:start] + s[end:]
