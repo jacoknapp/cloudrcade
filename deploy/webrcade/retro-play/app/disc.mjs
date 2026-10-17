@@ -23,30 +23,32 @@ export async function remoteDisc(value, {signal} = {}) {
  const validator = etag && !etag.startsWith('W/') ? etag : head.headers.get('Last-Modified');
  // Pending buffers share the LRU budget with ready data. Aborted requests keep
  // their slot until the reader settles, so seeks cannot multiply memory use.
- const cache = new Map(); let disposed = false, transferred = 0, previousEnd = -1, aheadFrom = -1, aheadDepth = 0, sequentialBytes = 0;
+ // Index lookup excludes cancelled requests; live ownership retains them until
+ // settlement, even when a seek back admits a replacement for the same index.
+ const cache = new Map(), live = new Set(); let disposed = false, waitingDemand = 0, transferred = 0, previousEnd = -1, aheadFrom = -1, aheadDepth = 0, sequentialBytes = 0;
  function discard(index,entry) {
   entry.abort.abort();
-  if(entry.ready)cache.delete(index);
+  if(cache.get(index)===entry)cache.delete(index);
+  if(entry.ready)live.delete(entry);
  }
  function cancelAhead(index) {
-  const pending=[];
   for(const [at,entry]of cache)if(entry.speculative&&(at<index||at>index+AHEAD)) {
-   discard(at,entry);pending.push(entry.promise.catch(()=>{}));
+   discard(at,entry);
   }
-  return pending;
  }
  function entryFor(index,speculative) {
-  if(disposed||index*CHUNK>=size)return null;
+  // A completed stream must not reoccupy the slot a queued demand needs.
+  if(disposed||index*CHUNK>=size||(speculative&&waitingDemand))return null;
   const existing=cache.get(index);
-  if(existing)return existing.abort.signal.aborted?null:existing;
-  if(cache.size>=LIMIT) {
+  if(existing){if(!existing.abort.signal.aborted)return existing;discard(index,existing);}
+  if(live.size>=LIMIT) {
    const victim=[...cache].find(([,entry])=>entry.ready);
    if(!victim)return null;
    discard(...victim);
   }
   const start=index*CHUNK, end=Math.min(size-1,start+CHUNK-1);
   const entry={bytes:new Uint8Array(end-start+1),abort:new AbortController(),ready:false,speculative};
-  cache.set(index,entry);
+  cache.set(index,entry);live.add(entry);
   const cancelEntry=()=>entry.abort.abort();
   abort.signal.addEventListener('abort',cancelEntry,{once:true});
   if(abort.signal.aborted)cancelEntry();
@@ -81,7 +83,7 @@ export async function remoteDisc(value, {signal} = {}) {
   transferred+=length;
   entry.ready=true;return entry.bytes;
   }catch(error){if(cache.get(index)===entry)cache.delete(index);throw error;}
-  finally{clearTimeout(timer);abort.signal.removeEventListener('abort',cancelEntry);}
+  finally{if(!entry.ready)live.delete(entry);clearTimeout(timer);abort.signal.removeEventListener('abort',cancelEntry);}
   })();
   // Failed speculation is retried on demand, never an unhandled fatal error.
   entry.promise.catch(()=>{});
@@ -89,15 +91,29 @@ export async function remoteDisc(value, {signal} = {}) {
  }
  async function chunk(index) {
   if(disposed)throw new Error('PS2 disc is closed.');
-  const cancelled=cancelAhead(index);
-  if(cancelled.length)await Promise.all(cancelled);
-  if(disposed)throw new Error('PS2 disc is closed.');
+  cancelAhead(index);
+  // Cancellation is asynchronous. Admit demand using any spare/ready slot
+  // before waiting for unrelated speculation to release its pending buffer.
   let entry=entryFor(index,false);
-  if(!entry) {
-   await Promise.all([...cache.values()].filter(e=>e.abort.signal.aborted).map(e=>e.promise.catch(()=>{})));
+  while(!entry) {
+   if(disposed)throw new Error('PS2 disc is closed.');
+   const pending=[...live].filter(e=>!e.ready).map(e=>e.promise.catch(()=>{}));
+   if(!pending.length)throw new Error('PS2 disc cache has no demand slot.');
+   // A saturated cache needs only the first freed/ready slot. Include active
+   // demand too: concurrent consumers may fill the budget without speculation.
+   // Close must wake this waiter even if an aborted reader settles much later.
+   let onClose;
+   waitingDemand++;
+   try {
+    await Promise.race([...pending,new Promise((_,reject)=>{
+     onClose=()=>reject(new Error('PS2 disc read cancelled.'));
+     abort.signal.addEventListener('abort',onClose,{once:true});
+     if(abort.signal.aborted)onClose();
+    })]);
+   } finally {waitingDemand--;abort.signal.removeEventListener('abort',onClose);}
+   if(disposed)throw new Error('PS2 disc is closed.');
    entry=entryFor(index,false);
   }
-  if(!entry)throw new Error('PS2 disc cache has no demand slot.');
   entry.speculative=false;cache.delete(index);cache.set(index,entry);
   return entry.promise;
  }
@@ -117,7 +133,7 @@ export async function remoteDisc(value, {signal} = {}) {
   }
  }
  const disc={name:decodeURIComponent(url.pathname.split('/').pop()),size,url:url.href,streamed:true,
-  get cachedBytes(){return [...cache.values()].reduce((total,entry)=>total+entry.bytes.length,0);},
+  get cachedBytes(){return [...live].reduce((total,entry)=>total+entry.bytes.length,0);},
   get transferred(){return transferred;},
   // Copy cached sectors directly into the current native heap. Check the whole
   // range first so a miss never leaves a partially copied result.
@@ -137,7 +153,7 @@ export async function remoteDisc(value, {signal} = {}) {
    for(let cursor=offset;cursor<end;){const index=Math.floor(cursor/CHUNK),bytes=await chunk(index),from=cursor%CHUNK,count=Math.min(end-cursor,bytes.length-from);out.set(bytes.subarray(from,from+count),cursor-offset);cursor+=count;}
    consumed(offset,end);return out;
   },
-  close(){disposed=true;abort.abort();cache.clear();signal?.removeEventListener('abort',cancel);},
+  close(){disposed=true;abort.abort();cache.clear();for(const entry of live)if(entry.ready)live.delete(entry);signal?.removeEventListener('abort',cancel);},
  };
  // Probe before native boot so a server ignoring Range cannot block a core thread.
  try { await disc.read(0,Math.min(4096,size)); } catch(error) {disc.close();throw error;}

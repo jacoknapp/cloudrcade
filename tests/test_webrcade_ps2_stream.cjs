@@ -79,5 +79,8 @@ const assert=require('node:assert/strict'),path=require('node:path'),{pathToFile
  assert(!requests.some(r=>r.index>100));
  const last=disc.read(100*CHUNK,123);await tick();disc.close();await assert.rejects(last,/cancel|closed/i);
  await tick();assert.equal(pending.size,0);assert.equal(disc.cachedBytes,0);
+ const {discMatrix}=await import('./fixtures/ps2-disc-matrix.mjs');
+ const matrix=await discMatrix({remoteDisc,CHUNK,LIMIT});
+ console.log('PASS PS2 delayed-abort/full-budget/strict-integrity matrix',JSON.stringify(matrix));
  console.log('PASS PS2 sequential read-ahead removes ready boundary waits, coalesces demand, cancels seeks, retries speculation, validates responses and bounds pending+ready memory');
 })().catch(error=>{console.error(error);process.exitCode=1;});
