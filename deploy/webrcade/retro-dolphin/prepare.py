@@ -124,6 +124,8 @@ def prepare(work, out):
             'adapterFilesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in sorted((stage / 'app').glob('*.mjs'))},
             'hostPatchSha256': hashlib.sha256((HERE / 'patch-runtime.py').read_bytes()).hexdigest(),
+            'hostPatchFilesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                                    for path in sorted(HERE.glob('patch-*.py'))},
             'sourceSha256': native.sha(source_archive),
         }, indent=2) + '\n')
         # Distribute sources and artifacts, not the compiler/cache/build objects.

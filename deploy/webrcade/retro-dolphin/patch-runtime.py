@@ -289,4 +289,6 @@ def patch_runtime(app, native_core_sha=None):
             '      if (!payload.fsPath) { try { moduleInstance.FS.unlink(path); } catch {} }\n'
             '      const loaded = rc === 1 && api.getStateLoadResult() === 1;\n'
             '      return { loaded, error: loaded ? null : "The state could not be loaded. Resume to continue your previous game.", rc, beforeState, afterState,')
+    import runpy
+    text = runpy.run_path(str(Path(__file__).with_name("patch-texture-decode.py")))["patch_texture_decode"](text)
     worker.write_text(text)
