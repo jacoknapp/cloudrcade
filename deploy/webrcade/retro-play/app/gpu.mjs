@@ -1,6 +1,6 @@
 // PS2 GS compute renderer. One bounded native request at a time; no software path.
 export class Ps2Gpu {
- constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;this.pending=0;}
+ constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;this.pending=0;this.timingEnabled=false;this.timingEpoch=null;}
  async initialize(canvas){this.initializing=this.open(canvas);return this.initializing;}
  async open(canvas){
   if(!navigator.gpu)throw new Error('PlayStation 2 requires device WebGPU.');
@@ -19,8 +19,15 @@ export class Ps2Gpu {
   if(!await module.ccall('gpu_init','number',[],[],{async:true}))throw new Error('PS2 WebGPU initialization failed.');
   if(this.closed)throw new Error('PS2 graphics was closed.');
   if(this.error)throw this.error;
+  this.module._gpu_set_timing(this.timingEnabled?1:0);
  }
  fail(error){if(!(error instanceof Error))error=new Error('PS2 WebGPU operation failed. Restart the game.');if(!this.error&&!this.closed){this.error=error;this.onError(error);}}
+ setTimingEnabled(enabled,epoch){
+  enabled=!!enabled&&!this.closed;
+  if(enabled===this.timingEnabled&&epoch===this.timingEpoch)return;
+  this.timingEnabled=enabled;this.timingEpoch=epoch;
+  if(this.module&&!this.closed)this.module._gpu_set_timing(enabled?1:0);
+ }
  sampleTiming(){
   const m=this.module;if(this.closed||!m?._gpu_has_timestamps)return null;
   return {supported:!!m._gpu_has_timestamps(),count:m._gpu_compute_samples(),ms:m._gpu_compute_ms()};
@@ -92,7 +99,7 @@ export class Ps2Gpu {
   }).catch(error=>{this.fail(error);finish(-1);}).finally(()=>{this.pending--;});
  }
  dispose(){
-  if(this.closePromise)return this.closePromise;this.closed=true;
+  if(this.closePromise)return this.closePromise;this.setTimingEnabled(false);this.closed=true;
   this.closePromise=(async()=>{await this.initializing?.catch(()=>{});await this.chain.catch(()=>{});try{if(this.module){if(this.buffer)this.module._free(this.buffer);this.module._gpu_destroy();}}catch(error){console.warn('PS2 graphics cleanup:',error);}finally{this.module=null;this.core=null;this.ackWords=null;}})();
   return this.closePromise;
  }

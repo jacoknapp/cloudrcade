@@ -14,6 +14,20 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
    const {default:Gpu}=await import('./core/Gpu.js'),failures=[];
    const m=await Gpu({canvas:document.getElementById('outputCanvas'),onGpuError:error=>failures.push(error)});
    if(!await m.ccall('gpu_init','number',[],[],{async:true}))throw Error('No device WebGPU');
+   // Count actual timestamp command/map work, not just reads of the HUD.
+   const timestampWork={passes:0,resolves:0,maps:0,unmaps:0},timestampBuffers=new WeakSet();
+   const realPass=GPUCommandEncoder.prototype.beginComputePass,realResolve=GPUCommandEncoder.prototype.resolveQuerySet;
+   const realMap=GPUBuffer.prototype.mapAsync,realUnmap=GPUBuffer.prototype.unmap;
+   let holdTimestampMap=null;
+   GPUCommandEncoder.prototype.beginComputePass=function(descriptor){if(descriptor?.timestampWrites)timestampWork.passes++;return realPass.call(this,descriptor);};
+   GPUCommandEncoder.prototype.resolveQuerySet=function(...args){timestampWork.resolves++;return realResolve.apply(this,args);};
+   GPUBuffer.prototype.mapAsync=function(mode,offset,size){
+    const result=realMap.call(this,mode,offset,size);
+    if(size!==16)return result;
+    timestampWork.maps++;timestampBuffers.add(this);
+    const hold=holdTimestampMap;return hold?result.then(()=>hold):result;
+   };
+   GPUBuffer.prototype.unmap=function(){if(timestampBuffers.has(this))timestampWork.unmaps++;return realUnmap.call(this);};
    // Hold the real queue-completion promise: a display fence must remain
    // pending, use no zero-delay polling, and release its timeout after success.
    const realDone=GPUQueue.prototype.onSubmittedWorkDone;
@@ -64,6 +78,27 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
    if(useBatch)enqueue(3,new Uint8Array(packet.buffer));else m.HEAPU8.set(new Uint8Array(packet.buffer),p);
    const composed=await new Promise((resolve,reject)=>requestAnimationFrame(()=>{if(useBatch){if(drain()!==7){reject(Error('Batched display not presented'));return;}}else m._gpu_present(p);const c=document.createElement('canvas');c.width=640;c.height=480;const ctx=c.getContext('2d');ctx.drawImage(document.getElementById('outputCanvas'),0,0);resolve(Array.from(ctx.getImageData(320,240,1,1).data));}));
    await m.ccall('gpu_wait',null,[],[],{async:true});
+   if(timestampWork.passes||timestampWork.resolves||timestampWork.maps)throw Error('Default-off diagnostics issued native timestamp work');
+   const supported=!!m._gpu_has_timestamps();
+   const present=async()=>{m.HEAPU8.set(new Uint8Array(packet.buffer),p);m._gpu_present(p);await m.ccall('gpu_wait',null,[],[],{async:true});};
+   m._gpu_set_timing(1);
+   if(supported){
+    let releaseMap;holdTimestampMap=new Promise(resolve=>releaseMap=resolve);
+    await present();const pendingMaps=timestampWork.maps;
+    if(pendingMaps!==1)throw Error('Enabled diagnostics did not issue one bounded map');
+    m._gpu_set_timing(0);m._gpu_set_timing(1);await present();
+    if(timestampWork.maps!==pendingMaps)throw Error('Toggle reused a still-owned timestamp buffer');
+    holdTimestampMap=null;releaseMap();await new Promise(resolve=>setTimeout(resolve,20));
+    await m.ccall('gpu_wait',null,[],[],{async:true});
+    if(m._gpu_compute_samples()!==0||m._gpu_compute_ms()!==0)throw Error('Stale map crossed a timing epoch');
+    for(let i=0;i<4;i++){await present();await new Promise(resolve=>setTimeout(resolve,10));}
+    if(m._gpu_compute_samples()<1||timestampWork.unmaps<1)throw Error('Fresh enabled timestamps were not collected/unmapped');
+   }else{await present();if(timestampWork.maps)throw Error('Unsupported timestamps started mapping');}
+   m._gpu_set_timing(0);const offMaps=timestampWork.maps,offPasses=timestampWork.passes;
+   await present();await present();
+   if(timestampWork.maps!==offMaps||timestampWork.passes!==offPasses||m._gpu_compute_samples()!==0)throw Error('Disabled timestamps kept collecting');
+   GPUCommandEncoder.prototype.beginComputePass=realPass;GPUCommandEncoder.prototype.resolveQuerySet=realResolve;
+   GPUBuffer.prototype.mapAsync=realMap;GPUBuffer.prototype.unmap=realUnmap;
    const malformed=[];
    if(useBatch)for(const words of [[99,0],[1,1,0],[2,8,0],[3,104],[2], [3,104,...Array(26).fill(0),2,0]]){
     m.HEAPU8.set(new Uint8Array(new Uint32Array(words).buffer),p);
@@ -71,7 +106,7 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
     if(!rejected)throw Error('Malformed GS batch accepted');malformed.push(words[0]);
    }
    const beforeLoss=failures.slice();m._gpu_destroy();await new Promise(resolve=>setTimeout(resolve,100));m._free(p);
-   return {fence,raster,partial,composed,malformed,beforeLoss,loss:failures};
+   return {fence,raster,partial,composed,malformed,beforeLoss,loss:failures,timestamps:{supported,...timestampWork}};
   },process.env.PS2_GPU_BATCH==='1');
   if(process.env.PS2_GPU_BATCH==='1')assert.equal(result.malformed.length,6);
   assert.deepEqual(result.raster,[128,64,32,128]);assert.deepEqual(result.partial,[10,20,30,40,50,60,70,80,90]);
