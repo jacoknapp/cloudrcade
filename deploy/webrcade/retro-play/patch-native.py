@@ -203,3 +203,8 @@ for name in ['dispFb', 'dispFb1', 'dispFb2']:
     assert text.count(old) == 1
     text = text.replace(old, old + f'\n\t\t\tlayer.bufOffsetX = {name}.nX; layer.bufOffsetY = {name}.nY;')
 path.write_text(text)
+
+# CPU diagnostics are isolated from the product patch list for checked reuse.
+import subprocess
+subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
+subprocess.run([sys.executable, str(here / 'patch-tail-chain.py'), str(root)], check=True)

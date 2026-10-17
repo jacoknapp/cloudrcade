@@ -163,3 +163,22 @@ timestamps as unavailable. Browser timing clocks and native-counter inspection
 are inactive with the readout off;
 pause/resume/state changes discard old samples and bounded interval storage
 avoids growing memory during play. Guest timing is unchanged.
+
+### Native timing and EE tail-chain experiment
+
+The performance readout can opt into sparse native execution and movie timing.
+Execution figures are sampled wall milliseconds per call with coverage; compile
+and blocked boundaries report completed-call totals. They are not utilization
+or additive frame budgets. The default disabled state performs no timing clocks.
+
+`setNativeChainEnabled(true)` before `initialize()` selects an experimental
+EE-only bounded Wasm tail-chain path. It defaults off and returns false when
+multi-table Wasm tail calls are unavailable. IOP/VU execution and guest state
+formats are unchanged. Do not enable by default until actual scene/state tests
+and balanced browser performance measurements qualify it.
+
+`tests/test_webrcade_ps2_tail_chain.cjs` is a dependency-free synthetic Wasm
+contract fixture. `tests/test_webrcade_ps2_play_chain.cpp` links the patched
+PlayCore/CodeGen to compare actual R5900 state/RAM and lifecycle behavior; it
+requires the pinned source/SDK and its separate fixture target (see maintained
+implementation evidence for invocation). Neither is a full-game FPS benchmark.
