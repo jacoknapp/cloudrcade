@@ -1,0 +1,405 @@
+diff --git a/Source/Core/VideoBackends/WebGPU/ShaderTranslationCache.h b/Source/Core/VideoBackends/WebGPU/ShaderTranslationCache.h
+new file mode 100644
+index 0000000..25e417d
+--- /dev/null
++++ b/Source/Core/VideoBackends/WebGPU/ShaderTranslationCache.h
+@@ -0,0 +1,241 @@
++// Copyright 2026 Dolphin Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <initializer_list>
++#include <memory>
++#include <new>
++#include <optional>
++#include <string>
++#include <string_view>
++
++namespace WebGPU
++{
++// Process-local successful translation outputs only. The owner may seed this
++// from verified same-build records; no GPU handles or failures are retained.
++// The owner serializes access. Returned strings own their bytes, so eviction
++// cannot invalidate a shader or a command-ring payload already being emitted.
++class ShaderTranslationCache
++{
++public:
++  struct Key
++  {
++    std::uint32_t stage;
++    std::uint32_t variant;
++    std::string_view configuration;
++    std::string_view source;
++  };
++  struct Stats
++  {
++    std::uint64_t hits = 0;
++    std::uint64_t misses = 0;
++    std::uint64_t evictions = 0;
++    std::uint64_t rejected = 0;
++    std::uint64_t allocation_failures = 0;
++    std::uint64_t failures = 0;
++    std::uint64_t translation_microseconds = 0;
++    std::size_t entries = 0;
++    std::size_t bytes = 0;
++  };
++
++  // Bound retained UTF-8 inputs/outputs; the entry bound separately limits
++  // entry metadata. Temporary compiler allocations are not cache bytes.
++  explicit ShaderTranslationCache(std::size_t max_entries = 256,
++                                  std::size_t max_bytes = 8 * 1024 * 1024)
++      : m_max_entries(max_entries), m_max_bytes(max_bytes)
++  {
++  }
++
++  ~ShaderTranslationCache()
++  {
++    while (m_oldest)
++      RemoveOldest();
++  }
++  ShaderTranslationCache(const ShaderTranslationCache&) = delete;
++  ShaderTranslationCache& operator=(const ShaderTranslationCache&) = delete;
++
++  std::optional<std::string> Find(const Key& key)
++  {
++    const auto hash = Hash(key);
++    for (auto* entry = m_newest; entry; entry = entry->older)
++    {
++      // The hash is only a filter: exact bytes and every discriminator must
++      // match, including embedded NULs and colliding hashes.
++      if (Matches(*entry, key, hash))
++      {
++        ++m_stats.hits;
++        std::string result(entry->Wgsl());
++        Promote(entry);
++        return result;
++      }
++    }
++    ++m_stats.misses;
++    return std::nullopt;
++  }
++
++  bool Store(const Key& key, std::string_view wgsl)
++  {
++    // Subtract before adding so a hostile/oversized length cannot wrap the
++    // budget. Empty outputs are never useful successful translations.
++    std::size_t bytes = 0;
++    for (const auto size : {key.configuration.size(), key.source.size(), wgsl.size()})
++    {
++      if (size > m_max_bytes - bytes)
++      {
++        ++m_stats.rejected;
++        return false;
++      }
++      bytes += size;
++    }
++    if (wgsl.empty() || m_max_entries == 0)
++    {
++      ++m_stats.rejected;
++      return false;
++    }
++
++    const auto hash = Hash(key);
++    for (auto* entry = m_newest; entry; entry = entry->older)
++    {
++      // A racing compiler may have published the same key since its lookup.
++      if (Matches(*entry, key, hash))
++      {
++        Promote(entry);
++        return true;
++      }
++    }
++    // Dolphin disables C++ exceptions. Explicit nonthrowing requests preserve
++    // the valid compiler result when the allocator returns null; the SDK's
++    // existing fixed-heap abort-on-exhaustion policy is unchanged. Prepare all
++    // owned bytes before eviction so a failed request leaves old entries intact.
++    std::unique_ptr<Entry> entry(new (std::nothrow) Entry);
++    if (entry)
++      entry->data = static_cast<char*>(std::malloc(bytes));
++    if (!entry || !entry->data)
++    {
++      ++m_stats.allocation_failures;
++      return false;
++    }
++    entry->hash = hash;
++    entry->stage = key.stage;
++    entry->variant = key.variant;
++    entry->configuration_size = key.configuration.size();
++    entry->source_size = key.source.size();
++    entry->wgsl_size = wgsl.size();
++    if (!key.configuration.empty())
++      std::memcpy(entry->data, key.configuration.data(), key.configuration.size());
++    if (!key.source.empty())
++      std::memcpy(entry->data + key.configuration.size(), key.source.data(), key.source.size());
++    std::memcpy(entry->data + key.configuration.size() + key.source.size(), wgsl.data(), wgsl.size());
++    while (m_oldest &&
++           (m_stats.entries >= m_max_entries || bytes > m_max_bytes - m_stats.bytes))
++    {
++      RemoveOldest();
++      ++m_stats.evictions;
++    }
++    auto* published = entry.release();
++    published->older = m_newest;
++    if (m_newest)
++      m_newest->newer = published;
++    else
++      m_oldest = published;
++    m_newest = published;
++    m_stats.bytes += bytes;
++    ++m_stats.entries;
++    ++m_revision;
++    return true;
++  }
++
++  Stats GetStats() const { return m_stats; }
++  std::uint32_t Revision() const { return m_revision; }
++
++  template <typename Visitor>
++  void Visit(Visitor&& visitor) const
++  {
++    // Oldest first: replaying records preserves their bounded LRU order.
++    for (auto* entry = m_oldest; entry; entry = entry->newer)
++      visitor(Key{entry->stage, entry->variant, entry->Configuration(), entry->Source()},
++              entry->Wgsl());
++  }
++
++  void RecordTranslation(bool succeeded, std::uint64_t microseconds)
++  {
++    m_stats.failures += succeeded ? 0 : 1;
++    m_stats.translation_microseconds += microseconds;
++  }
++
++private:
++  struct Entry
++  {
++    Entry* older = nullptr;
++    Entry* newer = nullptr;
++    std::uint64_t hash = 0;
++    std::uint32_t stage = 0;
++    std::uint32_t variant = 0;
++    std::size_t configuration_size = 0;
++    std::size_t source_size = 0;
++    std::size_t wgsl_size = 0;
++    char* data = nullptr;
++    ~Entry() { std::free(data); }
++    std::string_view Configuration() const { return {data, configuration_size}; }
++    std::string_view Source() const { return {data + configuration_size, source_size}; }
++    std::string_view Wgsl() const { return {data + configuration_size + source_size, wgsl_size}; }
++    std::size_t Bytes() const { return configuration_size + source_size + wgsl_size; }
++  };
++
++  static bool Matches(const Entry& entry, const Key& key, std::uint64_t hash)
++  {
++    return entry.hash == hash && entry.stage == key.stage && entry.variant == key.variant &&
++           entry.Configuration() == key.configuration && entry.Source() == key.source;
++  }
++
++  void Promote(Entry* entry)
++  {
++    if (entry == m_newest)
++      return;
++    if (entry->older)
++      entry->older->newer = entry->newer;
++    else
++      m_oldest = entry->newer;
++    entry->newer->older = entry->older;
++    entry->older = m_newest;
++    entry->newer = nullptr;
++    m_newest->newer = entry;
++    m_newest = entry;
++  }
++
++  void RemoveOldest()
++  {
++    auto* removed = m_oldest;
++    m_oldest = removed->newer;
++    if (m_oldest)
++      m_oldest->older = nullptr;
++    else
++      m_newest = nullptr;
++    m_stats.bytes -= removed->Bytes();
++    --m_stats.entries;
++    delete removed;
++  }
++
++  static std::uint64_t Hash(const Key& key)
++  {
++    std::uint64_t hash = 14695981039346656037ull;
++    // Exact equality above disambiguates concatenations as well as collisions.
++    for (const auto text : {key.configuration, key.source})
++      for (const unsigned char byte : text)
++        hash = (hash ^ byte) * 1099511628211ull;
++    return hash;
++  }
++
++  const std::size_t m_max_entries;
++  const std::size_t m_max_bytes;
++  Entry* m_newest = nullptr;
++  Entry* m_oldest = nullptr;
++  Stats m_stats;
++  std::uint32_t m_revision = 0;
++};
++}  // namespace WebGPU
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
+index 6732a4f..2daeec7 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
+@@ -784,7 +784,8 @@ WebGPUGfx::CreateShaderFromSource(ShaderStage stage, std::string_view source,
+   {
+     std::string color_source(source);
+     color_source.replace(marker_pos, blend_marker.size(), "#if 1");
+-    auto color_wgsl = GlslToWgsl(stage, color_source);
++    auto color_wgsl = GlslToWgsl(stage, color_source,
++                               ShaderTranslationVariant::DestinationAlphaColor);
+     if (color_wgsl)
+       blend_color_id = m_cmd_stream.PushCreateShader(color_wgsl->data(), color_wgsl->size(),
+                                                      static_cast<u32>(stage));
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.cpp b/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.cpp
+index 5c6e730..3a42b0f 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.cpp
+@@ -7,6 +7,8 @@
+ #include <spirv-tools/libspirv.hpp>
+
+ #include <algorithm>
++#include <chrono>
++#include <mutex>
+
+ #include <emscripten/emscripten.h>
+
+@@ -39,6 +41,11 @@ const std::string& LastShaderTranslateError()
+
+ namespace
+ {
++// In-memory lifetime isolates compiler/Naga/build identity automatically. The
++// exact preamble is also part of every key; generator configuration is already
++// materialized in the exact GLSL input. No result can survive a core reload.
++ShaderTranslationCache s_translation_cache;
++std::mutex s_translation_cache_mutex;
+ // Day-24: Dolphin's shader generators emit GLSL *without* a preamble
+ // — every hardware backend prepends its own. This is the Vulkan
+ // backend's SHADER_HEADER verbatim (VideoBackends/Vulkan/
+@@ -155,7 +162,7 @@ std::optional<std::string> SpirvToWgsl(const SpirvModule& spirv)
+   return out;
+ }
+
+-std::optional<std::string> GlslToWgsl(ShaderStage stage, std::string_view glsl)
++static std::optional<std::string> TranslateGlslToWgsl(ShaderStage stage, std::string_view glsl)
+ {
+   auto spirv = GlslToSpirv(stage, glsl);
+   if (!spirv)
+@@ -240,4 +247,80 @@ std::optional<std::string> GlslToWgsl(ShaderStage stage, std::string_view glsl)
+   }
+   return wgsl;
+ }
++
++std::optional<std::string> GlslToWgsl(ShaderStage stage, std::string_view glsl,
++                                    ShaderTranslationVariant variant)
++{
++  const ShaderTranslationCache::Key key{static_cast<u32>(stage), static_cast<u32>(variant),
++                                        kShaderHeader, glsl};
++  // Never hold the cache lock across either compiler, diagnostics or ring work.
++  // Concurrent misses may compile twice; neither thread can publish partial data.
++  {
++    std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++    if (auto result = s_translation_cache.Find(key))
++      return result;
++  }
++  const auto start = std::chrono::steady_clock::now();
++  auto result = TranslateGlslToWgsl(stage, glsl);
++  const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
++      std::chrono::steady_clock::now() - start).count();
++  {
++    std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++    s_translation_cache.RecordTranslation(result.has_value(), static_cast<std::uint64_t>(elapsed));
++    if (result)
++      s_translation_cache.Store(key, *result);
++  }
++  return result;
++}
++
++ShaderTranslationCache::Stats GetShaderTranslationCacheStats()
++{
++  std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++  return s_translation_cache.GetStats();
++}
++
++// Only verified per-build host records reach this API. The exact header is
++// supplied by this binary and exact GLSL is still checked on demand. No GPU
++// objects are restored, no pipelines are precompiled, and shader failures are
++// never persisted. These cache APIs do not change the save-state format.
++extern "C" EMSCRIPTEN_KEEPALIVE u32 DolphinWeb_ShaderTranslationRevision()
++{
++  std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++  return s_translation_cache.Revision();
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE void DolphinWeb_GetShaderTranslationStats()
++{
++  std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++  const auto stats = s_translation_cache.GetStats();
++  EM_ASM({ Module._cloudrcadeShaderCacheStats = ({
++      hits: $0, translations: $1, failures: $2, translationMs: $3,
++      entries: $4, retainedBytes: $5, evictions: $6, rejected: $7, allocationFailures: $8}); },
++    static_cast<double>(stats.hits), static_cast<double>(stats.misses),
++    static_cast<double>(stats.failures), static_cast<double>(stats.translation_microseconds) / 1000.0,
++    stats.entries, stats.bytes, static_cast<double>(stats.evictions),
++    static_cast<double>(stats.rejected), static_cast<double>(stats.allocation_failures));
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE bool DolphinWeb_ImportShaderTranslation(
++    u32 stage, u32 variant, const char* source, u32 source_size, const char* wgsl, u32 wgsl_size)
++{
++  if (stage > static_cast<u32>(ShaderStage::Compute) || variant > 1 || !source || !wgsl ||
++      source_size > 8 * 1024 * 1024 || wgsl_size == 0 || wgsl_size > 8 * 1024 * 1024)
++    return false;
++  std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++  return s_translation_cache.Store({stage, variant, kShaderHeader, {source, source_size}},
++                                   {wgsl, wgsl_size});
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE void DolphinWeb_ExportShaderTranslations()
++{
++  std::lock_guard<std::mutex> guard(s_translation_cache_mutex);
++  EM_ASM({ Module._cloudrcadeShaderSnapshot = []; });
++  s_translation_cache.Visit([](const ShaderTranslationCache::Key& key, std::string_view wgsl) {
++    EM_ASM({ Module._cloudrcadeShaderSnapshot.push({stage: $0, variant: $1,
++               source: UTF8ToString($2, $3), wgsl: UTF8ToString($4, $5)}); },
++           key.stage, key.variant, key.source.data(), key.source.size(), wgsl.data(), wgsl.size());
++  });
++}
+ }  // namespace WebGPU
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.h b/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.h
+index 18282a1..0a0d53e 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUShaderTranslator.h
+@@ -10,6 +10,7 @@
+
+ #include "Common/CommonTypes.h"
+ #include "VideoCommon/AbstractShader.h"
++#include "VideoBackends/WebGPU/ShaderTranslationCache.h"
+
+ // Day-22: shader translation foundation for the WebGPU *hardware*
+ // renderer.
+@@ -51,7 +52,15 @@ std::optional<SpirvModule> GlslToSpirv(ShaderStage stage, std::string_view glsl)
+ std::optional<std::string> SpirvToWgsl(const SpirvModule& spirv);
+
+ // Convenience: full GLSL → WGSL. Returns nullopt if either stage fails.
+-std::optional<std::string> GlslToWgsl(ShaderStage stage, std::string_view glsl);
++enum class ShaderTranslationVariant : u32
++{
++  Standard = 0,
++  DestinationAlphaColor = 1,
++};
++std::optional<std::string> GlslToWgsl(
++    ShaderStage stage, std::string_view glsl,
++    ShaderTranslationVariant variant = ShaderTranslationVariant::Standard);
++ShaderTranslationCache::Stats GetShaderTranslationCacheStats();
+
+ // §28cx: the FIRST shader-translation failure reason (glslang or Naga),
+ // captured for the on-screen [webgpu-shader] summary so the error survives the

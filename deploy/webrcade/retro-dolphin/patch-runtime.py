@@ -96,6 +96,9 @@ def patch_runtime(app, native_core_sha=None):
             'import {invariantVertexPosition} from "../../shader-position.mjs";\n'
             'import {RenderStats} from "../../render-stats.mjs";\n'
             'import {waitForStateLoad} from "../../state-load.mjs";\n'
+            'import {PersistentShaderTranslations} from "../../shader-translation-cache.mjs";\n'
+            'let gamecubeShaderTranslations = null;\n'
+            'let gamecubeShaderBuild = null;\n'
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
             'const gamecubeGpuFrames = new GpuFrameQueue({onError:error => markWgpuReplayFatal("gpu-completion", error?.message || error)});\n'
             'const gamecubeRenderStats = new RenderStats();\n'
@@ -113,6 +116,11 @@ def patch_runtime(app, native_core_sha=None):
             'uploadPayload = borrowTextureUpload(heap, src, uploadBytes, copyImmediateWgpuBufferUpload);')
     replace('    wgsl = webGpuTextDecoder.decode(local);',
             '    wgsl = invariantVertexPosition(webGpuTextDecoder.decode(local), stage);')
+    replace('  const { wasmBinary, fingerprint: buildFingerprint } =',
+            '  const { wasmBinary, fingerprint: buildFingerprint, sha256: gamecubeVerifiedNativeSha256 } =')
+    replace('      await fetchWasmAndFingerprint(coreUrl, expectedCoreSha256);',
+            '      await fetchWasmAndFingerprint(coreUrl, expectedCoreSha256);\n'
+            '  gamecubeShaderBuild = gamecubeVerifiedNativeSha256;')
     replace('  const flushPassDiag = () => {\n    if (passFbId < 0) return;',
             '  const flushPassDiag = () => {\n    if (passFbId < 0) return;\n'
             '    if (wgpuDiagnosticQuiet) {\n'
@@ -152,7 +160,8 @@ def patch_runtime(app, native_core_sha=None):
             '  const pointer=api?.getHeapStats?.();if (!pointer) return null;\n'
             '  const values=new Uint32Array(moduleInstance.HEAPU8.buffer,pointer,4);\n'
             '  return gamecubeHeapSample={inUseBytes:values[0],reusableBytes:values[1],extentBytes:values[2],reservedBytes:values[3],capturedAtMs:now,queryMs:performance.now()-now};\n'
-            '}\n\nfunction framePayload({ forceCausalTelemetry = false } = {}) {')
+            '}\n\nfunction framePayload({ forceCausalTelemetry = false } = {}) {\n'
+            '  gamecubeShaderTranslations?.checkpoint();')
     # A complete submitted present is an ordering-safe yield boundary. Leave
     # unread commands in their authoritative ring; never drop GX operations.
     replace('  if (!ring || !renderGpu) return;',
@@ -233,6 +242,7 @@ def patch_runtime(app, native_core_sha=None):
             '      nativeTiming:gamecubeReadNativeTiming(),\n'
             '      uploads:{transport:wgpuUploadTransport,stagingBytes:wgpuMappedStagingPool ? wgpuMappedStagingSlotCount*WGPU_MAPPED_STAGING_SLOT_BYTES : 0,scratchBytes:wgpuImmediateBufferScratch.byteLength,pendingRemaps:wgpuMappedRemapPromises.size},\n'
             '      rendererError:rendererDiagnostics.errors.at(-1) || null,\n'
+            '      shaderTranslationCache:gamecubeShaderTranslations ? {...gamecubeShaderTranslations.stats} : null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
             '      resources:{textures:webGpuObjects.textures.size,bindGroups:webGpuObjects.bindGroups.size,shaderOk:webGpuObjects.shaderOk,shaderFail:webGpuObjects.shaderFail},\n'
             '      draws:webGpuExecStats.drawIdx,missingPipelines:webGpuExecStats.missPipe,missingBindings:webGpuExecStats.missBg,skippedDraws:webGpuExecStats.skipDraw},\n'
@@ -247,6 +257,8 @@ def patch_runtime(app, native_core_sha=None):
             '      postStatus: message => { postStatus(message); self.postMessage({type:"gamecube-fatal",message}); },\n'
             '    });\n  });\n\n  return state;')
     replace('    coreBoot.accepted = Boolean(api.bootDisc(path));',
+            '    gamecubeShaderTranslations = new PersistentShaderTranslations(moduleInstance, gamecubeShaderBuild, api.getGameId());\n'
+            '    await gamecubeShaderTranslations.load();\n'
             '    configureGameCube(moduleInstance.FS, api.getGameId());\n'
             '    coreBoot.accepted = Boolean(api.bootDisc(path));')
     replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
