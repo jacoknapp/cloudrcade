@@ -3,21 +3,11 @@
 #include <chrono>
 #include <emscripten/bind.h>
 #include "Ps2VmJs.h"
-#include "CloudCpuTiming.h"
-#include "CloudMovieMetrics.h"
-#include "CloudTailChain.h"
 #include "GSH_WebGPU.h"
 #include "sound/SH_OpenAL/SH_OpenALProxy.h"
 #include "PS2VM_Preferences.h"
 #include "DefaultAppConfig.h"
 
-EM_JS(int, CloudTailSupported, (), {
- if(Module.cloudTailSupported === undefined) {
-  Module.cloudTailSupported = WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,1,127,0,3,2,1,0,4,7,2,112,0,1,112,0,1,10,11,1,9,0,32,0,65,0,19,0,1,11]));
- }
- return Module.cloudTailSupported ? 1 : 0;
-});
-namespace CloudTail { bool Supported() { return CloudTailSupported() != 0; } }
 static CPs2VmJs* vm = nullptr;
 static std::atomic<uint32> frames{0};
 std::atomic<uint32> cloudRenderedFrames{0};
@@ -87,51 +77,6 @@ int operationStatus()
 EMSCRIPTEN_BINDINGS(CloudRcade)
 {
  using namespace emscripten;
- function("setNativeChainEnabled", optional_override([](bool enabled) {
-  if(vm) throw std::runtime_error("PS2 chain mode must be selected before initialization.");
-  const bool selected = enabled && CloudTail::Supported();
-  CloudTail::Enabled().store(selected, std::memory_order_relaxed); return selected;
- }));
- function("nativeChainStats", optional_override([]() {
-  auto result = val::object();
-  result.set("enabled", CloudTail::Enabled().load(std::memory_order_relaxed));
-  result.set("supported", CloudTail::Supported());
-  result.set("executorEntries", double(CloudTail::Entries().load(std::memory_order_relaxed)));
-  return result;
- }));
- function("setNativeTimingEnabled", &CloudCpuTiming::SetEnabled);
- function("nativeCpuTiming", optional_override([]() {
-  auto snapshot = val::object();
-  const auto state = CloudCpuTiming::State().load(std::memory_order_relaxed);
-  snapshot.set("epoch", state); snapshot.set("enabled", bool(state & 1));
-  auto categories = val::array();
-  for(unsigned i = 0; i < CloudCpuTiming::Count; ++i) {
-   const auto& counters = CloudCpuTiming::Counters()[i];
-   auto category = val::object(); category.set("name", CloudCpuTiming::Name(i));
-   category.set("calls", double(counters.calls.load(std::memory_order_relaxed)));
-   category.set("samples", double(counters.samples.load(std::memory_order_relaxed)));
-   category.set("microseconds", double(counters.microseconds.load(std::memory_order_relaxed)));
-   categories.call<void>("push", category);
-  }
-  snapshot.set("categories", categories); return snapshot;
- }));
- function("nativeMovieTiming", optional_override([]() {
-  const auto snapshot = CloudMovieMetrics::Read();
-  auto result = val::object();
-  result.set("epoch", snapshot.epoch);
-  result.set("codedBlocks", snapshot.codedBlocks);
-  result.set("uncodedBlocks", snapshot.uncodedBlocks);
-  result.set("idctCalls", snapshot.idctCalls);
-  result.set("zeroBlocks", snapshot.zeroBlocks);
-  result.set("dcOnlyBlocks", snapshot.dcOnlyBlocks);
-  result.set("acBlocks", snapshot.acBlocks);
-  result.set("idctSamples", snapshot.idctSamples);
-  result.set("idctMicroseconds", snapshot.idctMicroseconds);
-  result.set("cscBlocks", snapshot.cscBlocks);
-  result.set("cscSamples", snapshot.cscSamples);
-  result.set("cscMicroseconds", snapshot.cscMicroseconds);
-  return result;
- }));
  function("initialize", &initialize);
  function("setSystemLanguage", optional_override([](unsigned language) {
   if(!vm || language > 11) throw std::runtime_error("Invalid PS2 system language.");

@@ -204,9 +204,6 @@ for name in ['dispFb', 'dispFb1', 'dispFb2']:
     text = text.replace(old, old + f'\n\t\t\tlayer.bufOffsetX = {name}.nX; layer.bufOffsetY = {name}.nY;')
 path.write_text(text)
 
-# Movie code generation, opt-in CPU diagnostics and default-off EE tail
-# chaining have separate ownership for checked reuse.
+# Movie code generation and opt-in classification/timing have separate ownership.
 import subprocess
 subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=True)
-subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
-subprocess.run([sys.executable, str(here / 'patch-tail-chain.py'), str(root)], check=True)

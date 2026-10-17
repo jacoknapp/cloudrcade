@@ -1,5 +1,4 @@
 #include "Js_DiscImageDeviceStream.h"
-#include "CloudCpuTiming.h"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -29,7 +28,6 @@ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIREC
 uint64 CJsDiscImageDeviceStream::Tell() { return m_position; }
 void CJsDiscImageDeviceStream::ReadAt(void* buffer, uint64 position, uint32 amount)
 {
- CloudCpuTiming::Scope cloudTiming(CloudCpuTiming::DiscWait, true);
  MAIN_THREAD_EM_ASM({
   let position = ($1 >>> 0) + (($2 >>> 0) * 4294967296);
   Module.discImageDevice.read($0, position, $3);

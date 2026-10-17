@@ -18,6 +18,8 @@ if(EMSCRIPTEN)
  set_source_files_properties(../../src/idct/IEEE1180.cpp PROPERTIES COMPILE_OPTIONS "-msimd128;-ffp-contract=off")
 endif()
 ''')
+# Movie metrics share the timing gate header; no execution hooks are installed.
+(root / 'Source/CloudCpuTiming.h').write_bytes((here / 'native/CpuTiming.h').read_bytes())
 (root / 'Source/CloudMovieMetrics.h').write_bytes((here / 'native/CloudMovieMetrics.h').read_bytes())
 p = root / 'Source/ee/IPU.cpp'
 text = p.read_text()

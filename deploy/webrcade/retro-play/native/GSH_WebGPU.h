@@ -1,7 +1,6 @@
 // CloudRcade Play! GS frontend; rasterization and transfers run on device WebGPU.
 #pragma once
 #include "gs/GSHandler.h"
-#include "CloudCpuTiming.h"
 #include "states/MemoryStateFile.h"
 #include <emscripten.h>
 #include <emscripten/threading.h>
@@ -25,7 +24,6 @@ class CGSH_WebGPU final : public CGSHandler {
  }
  // The GS worker waits; the browser main thread remains free for async WebGPU.
  int Call(int op, const void* data=nullptr, uint32 size=0, void* output=nullptr) {
-  CloudCpuTiming::Scope cloudTiming(CloudCpuTiming::GSWait, true);
   std::atomic<int> done{0};
   MAIN_THREAD_EM_ASM({ Module.cloudGpu.nativeCall($0,$1,$2,$3,$4); },op,data,size,output,&done);
   const auto end=emscripten_get_now()+65000;
