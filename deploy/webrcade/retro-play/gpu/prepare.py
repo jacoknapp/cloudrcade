@@ -175,6 +175,12 @@ parser = parser.replace('        g_transfer = Transfer{};\n        g_carried = 0
 parser = parser.replace('        if ((value & 3u) == 0) g_transfer.active = true;\n        else if ((value & 3u) == 2) { if (cpu_raster()) local_copy(); }\n        else if ((value & 3u) == 1) g_transfer.active = true;', '')
 parser = parser.replace('feed_image(reinterpret_cast<const std::uint8_t *>(&value), 8);', 'gpu::image_data(reinterpret_cast<const std::uint8_t *>(&value), 8);')
 parser = parser.replace('if (!queue::active()) signal(reg, value);', '')
+# PRIM still resets the vertex queue in write(). draw() compares its resolved
+# attributes (including context and PRMODECONT) against cache.attr on every
+# primitive, so PRIM alone does not also need to invalidate make_setup().
+old = 'constexpr std::uint64_t kVertexRegs = (1ull << 0x01)'
+assert parser.count(old) == 1
+parser = parser.replace(old, 'constexpr std::uint64_t kVertexRegs = (1ull << 0x00) | (1ull << 0x01)')
 (out / 'state.cpp').write_text('''// Derived from the pinned MIT ps2-web-recomp GS parser; graphics execute on WebGPU.
 #include "gpu.hpp"
 #include <cstring>
