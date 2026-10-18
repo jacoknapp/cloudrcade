@@ -171,3 +171,9 @@ timestamps as unavailable. Browser timing clocks and native-counter inspection
 are inactive with the readout off;
 pause/resume/state changes discard old samples and bounded interval storage
 avoids growing memory during play. Guest timing is unchanged.
+
+Contiguous VIF V4-32/no-mask/mode0 transfers batch complete payload vectors when
+CL==WL is nonzero, preserving the existing stream/tag buffering, memory wrap,
+cycle counters and completion behavior. The native source/oracle fixture is
+[documented here](../../../tests/fixtures/ps2-vif-bulk/README.md). Synchronization,
+guest timing, quality and WebGPU behavior remain unchanged.
