@@ -208,4 +208,6 @@ runpy.run_path(str(Path(__file__).with_name('patch-pixel-cache.py')))['patch'](o
 for name, var in [('gs.wgsl', 'kGsShader'), ('blit.wgsl', 'kBlitShader')]:
     with (out / (name + '.cpp')).open('w') as f:
         f.write('extern const char ' + var + '[] = R"WGSL(\n' + (out / name).read_text() + ')WGSL";\n')
+        if name == 'gs.wgsl':
+            f.write('extern const char kGsCachedShader[] = R"WGSL(\n' + (out / 'gs-cached.wgsl').read_text() + ')WGSL";\n')
 shutil.copy2(Path(__file__).with_name('bridge.cpp'), out / 'bridge.cpp')
