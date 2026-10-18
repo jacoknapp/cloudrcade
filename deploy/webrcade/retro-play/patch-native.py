@@ -249,3 +249,6 @@ subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=
 subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-registers.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], check=True)
+
+# Bounded CMIPS context memory offsets; generic Wasm callers remain unchanged.
+subprocess.run([sys.executable, str(here / "patch-context-memarg.py"), str(root)], check=True)
