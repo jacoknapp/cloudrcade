@@ -249,3 +249,6 @@ subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=
 subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-registers.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], check=True)
+
+# Ordinary CMIPS register first-read reuse; retains all stores and synchronization.
+subprocess.run([sys.executable, str(here / 'patch-register-reuse.py'), str(root)], check=True)
