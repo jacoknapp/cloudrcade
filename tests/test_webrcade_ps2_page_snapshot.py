@@ -2,6 +2,7 @@
 """Pinned instruction coherence patch lifecycle/bounds/codegen screen (Docker/Node)."""
 import argparse
 import hashlib
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -54,11 +55,11 @@ for name, sha in [('xxhash.h', '17973c0dc49d9854ca26caa191f0e12f7a424b68858d9a78
     shutil.copyfile(src, out / name)
 def sdk(*command):
     subprocess.run(['docker', 'run', '--rm', '--network', 'none', '-v', str(out)+':/fixture', '-w', '/fixture', SDK, *command], check=True)
-sdk('emcc', '-O3', '-DNDEBUG', '-msimd128', '-c', 'xxhash.c', '-o', 'xxhash.o')
-sdk('em++', '-O3', '-msimd128', '-c', 'CloudInstructionPage.cpp', '-o', 'page.o')
+sdk('emcc', '-O3', '-DNDEBUG', '-fexceptions', '-pthread', '-msimd128', '-c', 'xxhash.c', '-o', 'xxhash.o')
+sdk('em++', '-O3', '-fexceptions', '-pthread', '-msimd128', '-c', 'CloudInstructionPage.cpp', '-o', 'page.o')
 # Existing EE source and final link retain their original no-SIMD flags.
-sdk('em++', '-O3', '-std=c++17', 'cache-fixture.cpp', 'page.o', 'xxhash.o',
-    '-sMODULARIZE=1', '-sENVIRONMENT=node', '-sALLOW_MEMORY_GROWTH=1', '-sASSERTIONS=1',
+sdk('em++', '-O3', '-fexceptions', '-pthread', '-std=c++17', 'cache-fixture.cpp', 'page.o', 'xxhash.o',
+    '--profiling-funcs', '-sMODULARIZE=1', '-sENVIRONMENT=node', '-sALLOW_MEMORY_GROWTH=1', '-sASSERTIONS=1',
     '-sEXPORTED_FUNCTIONS=[_run_fixture,_assign_snapshot,_equals_snapshot,_create_pages,_destroy_pages,_compare_pages,_hash_pages,_malloc,_free]',
     '-sEXPORTED_RUNTIME_METHODS=HEAPU8', '-o', 'cache.cjs')
 subprocess.run(['node', str(out / 'cache-fixture.cjs')], check=True)
@@ -66,4 +67,12 @@ sdk('/emsdk/upstream/bin/wasm-dis', 'cache.wasm', '-o', 'cache.wat')
 wat = (out / 'cache.wat').read_text()
 for op in ['v128.load', 'v128.xor', 'v128.or', 'v128.any_true']: assert op in wat, 'Missing page-compare SIMD: '+op
 assert 'relaxed' not in wat
+# With JS exceptions enabled, the pure comparison must feed the unchanged-page
+# branch directly (or inline), without an intervening EH flag check.
+start = wat.index(' (func $CEeExecutor::SyncInstructionCache')
+body = wat[start:wat.index('\n (func ', start + 1)]
+if '(call $CloudInstructionPage::Equals' in body:
+    assert re.search(r'\(br_if \$\S+\s+\(call \$CloudInstructionPage::Equals', body), 'Comparison retains EH flag checks'
+else:
+    assert body.count('(v128.xor') >= 4, 'Missing inlined exact comparison'
 print('PASS pinned coherence patch, extracted lifecycle, byte/bounds and target-local SIMD codegen; artifacts:', out)
