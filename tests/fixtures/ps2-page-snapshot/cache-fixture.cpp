@@ -84,6 +84,7 @@ public:
 #define XXH3_128bits TracedHash
 #include "sync.inc"
 #undef XXH3_128bits
+static_assert(noexcept(std::declval<const CloudInstructionPage&>().Equals(nullptr)));
 static unsigned tests;
 static void FlushAgainstReference(CEeExecutor& e, std::map<uint32, std::vector<uint8>>& reference) {
  std::vector<std::pair<uint32, uint32>> changed;

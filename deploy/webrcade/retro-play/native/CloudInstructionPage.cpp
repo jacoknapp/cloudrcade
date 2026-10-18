@@ -4,7 +4,7 @@
 #include <wasm_simd128.h>
 #endif
 
-bool CloudInstructionPage::Equals(const void* source) const
+bool CloudInstructionPage::Equals(const void* source) const noexcept
 {
 #ifdef __wasm_simd128__
  const auto* actual = static_cast<const uint8_t*>(source);

@@ -26,7 +26,10 @@ The JS fixture changes every byte/bit in a page, tests unaligned inputs and
 actual linear-memory-end bounds, and screens warmed balanced unchanged-page
 hashing versus the actual comparison helper. The latter is a synthetic host
 screen, not a game or phone performance claim. The final WAT must contain
-ordinary SIMD load/XOR/OR/any-true operations. Only the helper and the already
+ordinary SIMD load/XOR/OR/any-true operations. Production JS-exception and
+pthread flags remain enabled. The exact comparison must feed Sync’s unchanged-page branch directly
+(or inline), without per-page EH flag checks; the C++
+fixture also requires the helper declaration to be noexcept. Only the helper and the already
 shipped xxHash object receive SIMD flags; existing EE code and link do not.
 
 Outputs include `page-snapshot-result.json`, compiled Wasm/WAT and generated
