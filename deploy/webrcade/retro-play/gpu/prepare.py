@@ -67,6 +67,34 @@ s = s.replace(old, '''    if (!g_decodes.empty()) {
         }
         dispatch_linear(kDecode, groups * 64u, push_params({jobs, count, groups}));
     }''')
+# A large texture can be referenced by only a few small primitives even in a
+# large batch. Keep the existing direct texture path when decoding the whole
+# image costs more texels than the upper bound of four fetches per covered
+# pixel (including bilinear filtering and every internal-resolution sample).
+old = 'std::vector<Decode> g_decodes;'
+assert s.count(old) == 1
+s = s.replace(old, old + '\nstd::vector<std::uint64_t> g_decode_pixels;')
+old = '    static const int kKey[] = {12, 13, 14, 15, 16, 17, 20, 22};'
+assert s.count(old) == 1
+s = s.replace(old, old + '''
+    g_decode_pixels.assign(setups, 0);
+    for (std::uint32_t p = 0; p < prims; ++p) {
+        const auto* rec = b.prims.data() + p * kPrimWords;
+        const auto lo = rec[2], hi = rec[3];
+        g_decode_pixels[rec[0]] += std::uint64_t((hi & 0xFFFFu) - (lo & 0xFFFFu) + 1u) *
+            ((hi >> 16) - (lo >> 16) + 1u) * g_scale * g_scale;
+    }''')
+old = '        const std::uint32_t words = 1u << (tw + th);'
+assert s.count(old) == 1
+s = s.replace(old, old + '''
+        std::uint64_t pixels = 0;
+        for (std::uint32_t j = i; j < setups; ++j) {
+            const auto* o = b.setups.data() + j * kSetupWords;
+            bool same = (o[0] & 32768u) == (w[0] & 32768u);
+            for (int k : kKey) same = same && o[k] == w[k];
+            if ((o[0] & 2u) && same) pixels += g_decode_pixels[j];
+        }
+        if (pixels * 4u < words) continue;''')
 s = s.replace('        wgpuAdapterInfoFreeMembers(info);', '        const bool software = info.adapterType == WGPUAdapterType_CPU;\n        wgpuAdapterInfoFreeMembers(info);\n        if(software) return false;')
 s = s.replace('void wait_until(const bool &flag) {\n    while (!flag) pump();\n}', 'void wait_until(const bool &flag) {\n const auto end = emscripten_get_now() + 60000;\n while (!flag) { if(emscripten_get_now() > end) throw std::runtime_error("PS2 WebGPU timed out."); pump(); }\n}')
 s = s.replace('    while (!adapter_done) pump();', '    wait_until(adapter_done);').replace('    while (!device_done) pump();', '    wait_until(device_done);')
