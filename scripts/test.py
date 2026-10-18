@@ -14,7 +14,7 @@ for path in sorted((ROOT / 'tests').glob('test_webrcade*.cjs')):
     if path.name not in native:
         subprocess.run(['node', str(path)], cwd=ROOT, check=True)
 for name in ['test_core_cache.py', 'test_qualified_core_restore.py', 'test_webrcade_3ds_deploy.py', 'test_webrcade_refresh.py', 'test_webrcade_metadata.py',
-             'test_webrcade_cloud_config.py', 'test_webrcade_login_recovery.py']:
+             'test_webrcade_cloud_config.py', 'test_webrcade_login_recovery.py', 'test_webrcade_ps2_source_archive.py']:
     subprocess.run([sys.executable, str(ROOT / 'tests' / name)], cwd=ROOT, check=True)
 subprocess.run(['php', str(ROOT / 'integrations/nextcloud/tests/connect-controller.php')],
                cwd=ROOT, check=True)

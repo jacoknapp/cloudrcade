@@ -164,7 +164,11 @@ def prepare(work, out):
         # dependencies installed by npm, compiler objects or any operator files.
         def source_filter(info):
             parts = Path(info.name).parts
-            return None if info.name.endswith(('/Gpu.js', '/Gpu.wasm')) or any(part in {'.git', 'node_modules', '__pycache__', 'build_cmake'} for part in parts) else info
+            # Submodules keep tracked CMake recipes under build_cmake. Only
+            # Our compiler output is below Play!'s build_cmake/build tree;
+            # adjacent tracked build scripts belong in the source archive too.
+            generated = parts[:4] == ('ps2', 'Play', 'build_cmake', 'build')
+            return None if generated or info.name.endswith(('/Gpu.js', '/Gpu.wasm')) or any(part in {'.git', 'node_modules', '__pycache__'} for part in parts) else info
         archive = sources / 'ps2-source.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
             tar.add(source, arcname='ps2/Play', filter=source_filter)
