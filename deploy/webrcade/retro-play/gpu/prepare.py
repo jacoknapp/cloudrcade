@@ -202,6 +202,9 @@ void load_clut(std::uint64_t tex0) {
  gpu::load_clut(tex0, g_state.texclut);
 }
 ''' + tables + swizzle + parser + '\n}\n')
+# Keep the optional pixel-local path checked against the pinned shader layout.
+import runpy
+runpy.run_path(str(Path(__file__).with_name('patch-pixel-cache.py')))['patch'](out)
 for name, var in [('gs.wgsl', 'kGsShader'), ('blit.wgsl', 'kBlitShader')]:
     with (out / (name + '.cpp')).open('w') as f:
         f.write('extern const char ' + var + '[] = R"WGSL(\n' + (out / name).read_text() + ')WGSL";\n')
