@@ -38,6 +38,17 @@ inline bool SelectSample() {
  random ^= random << 13; random ^= random >> 17; random ^= random << 5;
  return (random & 63) == 0;
 }
+struct Decision {
+ uint32_t epoch;
+ Scope* parent;
+ bool sampled;
+};
+inline Decision Decide(Category category, bool every, uint32_t epoch) {
+ if(!(epoch & 1)) return {epoch, nullptr, false};
+ Counters()[category].calls.fetch_add(1, std::memory_order_relaxed);
+ auto* parent = Active();
+ return {epoch, parent, every || parent || SelectSample()};
+}
 class Scope {
  uint32_t epoch;
  Category category;
@@ -45,11 +56,10 @@ class Scope {
  uint64_t start = 0, children = 0;
  bool sampled = false;
 public:
- explicit Scope(Category value, bool every = false, bool enabled = true) : epoch(enabled ? State().load(std::memory_order_relaxed) : 0), category(value) {
-  if(!(epoch & 1)) return;
-  Counters()[category].calls.fetch_add(1, std::memory_order_relaxed);
-  parent = Active();
-  sampled = every || parent || SelectSample();
+ explicit Scope(Category value, bool every = false, bool enabled = true)
+  : Scope(value, Decide(value, every, enabled ? State().load(std::memory_order_relaxed) : 0)) {}
+ Scope(Category value, Decision decision)
+  : epoch(decision.epoch), category(value), parent(decision.parent), sampled(decision.sampled) {
   if(sampled) { start = Now(); Active() = this; }
  }
  ~Scope() {
@@ -67,13 +77,20 @@ public:
  Scope& operator=(const Scope&) = delete;
 };
 
-// Hot paths call Timed: when collection is off the body runs inline with no
+// Hot paths call Timed: disabled and unsampled bodies run inline with no
 // destructor in the caller's frame. Emscripten's JS exception lowering routes
 // every call inside a frame holding a Scope through an invoke_* trampoline, so
-// a Scope must only exist on the enabled path.
-template<class F> __attribute__((noinline)) auto TimedEnabled(Category category, bool every, F&& body) -> decltype(body()) {
- Scope scope(category, every);
+// decide sampling before entering the noinline cleanup frame. Calls, epochs,
+// forced nested samples and the pseudorandom stream share the Scope path.
+template<class F> __attribute__((noinline)) auto TimedSampled(Category category, uint32_t epoch, Scope* parent, F&& body) -> decltype(body()) {
+ Scope scope(category, Decision{epoch, parent, true});
  return body();
+}
+template<class F> inline auto TimedEnabled(Category category, bool every, F&& body) -> decltype(body()) {
+ const auto epoch = State().load(std::memory_order_relaxed);
+ const auto decision = Decide(category, every, epoch);
+ if(!decision.sampled) return body();
+ return TimedSampled(category, decision.epoch, decision.parent, static_cast<F&&>(body));
 }
 template<class F> inline auto Timed(Category category, bool every, F&& body) -> decltype(body()) {
  if(!(State().load(std::memory_order_relaxed) & 1)) return body();
