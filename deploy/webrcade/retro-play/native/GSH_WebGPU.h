@@ -2,6 +2,7 @@
 #pragma once
 #include "gs/GSHandler.h"
 #include "CloudCpuTiming.h"
+#include "CloudReadbackRange.h"
 #include "states/MemoryStateFile.h"
 #include <emscripten.h>
 #include <emscripten/threading.h>
@@ -64,10 +65,21 @@ protected:
   if(Submit()==2) ++cloudRenderedFrames;
   CGSHandler::FlipImpl(info);
  }
- void SyncMemoryCache() override { Flush(); Submit(); Call(7,nullptr,0,m_pRAM); }
+ void SyncMemoryCache() override { Flush(); Queue(9,nullptr,0); Submit(); Call(7,nullptr,0,m_pRAM); }
+ void WriteBackMemoryCache() override { Call(10,m_pRAM,4*1024*1024); }
+ void ReadImageDataImpl(void* output,uint32 size) override {
+  const auto buf=make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
+  const auto pos=make_convertible<TRXPOS>(m_nReg[GS_REG_TRXPOS]);
+  const auto reg=make_convertible<TRXREG>(m_nReg[GS_REG_TRXREG]);
+  const auto range=CloudReadbackRange::Plan(buf.nSrcPsm,buf.GetSrcPtr(),buf.nSrcWidth,
+   pos.nSSAX,pos.nSSAY,reg.nRRW,m_trxCtx.nRRX,m_trxCtx.nRRY,size);
+  const uint32 descriptor[]={range.offset,range.bytes};
+  Flush(); Submit(); Call(9,descriptor,sizeof(descriptor),m_pRAM+range.offset);
+  CGSHandler::ReadImageDataImpl(output,size);
+ }
 public:
  void ProcessHostToLocalTransfer() override {}
- void ProcessLocalToHostTransfer() override { SyncMemoryCache(); }
+ void ProcessLocalToHostTransfer() override { Flush(); Queue(9,nullptr,0); }
  void ProcessLocalToLocalTransfer() override { Flush(); }
  void ProcessClutTransfer(uint32,uint32) override {}
  void SaveState(Framework::CZipArchiveWriter& archive) override {
@@ -87,6 +99,6 @@ public:
   if(stream->Read(gpuState.data(),size)!=size) throw std::runtime_error("Truncated PS2 GPU state.");
   stream.reset();
   CGSHandler::LoadState(archive);
-  SendGSCall([&]() { writes.clear(); commands.clear(); Call(5,gpuState.data(),gpuState.size()); },true);
+  SendGSCall([&]() { writes.clear(); commands.clear(); Call(5,gpuState.data(),gpuState.size()); Call(10,m_pRAM,4*1024*1024); },true);
  }
 };
