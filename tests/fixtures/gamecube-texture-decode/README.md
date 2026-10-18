@@ -13,7 +13,13 @@ python3 tests/fixtures/gamecube-texture-decode/generate.py /tmp/cloudrcade-gc-re
 candidate `WebGPUTexture.cpp` against small transport/owner/configuration stubs,
 and links the pinned generic CPU decoder. It checks 68 format/TLUT/mip cases:
 RAM/palette snapshots, lazy shadow parity, CPU copies, pooled replacement,
-configuration/feature/shape/allocation fallback. Stubs do not validate real native
+configuration/feature/shape/allocation fallback. It also asserts that rectangle copies,
+resolves and CPU uploads publish prior draws before their immediate transfer.
+Pass `--prepared --native-only` for the October17 thirteen-patch corresponding-source tree.
+Use `--packaged --native-only` for a current corresponding-source tree that
+already includes the transfer fix.
+The baseline code fails the first copy-order assertion.
+Stubs do not validate real native
 ring backpressure or graphics state. The Node test executes the actual patched
 worker opcode, held-upload scanner and state-load discard branch with controlled
 ownership mocks; it also checks typed bindings, per-device pipeline caching,

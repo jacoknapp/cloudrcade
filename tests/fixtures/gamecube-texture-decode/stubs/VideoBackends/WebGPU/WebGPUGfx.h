@@ -4,6 +4,7 @@
 namespace WebGPU {
 struct WebGPUGfx {
  void PrepareTextureDecode() {events.push_back(1);}
+ void PrepareTextureTransfer() {events.push_back(1);}
  void ReleaseTextureResource(u32) {events.push_back(6);}
 };
 }

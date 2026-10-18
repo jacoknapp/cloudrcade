@@ -58,12 +58,18 @@ int main() {
    for(u32 y=0;y<h;y++)assert(std::equal(actual+y*w*4,actual+(y+1)*w*4,expected.begin()+y*aw*4));
    texture.GetData(0,level);assert(decodes==before+1);
    MathUtil::Rectangle<int> rect(0,0,w,h);
+   events.clear();
    copy.CopyRectangleFromTexture(&texture,rect,0,level,rect,0,level);
+   assert((events==std::vector<int>{1,5}));
    assert(std::equal(copy.GetData(0,level),copy.GetData(0,level)+w*h*4,actual));
+   events.clear();
+   copy.ResolveFromTexture(&texture,rect,0,level);
+   assert((events==std::vector<int>{1,5}));
    // Pool reuse with a new palette/input replaces the prior deferred shadow.
    assert(texture.LoadEncoded(level,w,h,aw,ah,src.data(),src.size(),f,pal.data(),static_cast<TLUTFormat>(pf)));
    std::vector<u8> replacement(w*h*4,0x37);
-   before=decodes;texture.Load(level,w,h,w,replacement.data(),replacement.size(),0);
+   before=decodes;events.clear();texture.Load(level,w,h,w,replacement.data(),replacement.size(),0);
+   assert((events==std::vector<int>{1,2,4}));
    assert(decodes==before);
    assert(std::equal(texture.GetData(0,level),texture.GetData(0,level)+replacement.size(),replacement.begin()));
    ++cases;
