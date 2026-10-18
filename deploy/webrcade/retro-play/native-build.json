@@ -1,8 +1,8 @@
 {
-  "nativeInputSha256": "c5906377ec54034a583bd9ec5af54e2c0d5af474cd738fe6a0b35f3328b7ac10",
+  "nativeInputSha256": "fb44124f6c450d71bc93ec3f01056db7bb5d0763b4011a3ba4e8766706c29f28",
   "artifacts": {
     "Play.js": "84e6e1689c7a00f2e6e9448108570807e747a2681e230d21714abcafbb03cc37",
-    "Play.wasm": "556419bd4ccc2e91a35e78f8ffb0ab5623b693137930c511a0ab9ad6e28566cd",
+    "Play.wasm": "b5852c8d6232bd5fb20b8336fabaec8838b82333dbffdd31434b7b9dff218abc",
     "Gpu.js": "9f4586f59e2829a0a039eecef993e7682e3e3b660e773735af0cbeeff497e31a",
     "Gpu.wasm": "910daaafcf90de48a1b97e84aef538bb10d8c39964d9055cc52411516dee2537"
   }

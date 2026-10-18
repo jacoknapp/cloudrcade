@@ -249,3 +249,6 @@ subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=
 subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-registers.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], check=True)
+
+# Install pending-validation and exact sparse snapshots after baseline helpers.
+subprocess.run([sys.executable, str(here / 'patch-coherence-sparse16.py'), str(root)], check=True)

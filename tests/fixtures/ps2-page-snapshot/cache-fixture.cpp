@@ -31,6 +31,9 @@ public:
  std::vector<uint8> memory;
  uint8* m_ram;
  std::map<uint32, Block> blocks;
+#ifdef PROTOTYPE_SPARSE
+ std::map<uint32,std::set<unsigned>> coverageOracle;
+#endif
  Block empty{UINT32_MAX, UINT32_MAX};
  uint32 protectedStart = UINT32_MAX;
  explicit CEeExecutor() : memory(PS2::EE_RAM_SIZE), m_ram(memory.data()) {}
@@ -52,14 +55,23 @@ public:
   memcpy(&hash, &xxHash, sizeof(xxHash));
   #include "register.inc"
   blocks[start] = {start, end};
+#ifdef PROTOTYPE_SPARSE
+  for(uint64_t address=start;address<uint64_t(end)+4;++address)coverageOracle[uint32_t(address)&~4095U].insert((address%4096)/64);
+#endif
  }
  void ClearActiveBlocksInRange(uint32 start, uint32 end, bool executing) {
   BaseClear(start, end, executing);
   #include "clear.inc"
+#ifdef PROTOTYPE_SPARSE
+  for(auto it=coverageOracle.begin();it!=coverageOracle.end();)if(!m_instructionPages.count(it->first))it=coverageOracle.erase(it);else++it;
+#endif
  }
  void Reset() {
   #include "reset.inc"
   blocks.clear();
+#ifdef PROTOTYPE_SPARSE
+  coverageOracle.clear();
+#endif
  }
  void SyncInstructionCache();
  #include "members.inc"
@@ -67,6 +79,12 @@ public:
   unsigned snapshots = 0;
   for(const auto& pair : m_instructionPages) {
    assert(!pair.second.entries.empty());
+#ifdef PROTOTYPE_SPARSE
+   const auto& covered=coverageOracle.at(pair.first);uint64_t wanted=0;
+   for(auto chunk:covered)wanted|=uint64_t(1)<<chunk;
+   if(covered.size()>16)wanted=UINT64_MAX;
+   assert(pair.second.coverage==wanted);
+#endif
    if(pair.second.snapshot) ++snapshots;
    for(auto start : pair.second.entries) {
     assert(HasBlockAt(start));
@@ -98,6 +116,9 @@ static void FlushAgainstReference(CEeExecutor& e, std::map<uint32, std::vector<u
  for(const auto& range : changed) for(auto it = expected.begin(); it != expected.end();)
   if(it->first < range.second && it->second.end >= range.first) it = expected.erase(it); else ++it;
  e.SyncInstructionCache();
+#ifdef COHERENCE_PENDING
+ for(const auto& pair : e.m_instructionPages) assert(!pair.second.pendingValidation);
+#endif
  assert(e.blocks.size() == expected.size());
  for(const auto& pair : expected) assert(e.HasBlockAt(pair.first));
  e.CheckMetadata();
@@ -143,6 +164,11 @@ extern "C" unsigned run_fixture() {
  assert(e.m_instructionSnapshotCount == 512);
  pageHashCalls = blockHashCalls = 0;
  FlushAgainstReference(e, reference);
+#ifdef COHERENCE_PENDING
+ assert(pageHashCalls == 188 && blockHashCalls == 700);
+ pageHashCalls = blockHashCalls = 0;
+ FlushAgainstReference(e, reference);
+#endif
  assert(pageHashCalls == 188 && blockHashCalls == 0);
  e.memory[20 * 4096 + 2] ^= 16;
  e.memory[650 * 4096 + 3] ^= 32;
@@ -205,3 +231,8 @@ extern "C" uint32 hash_pages(const uint8* source, unsigned pages, unsigned loops
   sum += static_cast<uint32>(XXH3_128bits(source + page * 4096, 4096).low64);
  return sum;
 }
+
+#include "sparse-tests.inc"
+#include "registration-tests.inc"
+
+extern "C" unsigned instruction_page_bytes(){return sizeof(CEeExecutor::InstructionPage);}
