@@ -54,5 +54,5 @@ for tier,flags in [('default',[]),('liftoff',['--liftoff-only']),('turbofan',['-
   subprocess.run(['node',*flags,str(out/script)],check=True)
   result='result.json' if script=='execute-vu.cjs' else 'access-result.json'
   shutil.copyfile(out/result,out/(tier+'-'+result))
-subprocess.run(['node','-e',"const p=process.argv[1]; require(p+'/portable-check.js').runContextMemargCorpus(require(p+'/portable-generated-corpus.json')).then(x=>require('fs').writeFileSync(p+'/portable-node-result.json',JSON.stringify(x,null,2)+'\n')).catch(e=>{console.error(e);process.exitCode=1;});",str(out)],check=True)
+subprocess.run(['node','-e',"const p=process.argv[1]; require(p+'/portable-check.js').runContextMemargCorpus(require(p+'/portable-generated-corpus.json')).then(x=>require('fs').writeFileSync(p+'/portable-node-result.json',JSON.stringify(x,null,2))).catch(e=>{console.error(e);process.exitCode=1;});",str(out)],check=True)
 print('PASS',out)
