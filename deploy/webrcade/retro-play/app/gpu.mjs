@@ -82,11 +82,21 @@ export class Ps2Gpu {
      break;
     }
     case 7:await m.ccall('gpu_download',null,['number'],[buffer],{async:true});this.core.HEAPU8.set(m.HEAPU8.subarray(buffer,buffer+4*1024*1024),output);break;
+    case 9:{
+     if(size!==8)throw new Error('Invalid PS2 snapshot range descriptor.');
+     const descriptor=new DataView(m.HEAPU8.buffer,buffer,8),offset=descriptor.getUint32(0,true),length=descriptor.getUint32(4,true);
+     if(!length||(offset|length)%4||offset>=4*1024*1024||length>4*1024*1024-offset)throw new Error('Invalid PS2 snapshot range.');
+     const target=this.reserve(offset+length);
+     await m.ccall('gpu_download_snapshot_range',null,['number','number','number'],[target,offset,length],{async:true});
+     this.core.HEAPU8.set(m.HEAPU8.subarray(target+offset,target+offset+length),output);
+     break;
+    }
+    case 10:if(size!==4*1024*1024)throw new Error('Invalid PS2 snapshot seed.');m._gpu_seed_download_snapshot(buffer,size);break;
     default:throw new Error('Invalid PS2 graphics command.');
    }
    if(submitStart!==null){
     if(op===1||op===2||op===3||op===8)timing.record('gpuSubmit',submitStart,epoch);
-    else if(op===7)timing.record('gpuWait',submitStart,epoch);
+    else if(op===7||op===9)timing.record('gpuWait',submitStart,epoch);
    }
    if(display){
     const waitStart=timing?.begin()??null;

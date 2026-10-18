@@ -149,6 +149,7 @@ void load_transfer(const std::uint32_t* p) {
 }
 '''
 s += '\nnamespace ps2::gs::gpu { void shutdown() { set_timestamp_collection(false); if(g_surface) wgpuSurfaceUnconfigure(g_surface); if(g_device) wgpuDeviceDestroy(g_device); } }\n'
+s += Path(__file__).with_name('snapshot-readback.inc').read_text()
 p.write_text(s)
 p = out / 'gs.wgsl'
 shader = p.read_text()

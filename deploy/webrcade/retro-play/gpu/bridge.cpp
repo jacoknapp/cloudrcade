@@ -11,6 +11,7 @@ extern std::uint32_t cbp0, cbp1;
 }
 namespace ps2::gs::gpu { void shutdown(); bool present_layers(const std::uint32_t*); void save_transfer(std::uint32_t*); void load_transfer(const std::uint32_t*); }
 namespace ps2::gs::gpu { void reset_timestamp_collection(); void set_timestamp_collection(bool); bool timestamp_queries(); double compute_samples(); double compute_ms(); }
+namespace ps2::gs::gpu { void capture_download_snapshot(); void seed_download_snapshot(const std::uint8_t*,std::uint32_t); void download_snapshot_range(std::uint8_t*,std::uint32_t,std::uint32_t); void release_download_snapshot(); }
 namespace ps2 { extern unsigned long long cloudGpuFrames; }
 using namespace ps2::gs;
 static std::vector<std::uint8_t> snapshot;
@@ -22,7 +23,7 @@ EMSCRIPTEN_KEEPALIVE int gpu_has_timestamps() { return gpu::timestamp_queries();
 EMSCRIPTEN_KEEPALIVE double gpu_compute_samples() { return gpu::compute_samples(); }
 EMSCRIPTEN_KEEPALIVE double gpu_compute_ms() { return gpu::compute_ms(); }
 EMSCRIPTEN_KEEPALIVE void gpu_wait() { gpu::wait_idle(); }
-EMSCRIPTEN_KEEPALIVE void gpu_destroy() { gpu::shutdown(); }
+EMSCRIPTEN_KEEPALIVE void gpu_destroy() { gpu::release_download_snapshot(); gpu::shutdown(); }
 EMSCRIPTEN_KEEPALIVE int gpu_init() {
  build_tables();
  if(!gpu::init(gpu::Mode::primary)) return 0;
@@ -38,6 +39,8 @@ EMSCRIPTEN_KEEPALIVE int gpu_present(const std::uint32_t* p) {
  if(shown) ++ps2::cloudGpuFrames; return shown;
 }
 EMSCRIPTEN_KEEPALIVE void gpu_download(std::uint8_t* target) { gpu::download(target); }
+EMSCRIPTEN_KEEPALIVE void gpu_download_snapshot_range(std::uint8_t* target,unsigned offset,unsigned bytes) { gpu::download_snapshot_range(target,offset,bytes); }
+EMSCRIPTEN_KEEPALIVE void gpu_seed_download_snapshot(const std::uint8_t* data,unsigned bytes) { gpu::seed_download_snapshot(data,bytes); }
 EMSCRIPTEN_KEEPALIVE unsigned gpu_state_size() { return stateSize; }
 EMSCRIPTEN_KEEPALIVE const std::uint8_t* gpu_save() {
  std::vector<std::uint32_t> vram,clut; std::uint32_t scale;
@@ -72,6 +75,7 @@ EMSCRIPTEN_KEEPALIVE void gpu_reset() {
  std::vector<std::uint32_t> vram(kMemorySize/4),clut(512);
  gpu::reset_timestamp_collection();
  gpu::write_state(vram,1,clut);
+ gpu::seed_download_snapshot(reinterpret_cast<const std::uint8_t*>(vram.data()),kMemorySize);
  std::uint32_t transfer[128]{}; transfer[9]=32; gpu::load_transfer(transfer);
  g_state={}; cbp0=cbp1=~0u; ++g_setup_generation;
 }
@@ -89,6 +93,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int gpu_batch(const std::uint32_t* words,unsigne
   case 1:if(bytes%12)throw std::runtime_error("Invalid batched GS registers.");gpu_write(data,bytes/4);break;
   case 2:gpu_image(reinterpret_cast<const std::uint8_t*>(data),bytes);break;
   case 3:if(bytes!=104 || cursor!=count)throw std::runtime_error("Invalid batched GS display.");result=3|(gpu_present(data)?4:0);break;
+  case 9:if(bytes)throw std::runtime_error("Invalid GS snapshot capture.");gpu::capture_download_snapshot();break;
   default:throw std::runtime_error("Invalid GS batch command.");
   }
  }
