@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Private source-only ordinary register read reuse prototype. Not installed by native recipe.
-Patch exact installed5833 source, reject drift/repeated application before writes.
-No artifact lock, core build, deployment, guest bytes, or performance claim.
+"""Guarded ordinary CMIPS register read reuse for the WebAssembly backend.
+Patch exact installed source; reject drift/repeated application before writes.
+Keep the first load and every store in place; preserve barriers and synchronization.
 """
 from pathlib import Path
 import hashlib,sys

@@ -192,3 +192,12 @@ CL==WL is nonzero, preserving the existing stream/tag buffering, memory wrap,
 cycle counters and completion behavior. The native source/oracle fixture is
 [documented here](../../../tests/fixtures/ps2-vif-bulk/README.md). Synchronization,
 guest timing, quality and WebGPU behavior remain unchanged.
+
+### Ordinary register read reuse
+
+The Wasm backend captures an ordinary GPR/VF register’s first typed load in a
+local and reuses it within a bounded straight-line region. The first load and
+every store retain their original order; overlapping writes, helpers and control
+boundaries invalidate cached values. This uses at most eight locals with a
+32-statement lifetime and excludes MakeSz input cones and special registers.
+The optimization applies across games and preserves GPU synchronization.
