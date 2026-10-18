@@ -73,6 +73,13 @@ with no enable setting. Its optional performance readout lives in Core Settings.
 The historical `/experimental/ps2/` launch URL remains compatible. The
 `beta/ps2-core` candidate branch publishes `beta-ps2-core` for AMD64 only;
 main publishes the standard cores for both AMD64 and ARM64.
+The `beta/wii-core` branch adds experimental Wii as its own category, core type,
+controller profile and save namespace. It reuses the current GameCube native
+patches and browser adapter, with a separately qualified Wii Remote/Nunchuk native
+build. Touch/mouse gestures supply IR, acceleration and simulated MotionPlus
+pitch/yaw. Settings → Core Settings owns separate default-off enable/readout
+switches. See the [Wii adapter](../deploy/webrcade/retro-wii/README.md).
+
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 

@@ -57,6 +57,12 @@ cores and pinned npm packages recorded in its lockfile. Their license notices
 ship in `sdk-licenses/` and the generated bundle's legal notices. See
 `deploy/webrcade/retro-dolphin/README.md` for pins and build limits.
 
+The experimental Wii adapter reuses the qualified Dolphin patches and adds
+emulated Wii Remote/Nunchuk input. Its distinct source/artifact lock is
+`deploy/webrcade/retro-wii/native-build.json`. Fully patched corresponding source
+ships as `/experimental/wii/wii-source.tar.gz`, with the same Dolphin, font and
+save SDK notices alongside it. Browser adapter source includes the Wii overlay.
+
 ## Experimental PlayStation 2
 
 The PS2 beta builds [Play!](https://github.com/jpd002/Play-) and its pinned

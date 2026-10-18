@@ -29,6 +29,24 @@ class RefreshTests(unittest.TestCase):
   games=[i for i in new if i['type']=='ps2'];self.assertEqual(len(games),1);self.assertTrue(games[0]['props']['uid'].startswith('cloudrcade-ps2-'))
   self.assertEqual([c['title'] for c in after['categories'] if any(i['type']=='ps2' for i in c['items'])],['PlayStation 2'])
   self.assertEqual(m.ps2_game(path),identity)
+ def test_wii_header_identity_and_platform_separation(self):
+  self.put('Wii/Test.iso',b'TEST01'+bytes(18)+bytes.fromhex('5d1c9ea3')+bytes(4))
+  path=self.root/'Wii/Test.iso'
+  with path.open('r+b') as stream:stream.truncate(4700000000)
+  self.assertTrue(m.wii_game(path).startswith('wii:'))
+  self.assertIsNone(m.gamecube_game(path))
+  self.assertTrue(m.managed_matches(path,'Wii',{'.iso'}))
+  self.assertFalse(m.managed_matches(path,'GameCube',{'.iso'}))
+  self.put('Wii/invalid.iso',bytes(32));self.assertIsNone(m.wii_game(self.root/'Wii/invalid.iso'))
+  self.put('nes/roms/existing.nes',b'nes-existing')
+  m.main();before=json.loads((self.state/'feeds/combined.json').read_text())
+  info=Path(self.tmp.name)/'wii-core.json';info.write_text('{}')
+  with patch.object(m,'WII_CORE_INFO',info),patch.object(m,'digest',wraps=m.digest) as digest:
+   m.main();after=json.loads((self.state/'feeds/combined.json').read_text())
+   self.assertFalse(any(call.args[0]==path for call in digest.call_args_list),'Wii DVDs never hashed in full')
+  category=next(c for c in after['categories'] if c['title']=='Nintendo Wii (experimental)')
+  self.assertEqual(len(category['items']),1);self.assertEqual(category['items'][0]['type'],'wii')
+  self.assertEqual([c for c in after['categories'] if c is not category],before['categories'])
  def test_gamecube_header_without_disc_hash(self):
   self.put('GameCube/game.iso',b'TEST01'+bytes(22)+bytes.fromhex('c2339f3d'))
   path=self.root/'GameCube/game.iso'

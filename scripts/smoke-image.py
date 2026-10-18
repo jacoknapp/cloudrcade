@@ -75,6 +75,9 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     gc_header=bytearray(32); gc_header[:6]=b'TEST01'; gc_header[28:32]=bytes.fromhex('c2339f3d')
     (roms / 'GameCube/gamecube-fixture.iso').write_bytes(gc_header)
     (roms / 'GameCube/invalid.iso').write_bytes(bytes(32))
+    (roms / 'Wii').mkdir()
+    wii_header=bytearray(32);wii_header[:6]=b'WIIE01';wii_header[24:28]=bytes.fromhex('5d1c9ea3')
+    (roms / 'Wii/wii-fixture.iso').write_bytes(wii_header)
     (roms / 'fixtures/disc.bin').write_bytes(bytes(2352 * 32))
     (roms / 'fixtures/disc.cue').write_text('FILE "disc.bin" BINARY\n TRACK 01 MODE1/2352\n INDEX 01 00:00:00\n')
     synthetic_keys = 'slot0x18KeyX=' + '00' * 16 + '\n'
@@ -112,6 +115,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         assert any(item['title'] == 'psp-fixture' and item['type'] == 'psp' for item in items())
         assert any(item['title'] == 'portable-fixture' and item['type'] == 'psp' for item in items())
         assert any(item['title'] == 'ps2-fixture' and item['type'] == 'ps2' and item['props']['uid'].startswith('release_test-ps2-') for item in items())
+        assert any(item['title']=='wii-fixture' and item['type']=='wii' for item in items())
         assert any(item['title']=='gamecube-fixture' and item['type']=='gamecube' for item in items()) == gamecube
         assert not any(item['title']=='invalid' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.
@@ -165,6 +169,23 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
                 assert hashlib.sha256(response.read()).hexdigest() == info['sourceSha256']
             with get(base + 'adapter-source/patch-runtime.py') as response:
                 assert hashlib.sha256(response.read()).hexdigest() == info['hostPatchSha256']
+        base='/experimental/wii/'
+        with get(base) as response:
+            assert b'data-cloudrcade-core="wii"' in response.read()
+            assert response.headers['Cross-Origin-Opener-Policy']=='same-origin'
+            assert response.headers['Cross-Origin-Embedder-Policy']=='require-corp'
+        with get(base+'core-info.json') as response:wii_info=json.load(response)
+        assert wii_info['experimental'] and wii_info['system']=='wii'
+        assert config['wiiUrl']==base
+        expected_wii=json.loads(Path('deploy/webrcade/retro-wii/native-build.json').read_text())
+        assert wii_info['nativeBuild']==expected_wii
+        for filename,expected in wii_info['artifacts'].items():
+            with get(base+'cores/dolphin/'+filename) as response:
+                assert hashlib.sha256(response.read()).hexdigest()==expected
+        for filename,expected in wii_info['adapterFilesSha256'].items():
+            with get(base+filename) as response:assert hashlib.sha256(response.read()).hexdigest()==expected
+        with get(base+'wii-source.tar.gz') as response:
+            assert hashlib.sha256(response.read()).hexdigest()==wii_info['sourceSha256']
         assert config['n3dsKeysUrl'] == '/cloud-saves/3ds-keys.php'
         with get('/cloud-saves/metadata.php?key='+'0'*64) as metadata_response:
             assert json.load(metadata_response)=={'available':False}

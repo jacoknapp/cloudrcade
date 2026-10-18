@@ -36,3 +36,9 @@ knowledge
 
 /release/gamecube-native/
 /release/ps2-native/
+
+/release/wii-native/
+/release/wii-native-cache/
+/release/wii-local/
+
+/release/wii/app/fixtures/

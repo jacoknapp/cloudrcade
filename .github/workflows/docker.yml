@@ -1,7 +1,7 @@
 name: Docker release
 on:
   push:
-    branches: [main, beta/psp-core, beta/ps2-core]
+    branches: [main, beta/psp-core, beta/ps2-core, beta/wii-core]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -92,6 +92,20 @@ jobs:
         run: python3 scripts/restore-qualified-cores.py
       - name: Prepare GameCube (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare gamecube
+      - name: Restore qualified Wii native bytes
+        uses: actions/cache@v4
+        with:
+          path: release/wii-native-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-wii-native-${{ hashFiles('deploy/webrcade/retro-wii/wii-input.patch', 'deploy/webrcade/retro-wii/native-build.json', 'deploy/webrcade/retro-wii/build-native.py', 'deploy/webrcade/retro-dolphin/native-build.json', 'deploy/webrcade/retro-dolphin/build-linux.sh') }}
+      - name: Prepare experimental Wii from the current GameCube source
+        run: |
+          if [ "$FORCE_CORE_REBUILD" != true ] && [ -f release/wii-native-cache/dolphin-core-upstream.wasm ]; then
+            export WII_NATIVE_CACHE="$PWD/release/wii-native-cache"
+          fi
+          python3 deploy/webrcade/retro-wii/build-native.py
+          python3 deploy/webrcade/retro-wii/prepare.py
+          mkdir -p release/wii-native-cache
+          cp release/wii-native/dolphin-core-upstream.{js,wasm} release/wii-native-cache/
       - name: Prepare 3DS (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare 3ds
       - name: Prepare PSP (reuse unchanged builds)

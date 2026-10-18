@@ -4,6 +4,7 @@
   const prefix = window.WrcadCloudConfig?.storagePrefix || 'webrcade';
   // A touch-capable desktop using a mouse still uses the desktop interface.
   const touchDevice = matchMedia('(pointer: coarse)').matches;
+  const wiiPage = location.pathname.startsWith('/experimental/wii/') || document.documentElement.dataset.cloudrcadeCore === 'wii';
   const gamecubePage = location.pathname.startsWith('/experimental/gamecube/') || document.documentElement.dataset.cloudrcadeCore === 'gamecube';
   if (!touchDevice) return;
   const KEY = prefix + '.touch.enabled.v1';
@@ -209,12 +210,15 @@
     psp: ['psp', 'retro-ppsspp'],
     ps2: ['ps2', 'play-ps2'],
     gamecube: ['gamecube', 'retro-dolphin'],
+    wii: ['wii', 'retro-dolphin-wii'],
   };
   const core = launchProps?.type || emulatorPath;
   const ps2Page = document.documentElement.dataset.cloudrcadeCore === 'ps2';
-  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (ps2Page ? 'ps2' : gamecubePage ? 'gamecube' : emulatorPath);
+  const system = Object.keys(platformCores).find(platform => platformCores[platform].includes(core)) || (wiiPage ? 'wii' : ps2Page ? 'ps2' : gamecubePage ? 'gamecube' : emulatorPath);
+  const wii = system === 'wii' || wiiPage;
   const gamecube = system === 'gamecube' || gamecubePage;
-  if (gamecube) {
+  const dolphin = gamecube || wii;
+  if (dolphin) {
     if (!touchDevice) for (const element of [toggle,$('.kt-edit'),$('.kt-translucence')]) element.hidden = true;
   }
   document.documentElement.classList.toggle('kt-ds-active', system === 'nds');
@@ -351,7 +355,7 @@
       ['psx','ps2'].includes(system) ? `${index ? 'Right' : 'Left'} analog stick` :
       n3ds ? (index ? 'C-stick' : 'Circle Pad') : 'Analog stick');
   }
-  configureDirection(stick, n64 || n3ds || system === 'psp' || gamecube ? 'analog' : 'digital');
+  configureDirection(stick, n64 || n3ds || system === 'psp' || dolphin ? 'analog' : 'digital');
   function addDirection(id, kind, index, className) {
     const element = stick.cloneNode(true);
     element.dataset.layoutId = id;
@@ -360,7 +364,7 @@
     pad.append(element); directions.push(element);
     return element;
   }
-  if (n64 || n3ds || system === 'psp' || gamecube) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
+  if (n64 || n3ds || system === 'psp' || dolphin) addDirection('dpad', 'digital', 0, 'kt-extra-dpad');
   if (n3ds || gamecube) addDirection('stick-right', 'analog', 1, 'kt-c-stick');
   if (system === 'psx' || system === 'ps2') {
     // A steady DualShock overlay avoids layout changes when games select digital
@@ -635,6 +639,7 @@
   host.classList.toggle('kt-n64', n64);
   host.classList.toggle('kt-3ds', n3ds);
   host.classList.toggle('kt-gamecube', gamecube);
+  host.classList.toggle('kt-wii', wii);
   host.classList.toggle('kt-psp', system === 'psp');
   host.classList.toggle('kt-gameboy', gameboy);
   $('.kt-cbuttons').hidden = !n64;
@@ -671,6 +676,17 @@
   if (gamecube) {
     const z = $('[data-cid="12"]'); z.textContent = 'Z'; $('.kt-shoulders').append(z);
     $('[data-cid="10"]').hidden = true; $('[data-cid="11"]').hidden = true;
+  }
+  if (wii) {
+    pad.setAttribute('aria-label','Wii Remote and Nunchuk touch controller');
+    stick.setAttribute('aria-label','Nunchuk analog stick');
+    $('.kt-extra-dpad')?.setAttribute('aria-label','Wii Remote directional pad');
+    $('.kt-shoulders').append($('[data-cid="12"]'));
+    $('[data-cid="11"]').hidden=true;
+    for (const [cid,label] of [[4,'A'],[5,'B'],[6,'1'],[7,'2'],[8,'C'],[9,'Z'],[12,'−'],[13,'+'],[10,'Home']]) {
+      const button=$(`[data-cid="${cid}"]`);button.textContent=label;button.setAttribute('aria-label',label==='−'?'Minus':label==='+'?'Plus':label);
+    }
+    $('[data-cid="10"]').hidden=false;
   }
   if (system === 'psx' || system === 'psp' || system === 'ps2') {
     for (const [cid, label] of [[4,'✕'],[5,'○'],[6,'□'],[7,'△']]) $(`[data-cid="${cid}"]`).textContent = label;
@@ -735,7 +751,7 @@
   function dockPosition() {
     const point = currentLayout().dock;
     if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
-    if (gamecube && innerWidth > innerHeight && innerWidth <= 650 && innerHeight <= 550) {
+    if (dolphin && innerWidth > innerHeight && innerWidth <= 650 && innerHeight <= 550) {
       // The short landscape layout reaches the top of the window. Put its
       // settings tab between the shoulder and face buttons, without pushing
       // Z onto R. Re-measure on viewport changes, never on every input frame.
@@ -774,11 +790,11 @@
     host.classList.toggle('kt-enabled', effectiveEnabled);
     // PS2/GameCube own their canvas geometry and consume this class. Refit on
     // transitions even if the game is paused and has no animation frame.
-    if (presentationChanged && (system === 'ps2' || gamecube)) window.app?.emulator?.updateScreenSize?.();
+    if (presentationChanged && (system === 'ps2' || dolphin)) window.app?.emulator?.updateScreenSize?.();
     toggle.setAttribute('aria-pressed', String(effectiveEnabled));
     toggle.textContent = `Touch controls: ${effectiveEnabled ? 'On' : 'Off'}`;
     const wasHidden = pad.hidden;
-    pad.hidden = (gamecube && !touchDevice) || drawerOpen || (!editing && (!effectiveEnabled || !gameReady));
+    pad.hidden = (dolphin && !touchDevice) || drawerOpen || (!editing && (!effectiveEnabled || !gameReady));
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
@@ -797,7 +813,7 @@
     tab.setAttribute('aria-expanded', String(open));
     draw();
     if (open) cloud()?.syncControls?.();
-    if (gamecube) window.WrcadGameCube?.menuOpen(open);
+    if (dolphin) (wii ? window.WrcadWii : window.WrcadGameCube)?.menuOpen(open);
     if (system === 'ps2') window.WrcadPS2?.menuOpen(open);
   }
   toggle.addEventListener('click', () => {
@@ -1209,7 +1225,7 @@
     const framed = Boolean(document.getElementById('webrcade-app-iframe'));
     // Layout editing intentionally pauses the emulator. Keep its toolbar and
     // dock usable until Save/Cancel, while hiding controls on native pause screens.
-    host.hidden = framed || !(ready || (gamecube && emulator?.started && !window.app.isPauseScreen()) || (editing && emulator === editEmulator));
+    host.hidden = framed || !(ready || (dolphin && emulator?.started && !window.app.isPauseScreen()) || (editing && emulator === editEmulator));
     if (host.hidden && drawerOpen) setDrawer(false);
     if (ready !== gameReady || controller !== activeController || framed) clear();
     activeController = controller; gameReady = ready;

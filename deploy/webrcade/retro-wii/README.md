@@ -1,0 +1,65 @@
+# Experimental Wii core
+
+Wii reuses the current GameCube Dolphin improvements, all its native patches, device WebGPU
+renderer, bounded disc streaming, lifecycle/audio recovery, standard pause menu
+and save slots. A separate native build adds one emulated Wii Remote + Nunchuk.
+The GameCube package and its save compatibility remain unchanged.
+
+Enable **Wii (experimental)** in library Settings → Core Settings. The separate
+**Wii performance readout (experimental)** switch uses the same metrics and
+placement as GameCube. Both default off and follow OK/Cancel. The direct lab is
+`/experimental/wii/`; it accepts Wii ISO files and range-capable HTTP URLs.
+The scanner recognizes Wii ISO headers in `Wii/` and managed platform 5 games.
+WBFS, RVZ, WAD, multiple Remotes and MotionPlus roll are not implemented.
+
+Wii has its own category, controller profile and independently saved layouts.
+The Remote/Nunchuk layout follows the shared screen/dock placement and editor behavior, with Wii button geometry:
+A/B, 1/2, C/Z, Plus/Minus and Home. Its left stick controls the Nunchuk.
+Touch the video or move the desktop mouse to point; tap/click is A and right
+click is B. Position supplies tilt and quick drags supply swing/shake acceleration.
+Pointer coordinates use the visible game rectangle. Touch cancellation, pause,
+menus, backgrounding and exit release motion/buttons. No device sensor permission
+is requested. Dragging also supplies simulated MotionPlus pitch/yaw. Games needing richer gestures or roll need further
+input work; see their requirements before assuming compatibility.
+
+Wii saves live under a separate `wii/<game ID>/` namespace. Standard save feedback,
+account-scoped local/cloud storage and state slots reuse GameCube's implementation.
+Only NAND title `data/` files are synchronized, with path validation and a 64 MiB
+limit. Titles/content/tickets/console keys are never included in save archives.
+
+## Run locally
+
+After preparing Wii, run `python3 scripts/run-wii-beta.py`. It leaves an isolated
+container at `https://localhost:18573/play/` and the Wii disc launcher at
+`https://localhost:18573/experimental/wii/`. Development HTTPS uses a local
+certificate. Enable Wii in Settings → Core Settings, then select your Wii ISO
+in the launcher. State lives under ignored `release/wii-local/`; the helper
+mounts its empty ROM folder read-only and disables automatic scanning and cloud accounts.
+For the separate Wii library category, put ISOs in `release/wii-local/roms/Wii/`
+and run `docker exec cloudrcade-wii-beta python3 /usr/local/share/cloudrcade/service.py scan`,
+then refresh the library. Your independently saved Wii touch layout follows your
+account's controller sync settings when cloud storage is enabled on a normal server.
+
+## Reproduce
+
+Prepare the current qualified GameCube package first, then run:
+
+```sh
+python3 deploy/webrcade/retro-wii/build-native.py
+python3 deploy/webrcade/retro-wii/prepare.py
+```
+
+`WII_WORK` must be a new dedicated directory; `WII_TOOLCHAIN` holds the pinned SDK
+Rust compiler/cache. Use a filesystem with enough space for a Dolphin source build.
+`OUT` can override each stage's new output directory. `GAMECUBE_APP` selects a
+verified current GameCube package. `WII_NATIVE_CACHE` reuses only exact locked
+native hashes. An intentional native change requires a fresh `--qualify` build,
+review of the resulting source/artifact lock and native/browser regression checks.
+
+The Wii source archive contains fully patched Dolphin/source, the complete
+GameCube recipe/locks, and the additional `cloudrcade-wii` patch/lock. To rebuild
+that extracted archive directly, use the exact SDK image in native-build.json,
+mount it at `/work`, empty compiler/cache scratch at `/toolchain`, and
+`cloudrcade-native` at `/recipe`, then run `bash /recipe/build-linux.sh`.
+The Wii input report probe is opt-in and accepts only stopped/paused sessions.
+It calls Dolphin's actual Wii Remote report builder without per-frame overhead.
