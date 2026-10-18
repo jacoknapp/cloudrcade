@@ -252,3 +252,6 @@ subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], 
 # Batch only contiguous ordinary V4-32 unpack; preserve the FIFO/tag machinery.
 subprocess.run([sys.executable, str(here / 'patch-vif-bulk.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-handoff.py'), str(root)], check=True)
+
+# Ordinary CMIPS register first-read reuse; retains all stores and synchronization.
+subprocess.run([sys.executable, str(here / 'patch-register-reuse.py'), str(root)], check=True)
