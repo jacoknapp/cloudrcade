@@ -15,8 +15,9 @@ data. Output contains extracted source and test binaries. ASan/UBSan is optional
   cursor, and checks each actual source address against the planned interval.
   Cases cover CT32/Z32/CT24/Z24/CT16/Z16S/T8/T8H, odd/zero SBW, 256-byte SBP,
   page/RAM/coordinate wraps, padding, unsupported fallback and continued reads.
-  NDEBUG matches the shipped reader: Z24's nominal nSize can be zero despite a
-  real DMA read, so planning uses the actual size/cursor rather than that field.
+  NDEBUG matches the shipped reader. Synthetic nominal-size mismatches exercise
+  planning from actual size/cursor rather than that field. Pinned BeginTransfer
+  supports Z24; an 8×4 transfer programs 96 bytes.
 - `snapshot.cpp` compiles the actual GPU snapshot implementation/reset export
   against an ordered queue observer. It checks capture A → VRAM B → ranged A,
   repeated/mismatched reads, full sync replacing the snapshot, archived CPU RAM

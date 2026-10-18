@@ -42,7 +42,7 @@ static void check(uint32 psm,uint32 bp,uint32 bw,uint32 x,uint32 y,uint32 width,
   r->m_nReg[GS_REG_TRXPOS]=x|(uint64(y)<<16);
   r->m_nReg[GS_REG_TRXREG]=width;
   r->m_trxCtx.nRRX=rx; r->m_trxCtx.nRRY=ry;
-  r->m_trxCtx.nSize=0; // Z24's pinned BeginTransfer can set zero; actual DMA still reads.
+  r->m_trxCtx.nSize=0; // Synthetic nominal-size mismatch; actual DMA size drives the reader.
   r->m_transferReadHandlers[psm]=high?&Reader::TransferReadHandlerPSMT8H:
    packed24?&Reader::TransferReadHandler24<Storage>:&Reader::TransferReadHandlerGeneric<Storage>;
  }
