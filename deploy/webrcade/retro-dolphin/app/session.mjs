@@ -36,7 +36,7 @@ export async function inspectDisc(file) {
 }
 
 export class GameCubeSession {
-  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, onTelemetry = () => {}, onFatal = () => {}, timeoutMs = 60000} = {}) {
+  constructor({scope = globalThis, canvas, createAdapter, onStatus = () => {}, onTelemetry = () => {}, onFatal = () => {}, timeoutMs = 60000, nativeTimingEnabled = false} = {}) {
     this.scope = scope;
     this.createAdapter = createAdapter || (async options => {
       const {UpstreamWorkerAdapter} = await import('./vendor/src/upstream-worker-adapter.js');
@@ -47,6 +47,7 @@ export class GameCubeSession {
     this.onFatal = onFatal;
     this.canvas = canvas;
     this.timeoutMs = timeoutMs;
+    this.nativeTimingEnabled = Boolean(nativeTimingEnabled);
     this.adapter = null;
     this.initializing = null;
     this.closed = false;
@@ -123,6 +124,7 @@ export class GameCubeSession {
       adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());
       if (this.closed) throw new Error('GameCube session is closed.');
+      if (this.nativeTimingEnabled) await this.bounded(adapter.request('nativeTiming',{enabled:true}));
       adapter.worker?.addEventListener?.('error', event => this.fail(new Error(event.message || 'GameCube worker failed.')));
       adapter.worker?.addEventListener?.('messageerror', () => this.fail(new Error('GameCube worker communication failed.')));
       adapter.worker?.addEventListener?.('message', event => {

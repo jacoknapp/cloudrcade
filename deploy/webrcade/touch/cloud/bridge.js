@@ -70,10 +70,14 @@
     const auth = connection;
     // Opt-in per save manager; existing cores retain their request policy.
     const signal = Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-    if (!csrf) {
+    // A game can outlive its PHP session. Refresh before sending a large save
+    // body, rather than discovering an expired token after the upload.
+    if (!csrf || method === 'PUT' && !retried) {
       bootstrap ||= fetch(API + '?action=status', {cache: 'no-store', signal}).then(async response => {
         if (!response.ok) throw new Error('Cloud connection unavailable. Please try again.');
-        csrf = (await response.json()).csrf;
+        const value = await response.json();
+        if (typeof value.csrf !== 'string' || !value.csrf) throw new Error('Cloud session unavailable. Please refresh the page and try again.');
+        csrf = value.csrf;
       }).finally(() => { bootstrap = null; });
       await bootstrap;
     }
@@ -82,6 +86,13 @@
     const response = await fetch(url, {method, body, cache: 'no-store', signal, headers: {...headers(auth), 'X-CSRF-Token': csrf, ...extra}});
     requireAccount(uid);
     if (response.status === 403 && !retried) {
+      const detail = await response.clone().json().catch(() => null);
+      // An access denial or rejected Origin cannot be repaired with a new
+      // CSRF token. Retain the provider's explanation instead of resending.
+      if (detail?.code !== 'csrf_invalid' && detail?.error !== 'Refresh the page and try again.') {
+        const error = new Error(detail?.error || 'Cloud upload was denied (HTTP 403). Refresh the page and check your cloud connection.');
+        error.status = 403; throw error;
+      }
       csrf = null;
       return request(action, {method, path, body, extra, retried:true, uid, timeoutMs});
     }
@@ -180,7 +191,7 @@
       throw e;
     }
   }
-  async function upload(blob, path, uid = account(), condition, timeoutMs = 0) {
+  async function upload(blob, path, uid = account(), condition, timeoutMs = 0, uploadTimeoutMs) {
     requireAccount(uid);
     const key = versionKey(uid, path);
     if (condition === undefined) {
@@ -193,7 +204,8 @@
       }
       condition = versions.get(key);
     }
-    const response = await request('file', {method:'PUT', path, body:blob, uid, timeoutMs,
+    const response = await request('file', {method:'PUT', path, body:blob, uid,
+      timeoutMs:provider === 'nextcloud' ? uploadTimeoutMs ?? timeoutMs : timeoutMs,
       extra: condition ? {'If-Match':condition} : {'If-None-Match':'*'}});
     if (response.headers.get('ETag')) versions.set(key, response.headers.get('ETag'));
     else versions.delete(key);
@@ -283,7 +295,7 @@
       record.sync = {dirty:true, base:record.sync.base ?? null, attempt:digest};
       await write(manager, path, record.files, record.sync);
       const zip = await manager.createZip(record.files);
-      try { await upload(zip, zipPath, uid, record.sync.base, manager.cloudRequestTimeoutMs); }
+      try { await upload(zip, zipPath, uid, record.sync.base, manager.cloudRequestTimeoutMs, manager.cloudUploadTimeoutMs); }
       catch (e) {
         if (e.status !== 409) throw e;
         // Also recover pre-upgrade pending records without an attempt marker.
@@ -308,7 +320,7 @@
     };
     proto.saveCloud = async function(path, files) {
       const uid = owner(this); requireAccount(uid);
-      return upload(await this.createZip(files), this.getZipFileName(path), uid, undefined, this.cloudRequestTimeoutMs);
+      return upload(await this.createZip(files), this.getZipFileName(path), uid, undefined, this.cloudRequestTimeoutMs, this.cloudUploadTimeoutMs);
     };
     proto.loadCloudSingleFile = function(path) { return download(path, owner(this)); };
     proto.saveCloudSingleFile = function(path, content) { return upload(content, path, owner(this)); };

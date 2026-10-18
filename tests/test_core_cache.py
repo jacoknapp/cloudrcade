@@ -52,10 +52,42 @@ class CoreCacheTest(unittest.TestCase):
         self.assertEqual(self.changed(cache.READER), {'3ds', 'psp', 'gamecube'})
         self.assertEqual(self.changed('deploy/webrcade/retro-ppsspp/build.sh'), {'psp'})
         self.assertEqual(self.changed('deploy/webrcade/retro-azahar/patches/new.patch'), {'3ds'})
-        self.assertEqual(self.changed('deploy/webrcade/touch/assets/controller.css'), {'gamecube'})
+        self.assertEqual(self.changed('deploy/webrcade/touch/assets/controller.css'), {'gamecube', 'ps2'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-play/native/CloudRcade.cpp'), {'ps2', 'ps2-native'})
+        # Newly added native patch helpers must invalidate both the compiler
+        # receipt and the adapter package; otherwise old binaries can be reused.
+        before = cache.ps2_native_key(self.root)
+        self.assertEqual(self.changed('deploy/webrcade/retro-play/patch-extra-native.py'), {'ps2', 'ps2-native'})
+        self.assertNotEqual(before, cache.ps2_native_key(self.root))
+        prepare = runpy.run_path(str(self.root / cache.BASE / 'retro-play/prepare.py'))
+        self.assertEqual(prepare['native_key'](), cache.ps2_native_key(self.root))
+        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/sdk/pause.jsx'), {'gamecube', 'ps2'})
         self.assertEqual(self.changed('deploy/webrcade/touch/cloud/bridge.js'), set())
         self.assertEqual(self.changed('README.md'), set())
-        self.assertEqual(self.changed('.github/workflows/docker.yml'), set(cache.INPUTS))
+        self.assertEqual(self.changed('.github/workflows/docker.yml'), set())
+        self.assertEqual(self.changed('scripts/core-cache.py'), set())
+        self.assertEqual(self.changed('scripts/restore-qualified-cores.py'), set())
+        self.assertEqual(self.changed('deploy/webrcade/retro-azahar/README.md'), set())
+        self.assertEqual(self.changed('deploy/webrcade/retro-ppsspp/README.md'), set())
+        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/README.md'), {'gamecube'})
+
+    def test_effective_toolchain_and_per_core_command_changes(self):
+        workflow = self.root / '.github/workflows/docker.yml'
+        original = workflow.read_text()
+        before = self.keys()
+        def changed(text):
+            workflow.write_text(text)
+            return {core for core, key in self.keys().items() if key != before[core]}
+        self.assertEqual(changed(original.replace("node-version: '22'", "node-version: '24'")), {'gamecube', 'ps2'})
+        self.assertEqual(changed(original.replace('runs-on: ubuntu-24.04', 'runs-on: ubuntu-26.04')), set(cache.COMMANDS))
+        self.assertEqual(changed(original.replace('permissions:', '# release scheduling\npermissions:', 1)), set())
+        self.assertEqual(changed(original.replace('actions/cache/restore@v4', 'actions/cache/restore@v5')), set())
+        self.assertEqual(changed(original.replace('Prepare PSP (reuse unchanged builds)', 'PSP label only')), set())
+        self.assertEqual(changed(original.replace('run: python3 scripts/core-cache.py prepare psp', 'env:\n          CXXFLAGS: changed\n        run: python3 scripts/core-cache.py prepare psp')), {'psp'})
+        self.assertEqual(changed(original.replace('    env:\n', '    env:\n      CXXFLAGS: changed\n', 1)), set(cache.INPUTS))
+        workflow.write_text(original)
+        with patch.dict(cache.COMMANDS, {'psp': ['bash', 'different-recipe.sh']}):
+            self.assertEqual({core for core, key in self.keys().items() if key != before[core]}, {'psp'})
 
     def package(self):
         out = self.root / 'release/psp'
@@ -152,6 +184,51 @@ class CoreCacheTest(unittest.TestCase):
             self.assertIsNone(builds[-1])
             self.assertEqual(len(builds), 4)
 
+
+    def test_ps2_adapter_reuses_locked_native_and_force_or_corruption_builds(self):
+        native = self.root / 'release/ps2-native'
+        native.mkdir(parents=True)
+        lockpath = self.root / cache.BASE / 'retro-play/native-build.json'
+        lock = json.loads(lockpath.read_text())
+        for name in lock['artifacts']:
+            (native / name).write_bytes(b'fixture native ' + name.encode())
+            lock['artifacts'][name] = cache.sha(native / name)
+        lock['nativeInputSha256'] = cache.ps2_native_key(self.root)
+        lockpath.write_text(json.dumps(lock))
+        prepare = runpy.run_path(str(self.root / cache.BASE / 'retro-play/prepare.py'))
+        self.assertEqual(prepare['native_key'](), cache.ps2_native_key(self.root))
+        builds = []
+        run = subprocess.run
+        def fake_build(command, **kwargs):
+            if command != cache.COMMANDS['ps2']: return run(command, **kwargs)
+            builds.append(kwargs['env'].get('PS2_NATIVE_CACHE'))
+            app = self.root / 'release/ps2/app'
+            (app / 'core').mkdir(parents=True)
+            source = app.parent / 'sources/ps2-source.tar.gz'
+            source.parent.mkdir()
+            source.write_bytes(b'source fixture')
+            (app / 'index.html').write_text('fixture')
+            for name in lock['artifacts']:
+                (app / 'core' / name).write_bytes(b'fixture native ' + name.encode())
+            (app / 'core-info.json').write_text(json.dumps({'nativeBuild':lock,'sourceSha256':cache.sha(source)}))
+            return subprocess.CompletedProcess(command, 0)
+        with patch.dict(os.environ, {'FORCE_CORE_REBUILD':'false','PS2_NATIVE_CACHE':'/invalid'}), patch.object(cache.subprocess,'run',side_effect=fake_build):
+            cache.prepare('ps2', self.root)
+            cache.prepare('ps2', self.root)
+            self.assertEqual(builds, [str(native)])
+            self.changed('deploy/webrcade/retro-play/app/index.html')
+            cache.prepare('ps2', self.root)
+            self.assertEqual(builds, [str(native),str(native)])
+            (native / 'Play.wasm').write_bytes(b'corrupt')
+            self.changed('deploy/webrcade/retro-play/app/index.html')
+            cache.prepare('ps2', self.root)
+            self.assertIsNone(builds[-1])
+            with patch.dict(os.environ, {'FORCE_CORE_REBUILD':'true'}): cache.prepare('ps2', self.root)
+            self.assertIsNone(builds[-1])
+            self.assertEqual(len(builds), 4)
+        # Matching artifact bytes alone cannot authorize reuse after source edits.
+        self.changed('deploy/webrcade/retro-play/native/CloudRcade.cpp')
+        self.assertFalse(cache.native_valid(native, self.root, 'ps2'))
 
     def test_force_3ds_also_bypasses_legacy_pinned_release_download(self):
         deploy = runpy.run_path(str(self.root / cache.BASE / 'retro-azahar/deploy.py'))

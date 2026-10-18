@@ -53,6 +53,13 @@ function fake() {
   }});
   await Promise.all([session.initialize(), session.initialize()]);
   assert.equal(adapter.calls.load,1,'parallel initialization shares one worker');
+  const profiled=fake(),profileCalls=[];
+  profiled.request=async(type,payload)=>{profileCalls.push({type,payload});return {available:true,enabled:true};};
+  const timingSession=new GameCubeSession({...options,nativeTimingEnabled:true,createAdapter:async()=>profiled});
+  await timingSession.initialize();
+  assert.deepEqual(profileCalls,[{type:'nativeTiming',payload:{enabled:true}}],
+    'opt-in native slice timing uses its narrow API without global metrics/PPC profiling');
+  timingSession.dispose();
   const original = disc(); await session.boot(original);
   assert.equal(adapter.calls.mounted, original,'original File/Blob is mounted, without a full read');
   await assert.rejects(session.boot(disc()), /Close this session/);

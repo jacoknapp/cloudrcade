@@ -1,0 +1,27 @@
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -4863,11 +4863,23 @@
+ 
+   EmitFpuAvailableOrFallback(body, op, layout, downcount);
+ 
++  // Both outputs consume the original scalar. When FD aliases FC lane 0,
++  // writing the first output must not change the second output's scalar input.
++  const bool snapshot_scalar = scalar_lane == 0 && inst.FD == inst.FC;
++  if (snapshot_scalar)
++  {
++    EmitStateLoadF64(body, PsOffset(layout, inst.FC, scalar_lane));
++    EmitLocalSet(body, 6);
++  }
++
+   for (u32 lane = 0; lane < 2; ++lane)
+   {
+     EmitStateStoreU32Prefix(body);
+     EmitStateLoadF64(body, PsOffset(layout, inst.FA, lane));
+-    EmitStateLoadF64(body, PsOffset(layout, inst.FC, scalar_lane));
++    if (snapshot_scalar)
++      EmitLocalGet(body, 6);
++    else
++      EmitStateLoadF64(body, PsOffset(layout, inst.FC, scalar_lane));
+     body.push_back(0xa2);
+     if (add)
+     {

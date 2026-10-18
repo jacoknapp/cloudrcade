@@ -1,0 +1,357 @@
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp
+index f1ecf61..e13a88f 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp
+@@ -256,6 +256,10 @@ void WebGPUCommandStream::TraceCommand(const CmdRecord& rec)
+     resource_id = rec.arg.u[0];
+     payload_length = rec.arg.u[3];
+     break;
++  case CmdOp::DecodeTexture:
++    resource_id = rec.arg.u[0];
++    payload_length = rec.arg.u[2];
++    break;
+   case CmdOp::UploadTexture:
+     resource_id = rec.arg.u[0];
+     payload_length = rec.arg.u[2] * rec.arg.u[4];
+@@ -1075,6 +1079,26 @@ u32 WebGPUCommandStream::PushCreateTexture(u32 w, u32 h, u32 wgpu_format, u32 us
+   return id;
+ }
+
++bool WebGPUCommandStream::PushDecodeTexture(u32 id, u32 src_heap_ptr, u32 bytes,
++                                            u32 w, u32 h, u32 mip_level, u32 aligned_width)
++{
++  CmdRecord rec{};
++  rec.op = static_cast<u32>(CmdOp::DecodeTexture);
++  rec.arg.u[0] = id;
++  rec.arg.u[1] = src_heap_ptr;
++  rec.arg.u[2] = bytes;
++  rec.arg.u[3] = w;
++  rec.arg.u[4] = h;
++  rec.arg.u[5] = mip_level;
++  rec.arg.u[6] = aligned_width;
++  if (!Push(rec))
++  {
++    RollbackLastUpload(src_heap_ptr, bytes);
++    return false;
++  }
++  return true;
++}
++
+ bool WebGPUCommandStream::PushUploadTexture(u32 id, u32 src_heap_ptr, u32 bytes_per_row, u32 w,
+                                             u32 h, u32 mip_level, u32 layer)
+ {
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h
+index 7564fc1..5743a86 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h
+@@ -137,6 +137,9 @@ enum class CmdOp : u32
+   //   flags: 8=explicit channel mask, 1=RGB, 2=depth, 4=alpha.
+   //   Without flag 8, legacy flag 1 enables all RGBA channels.
+   ClearRect = 25,
++  // u0=texture id u1=upload pointer u2=packet bytes u3=width u4=height u5=mip
++  // u6=aligned width. Packet: {format,tlutFormat,dataBytes,paletteBytes}, GX bytes.
++  DecodeTexture = 26,
+ };
+
+ // Stable producer attribution for UploadBuffer records. The value is carried
+@@ -363,6 +366,8 @@ public:
+                         BufferUploadRole role);
+   u32 PushCreateTexture(u32 w, u32 h, u32 wgpu_format, u32 usage_flags, u32 layers = 1,
+                         u32 levels = 1);
++  bool PushDecodeTexture(u32 id, u32 src_heap_ptr, u32 bytes, u32 w, u32 h,
++                         u32 mip_level, u32 aligned_width);
+   bool PushUploadTexture(u32 id, u32 src_heap_ptr, u32 bytes_per_row, u32 w, u32 h,
+                          u32 mip_level = 0, u32 layer = 0);
+   // Serialized AbstractPipelineConfig blob (owned/persistent, like
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
+index 8ba515c..eda2181 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
+@@ -56,6 +56,8 @@ public:
+   void UploadUtilityUniforms(const void* data, u32 size);
+   // Release after publishing the pass that last referenced this texture.
+   void ReleaseTextureResource(u32 id);
++  // Decode writes must follow any recorded draws that may reference a recycled texture.
++  void PrepareTextureDecode() { EndPassIfOpen(); }
+
+   std::unique_ptr<AbstractTexture> CreateTexture(const TextureConfig& config,
+                                                  std::string_view name) override;
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
+index a0371a1..2168aba 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
+@@ -8,6 +8,9 @@
+
+ #include "VideoBackends/WebGPU/WebGPUCommandStream.h"
+ #include "VideoBackends/WebGPU/WebGPUGfx.h"
++#include "VideoCommon/VideoConfig.h"
++
++extern "C" unsigned int DolphinWeb_GetRendererFeatureMask();
+
+ namespace WebGPU
+ {
+@@ -47,6 +50,7 @@ static constexpr u32 kTexUsage = 1u | 2u | 4u | 0x10u;
+ WebGPUTexture::WebGPUTexture(const TextureConfig& tex_config) : AbstractTexture(tex_config)
+ {
+   const size_t texel_size = GetTexelSizeForFormat(tex_config.format);
++  m_encoded.resize(tex_config.levels);
+   m_data.resize(tex_config.layers);
+   for (u32 layer = 0; layer < tex_config.layers; layer++)
+   {
+@@ -67,7 +71,9 @@ WebGPUTexture::WebGPUTexture(const TextureConfig& tex_config) : AbstractTexture(
+   if (cs.ready())
+   {
+     m_bridge_id = cs.PushCreateTexture(tex_config.width, tex_config.height,
+-                                       MapTexFormat(tex_config.format), kTexUsage,
++                                       MapTexFormat(tex_config.format), kTexUsage |
++                                         (tex_config.format == AbstractTextureFormat::RGBA8 &&
++                                          tex_config.samples == 1 ? 8u : 0u),
+                                        tex_config.layers, tex_config.levels);
+   }
+ }
+@@ -80,7 +86,9 @@ u32 WebGPUTexture::EnsureBridgeId()
+   cs.EnsureRing();
+   if (cs.ready())
+     m_bridge_id = cs.PushCreateTexture(m_config.width, m_config.height,
+-                                       MapTexFormat(m_config.format), kTexUsage,
++                                       MapTexFormat(m_config.format), kTexUsage |
++                                         (m_config.format == AbstractTextureFormat::RGBA8 &&
++                                          m_config.samples == 1 ? 8u : 0u),
+                                        m_config.layers, m_config.levels);
+   return m_bridge_id;
+ }
+@@ -185,6 +193,8 @@ void WebGPUTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const
+   if (!buffer)
+     return;
+   const size_t texel_size = GetTexelSizeForFormat(m_config.format);
++  if (layer == 0)
++    m_encoded[level] = {};
+   u8* data = GetData(layer, level);
+   for (u32 y = 0; y < height; y++)
+   {
+@@ -196,13 +206,85 @@ void WebGPUTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const
+   EmitUpload(level, width, height, layer);
+ }
+
++bool WebGPUTexture::LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
++                                u32 aligned_height, const u8* data, u32 data_size,
++                                TextureFormat format, const u8* palette, TLUTFormat palette_format)
++{
++  if ((DolphinWeb_GetRendererFeatureMask() & 2u) == 0 || g_ActiveConfig.bArbitraryMipmapDetection ||
++      g_ActiveConfig.bTexFmtOverlayEnable || g_ActiveConfig.bDumpTextures ||
++      !IsValidTextureFormat(format) || !data || !g_gfx || level >= m_config.levels ||
++      m_config.format != AbstractTextureFormat::RGBA8 || m_config.samples != 1 ||
++      m_config.layers != 1 || width != std::max(m_config.width >> level, 1u) ||
++      height != std::max(m_config.height >> level, 1u) || width > 1024 || height > 1024)
++    return false;
++  const u32 block_width = TexDecoder_GetBlockWidthInTexels(format);
++  const u32 block_height = TexDecoder_GetBlockHeightInTexels(format);
++  if (aligned_width != (width + block_width - 1) / block_width * block_width ||
++      aligned_height != (height + block_height - 1) / block_height * block_height ||
++      data_size != static_cast<u32>(TexDecoder_GetTextureSizeInBytes(aligned_width, aligned_height, format)))
++    return false;
++  const u32 palette_size = TexDecoder_GetPaletteSize(format);
++  if (palette_size && (!palette || static_cast<u32>(palette_format) > 2))
++    return false;
++  const u32 id = EnsureBridgeId();
++  if (!id)
++    return false;
++
++  // Snapshot both for replay and a lazily materialized exact CPU mirror. Cache hashing,
++  // RAM/TMEM invalidation and palette identity remain owned by TextureCacheBase.
++  EncodedMip shadow;
++  shadow.data.assign(data, data + data_size);
++  if (palette_size)
++    shadow.palette.assign(palette, palette + palette_size);
++  shadow.format = format;
++  shadow.palette_format = palette_format;
++  shadow.width = aligned_width;
++  shadow.height = aligned_height;
++  // Header is little-endian u32; encoded source/palette bytes retain GX byte order.
++  std::vector<u32> packet(4 + (data_size + palette_size) / 4);
++  packet[0] = static_cast<u32>(format);
++  packet[1] = static_cast<u32>(palette_format);
++  packet[2] = data_size;
++  packet[3] = palette_size;
++  std::memcpy(packet.data() + 4, shadow.data.data(), data_size);
++  if (palette_size)
++    std::memcpy(reinterpret_cast<u8*>(packet.data() + 4) + data_size,
++                shadow.palette.data(), palette_size);
++  static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureDecode();
++  auto& cs = GetCommandStream();
++  const u32 bytes = static_cast<u32>(packet.size() * sizeof(u32));
++  const u32 src = cs.UploadAlloc(packet.data(), bytes, 4);
++  if (!src || !cs.PushDecodeTexture(id, src, bytes, width, height, level, aligned_width))
++    return false;
++  m_encoded[level] = std::move(shadow);
++  return true;
++}
++
++void WebGPUTexture::MaterializeShadow(u32 layer, u32 level) const
++{
++  if (layer != 0 || m_encoded[level].data.empty())
++    return;
++  auto& shadow = m_encoded[level];
++  std::vector<u8> decoded(static_cast<size_t>(shadow.width) * shadow.height * 4);
++  TexDecoder_Decode(decoded.data(), shadow.data.data(), shadow.width, shadow.height,
++                   shadow.format, shadow.palette.data(), shadow.palette_format);
++  const u32 width = std::max(m_config.width >> level, 1u);
++  const u32 height = std::max(m_config.height >> level, 1u);
++  for (u32 y = 0; y < height; ++y)
++    std::memcpy(m_data[layer][level].data() + static_cast<size_t>(y) * width * 4,
++                decoded.data() + static_cast<size_t>(y) * shadow.width * 4, width * 4);
++  shadow = {};
++}
++
+ const u8* WebGPUTexture::GetData(u32 layer, u32 level) const
+ {
++  MaterializeShadow(layer, level);
+   return m_data[layer][level].data();
+ }
+
+ u8* WebGPUTexture::GetData(u32 layer, u32 level)
+ {
++  MaterializeShadow(layer, level);
+   return m_data[layer][level].data();
+ }
+
+diff --git a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h
+index 396fe8e..77bfbb2 100644
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.h
+@@ -40,6 +40,9 @@ public:
+   void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer, size_t buffer_size,
+             u32 layer) override;
+
++  bool LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
++                   u32 aligned_height, const u8* data, u32 data_size,
++                   TextureFormat format, const u8* palette, TLUTFormat palette_format) override;
+   const u8* GetData(u32 layer, u32 level) const;
+   u8* GetData(u32 layer, u32 level);
+
+@@ -53,7 +56,17 @@ private:
+   u32 EnsureBridgeId();
+   bool EmitUpload(u32 level, u32 width, u32 height, u32 layer);
+
+-  std::vector<std::vector<std::vector<u8>>> m_data;
++  struct EncodedMip
++  {
++    std::vector<u8> data;
++    std::vector<u8> palette;
++    TextureFormat format{};
++    TLUTFormat palette_format{};
++    u32 width = 0, height = 0;
++  };
++  void MaterializeShadow(u32 layer, u32 level) const;
++  mutable std::vector<EncodedMip> m_encoded;
++  mutable std::vector<std::vector<std::vector<u8>>> m_data;
+   u32 m_bridge_id = 0;
+ };
+
+diff --git a/Source/Core/VideoCommon/AbstractTexture.h b/Source/Core/VideoCommon/AbstractTexture.h
+index 3abd535..98e7749 100644
+--- a/Source/Core/VideoCommon/AbstractTexture.h
++++ b/Source/Core/VideoCommon/AbstractTexture.h
+@@ -9,6 +9,7 @@
+ #include "Common/CommonTypes.h"
+ #include "Common/MathUtil.h"
+ #include "VideoCommon/TextureConfig.h"
++#include "VideoCommon/TextureDecoder.h"
+
+ struct ImTextureRef;
+
+@@ -32,6 +33,15 @@ public:
+   virtual void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer,
+                     size_t buffer_size, u32 layer = 0) = 0;
+
++  // Optional native tiled upload. False preserves the exact software conversion path.
++  // The backend must snapshot source/palette before returning, including for deferred replay.
++  virtual bool LoadEncoded(u32 level, u32 width, u32 height, u32 aligned_width,
++                           u32 aligned_height, const u8* data, u32 data_size,
++                           TextureFormat format, const u8* palette, TLUTFormat palette_format)
++  {
++    return false;
++  }
++
+   // Hints to the backend that we have finished rendering to this texture, and it will be used
+   // as a shader resource and sampled. For Vulkan, this transitions the image layout.
+   virtual void FinishedRendering();
+diff --git a/Source/Core/VideoCommon/TextureCacheBase.cpp b/Source/Core/VideoCommon/TextureCacheBase.cpp
+index bbcd114..a17a10f 100644
+--- a/Source/Core/VideoCommon/TextureCacheBase.cpp
++++ b/Source/Core/VideoCommon/TextureCacheBase.cpp
+@@ -1673,12 +1673,18 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
+     // Initialized to null because only software loading uses this buffer
+     u8* dst_buffer = nullptr;
+
+-    if (!decode_on_gpu ||
++    const bool native_tiled_upload =
++        !(texture_info.IsFromTmem() && texture_info.GetTextureFormat() == TextureFormat::RGBA8);
++    const bool native_base_decoded = native_tiled_upload && entry->texture->LoadEncoded(
++        0, width, height, expanded_width, expanded_height, texture_info.GetData(),
++        texture_info.GetTextureSize(), texture_info.GetTextureFormat(),
++        texture_info.GetTlutAddress(), texture_info.GetTlutFormat());
++    if (!native_base_decoded && (!decode_on_gpu ||
+         !DecodeTextureOnGPU(
+             entry, 0, texture_info.GetData(), texture_info.GetTextureSize(),
+             texture_info.GetTextureFormat(), width, height, expanded_width, expanded_height,
+             creation_info.bytes_per_block * (expanded_width / texture_info.GetBlockWidth()),
+-            texture_info.GetTlutAddress(), texture_info.GetTlutFormat()))
++            texture_info.GetTlutAddress(), texture_info.GetTlutFormat())))
+     {
+       size_t decoded_texture_size = expanded_width * sizeof(u32) * expanded_height;
+
+@@ -1731,16 +1737,30 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
+         continue;
+       }
+
+-      if (!decode_on_gpu ||
++      // If the base used software, keep every mip on software so the arbitrary mip
++      // detector has a complete chain. A malformed/unsupported base never partially opts in.
++      const bool native_mip_decoded = native_base_decoded && entry->texture->LoadEncoded(
++          mip_level.GetLevel(), mip_level.GetRawWidth(), mip_level.GetRawHeight(),
++          mip_level.GetExpandedWidth(), mip_level.GetExpandedHeight(), mip_level.GetData(),
++          mip_level.GetTextureSize(), texture_info.GetTextureFormat(),
++          texture_info.GetTlutAddress(), texture_info.GetTlutFormat());
++      if (!native_mip_decoded && (!decode_on_gpu ||
+           !DecodeTextureOnGPU(entry, mip_level.GetLevel(), mip_level.GetData(),
+                               mip_level.GetTextureSize(), texture_info.GetTextureFormat(),
+                               mip_level.GetRawWidth(), mip_level.GetRawHeight(),
+                               mip_level.GetExpandedWidth(), mip_level.GetExpandedHeight(),
+                               creation_info.bytes_per_block *
+                                   (mip_level.GetExpandedWidth() / texture_info.GetBlockWidth()),
+-                              texture_info.GetTlutAddress(), texture_info.GetTlutFormat()))
++                              texture_info.GetTlutAddress(), texture_info.GetTlutFormat())))
+       {
+-        // No need to call CheckTempSize here, as the whole buffer is preallocated at the beginning
++        std::vector<u8> native_fallback;
++        if (native_base_decoded)
++        {
++          native_fallback.resize(mip_level.GetExpandedWidth() * sizeof(u32) *
++                                  mip_level.GetExpandedHeight());
++          dst_buffer = native_fallback.data();
++        }
++        // Ordinary CPU decoding preallocates the complete chain at the beginning.
+         const u32 decoded_mip_size =
+             mip_level.GetExpandedWidth() * sizeof(u32) * mip_level.GetExpandedHeight();
+         TexDecoder_Decode(dst_buffer, mip_level.GetData(), mip_level.GetExpandedWidth(),
+@@ -1750,14 +1770,16 @@ RcTcacheEntry TextureCacheBase::CreateTextureEntry(
+                              mip_level.GetRawHeight(), mip_level.GetExpandedWidth(), dst_buffer,
+                              decoded_mip_size);
+
+-        arbitrary_mip_detector.AddLevel(mip_level.GetRawWidth(), mip_level.GetRawHeight(),
+-                                        mip_level.GetExpandedWidth(), dst_buffer);
++        if (!native_base_decoded)
++          arbitrary_mip_detector.AddLevel(mip_level.GetRawWidth(), mip_level.GetRawHeight(),
++                                          mip_level.GetExpandedWidth(), dst_buffer);
+
+         dst_buffer += decoded_mip_size;
+       }
+     }
+
+-    entry->has_arbitrary_mips = arbitrary_mip_detector.HasArbitraryMipmaps(dst_buffer);
++    entry->has_arbitrary_mips = !native_base_decoded &&
++        arbitrary_mip_detector.HasArbitraryMipmaps(dst_buffer);
+
+     if (g_ActiveConfig.bDumpTextures && !skip_texture_dump && texLevels > 0)
+     {

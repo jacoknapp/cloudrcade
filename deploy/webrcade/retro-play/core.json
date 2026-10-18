@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/jpd002/Play-.git",
+  "commit": "d44bfa1814b729d4a3ed3c6c3a945432d5ee5bbe",
+  "sdk": "emscripten/emsdk@sha256:90b757eb11fa9a0e3ce4d2d9f76d932a56018e4accc37b5a28b2783751e60eb7",
+  "saveSdkCommit": "9a7cf19b64a440df8ca9b22a4136b34dc6e9f3db",
+  "stateFormatId": "play-d44bfa18-webgpu-v1",
+  "renderer": "device-webgpu",
+  "gpuRepository": "https://github.com/snuri00/ps2-web-recomp.git",
+  "gpuCommit": "f3a550b797de04b6380394e52532c03902bb03c4",
+  "dawnUrl": "https://github.com/google/dawn/releases/download/v20261013.193955/emdawnwebgpu_pkg-v20261013.193955.zip",
+  "dawnSha256": "c65cdd820c75354ef2ed7196f3dd43428c2b56f49f49a2c513263b593563ee3a"
+}

@@ -3,6 +3,69 @@ from pathlib import Path
 import re
 
 
+def patch_replay_pump(text):
+    """Adapt the pinned pump separately so its actual scheduler is testable."""
+    def replace(old, new):
+        nonlocal text
+        if text.count(old) != 1:
+            raise RuntimeError(f'Unexpected pinned Dolphin pump anchor: {old[:70]}')
+        text = text.replace(old, new)
+
+    replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
+            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked || gamecubeGpuFrames.blocked() ? 4 : 0)')
+    # Wake only after this pump observed the two-frame GPU gate with ring work.
+    # Keep a single timer, the cap deadline, and the mapped-capacity retry. A
+    # completion never drains inline (or notifies for ordinary producer writes).
+    replace('function startWgpuReplayPump() {', '''let gamecubeReplayPumpCallback = null;
+let gamecubeReplayPumpGeneration = 0;
+let gamecubeReplayCompletionAt = null;
+
+function wakeGamecubeReplayPump() {
+  const pump = gamecubeReplayPumpCallback;
+  if (!pump || !wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal ||
+      wgpuMappedCapacityBlocked) return;
+  gamecubeReplayCompletionAt = performance.now();
+  gamecubeReplayTiming.completionWakes++;
+  if (wgpuReplayPumpTimer !== null) clearTimeout(wgpuReplayPumpTimer);
+  scheduleWgpuReplayPump(pump, gamecubeFrameLimit.timerDelay(performance.now()));
+}
+
+function startWgpuReplayPump() {''')
+    replace('  const pump = () => {\n    wgpuReplayPumpTimer = null;\n    if (!wgpuReplayPumpEnabled || !webGpuCmdRing) return;', '''  const generation = gamecubeReplayPumpGeneration;
+  const pump = () => {
+    if (generation !== gamecubeReplayPumpGeneration) return;
+    wgpuReplayPumpTimer = null;
+    if (!wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal) return;
+    const completionAt = gamecubeReplayCompletionAt;
+    gamecubeReplayCompletionAt = null;
+    const replayStartedAt = completionAt === null ? 0 : performance.now();''')
+    replace('    scheduleWgpuReplayPump(\n      pump,', '''    if (completionAt !== null) {
+      if (webGpuCmdRing && currentWgpuReadIndex(webGpuCmdRing) !== read) {
+        const elapsed = Math.max(0, replayStartedAt - completionAt);
+        gamecubeReplayTiming.completionUsefulDrains++;
+        gamecubeReplayTiming.completionToDrainTotalMs += elapsed;
+        gamecubeReplayTiming.completionToDrainMaxMs = Math.max(gamecubeReplayTiming.completionToDrainMaxMs, elapsed);
+      } else gamecubeReplayTiming.completionNoWorkWakes++;
+    }
+    // A failed drain can synchronously cancel the pump through emergencyFail.
+    if (generation !== gamecubeReplayPumpGeneration || !wgpuReplayPumpEnabled || !webGpuCmdRing || wgpuReplayFatal) return;
+    if (gamecubeGpuFrames.blocked() &&
+        (Atomics.load(webGpuCmdRing.headerI32, 0) >>> 0) !== currentWgpuReadIndex(webGpuCmdRing))
+      gamecubeGpuFrames.waitForCapacity(wakeGamecubeReplayPump);
+    else gamecubeGpuFrames.cancelWait();
+    scheduleWgpuReplayPump(
+      pump,''')
+    replace('  wgpuReplayPumpTimer = setTimeout(callback, delay);',
+            '  gamecubeReplayPumpCallback = callback;\n'
+            '  wgpuReplayPumpTimer = setTimeout(callback, delay);')
+    replace('function cancelWgpuReplayPump() {', '''function cancelWgpuReplayPump() {
+  gamecubeReplayPumpGeneration++;
+  gamecubeReplayPumpCallback = null;
+  gamecubeReplayCompletionAt = null;
+  gamecubeGpuFrames.cancelWait();''')
+    return text
+
+
 def patch_runtime(app, native_core_sha=None):
     if native_core_sha is not None:
         if not re.fullmatch(r'[0-9a-f]{64}', native_core_sha):
@@ -33,10 +96,18 @@ def patch_runtime(app, native_core_sha=None):
             'import {invariantVertexPosition} from "../../shader-position.mjs";\n'
             'import {RenderStats} from "../../render-stats.mjs";\n'
             'import {waitForStateLoad} from "../../state-load.mjs";\n'
+            'import {PersistentShaderTranslations} from "../../shader-translation-cache.mjs";\n'
+            'let gamecubeShaderTranslations = null;\n'
+            'let gamecubeShaderBuild = null;\n'
             'const gamecubeFrameLimit = new FrameLimit(60);\n'
             'const gamecubeGpuFrames = new GpuFrameQueue({onError:error => markWgpuReplayFatal("gpu-completion", error?.message || error)});\n'
             'const gamecubeRenderStats = new RenderStats();\n'
-            'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0};\n'
+            'let gamecubeNativeTimingEnabled = false;\n'
+            'function gamecubeReadNativeTiming() {\n'
+            '  if (!gamecubeNativeTimingEnabled) return null;\n'
+            '  try { const value=api?.getSliceTimingTotals?.(); return value ? JSON.parse(value) : null; } catch { return null; }\n'
+            '}\n'
+            'const gamecubeReplayTiming = {totalMs:0,maxMs:0,calls:0,completionWakes:0,completionUsefulDrains:0,completionNoWorkWakes:0,completionToDrainTotalMs:0,completionToDrainMaxMs:0};\n'
             'const gamecubeJitGuard = new JitLivenessGuard();\n') + text
     # Queue writes consume a snapshot before returning. Reuse the already
     # bounded immediate-buffer scratch for ordinary texture writes too; held
@@ -45,6 +116,11 @@ def patch_runtime(app, native_core_sha=None):
             'uploadPayload = borrowTextureUpload(heap, src, uploadBytes, copyImmediateWgpuBufferUpload);')
     replace('    wgsl = webGpuTextDecoder.decode(local);',
             '    wgsl = invariantVertexPosition(webGpuTextDecoder.decode(local), stage);')
+    replace('  const { wasmBinary, fingerprint: buildFingerprint } =',
+            '  const { wasmBinary, fingerprint: buildFingerprint, sha256: gamecubeVerifiedNativeSha256 } =')
+    replace('      await fetchWasmAndFingerprint(coreUrl, expectedCoreSha256);',
+            '      await fetchWasmAndFingerprint(coreUrl, expectedCoreSha256);\n'
+            '  gamecubeShaderBuild = gamecubeVerifiedNativeSha256;')
     replace('  const flushPassDiag = () => {\n    if (passFbId < 0) return;',
             '  const flushPassDiag = () => {\n    if (passFbId < 0) return;\n'
             '    if (wgpuDiagnosticQuiet) {\n'
@@ -73,6 +149,8 @@ def patch_runtime(app, native_core_sha=None):
     replace('    getFrame: cwrap("GetFrame", "number", []),',
             '    getFrame: cwrap("GetFrame", "number", []),\n'
             '    getHeapStats: optionalCwrap("GetHeapStats", "number", []),\n'
+            '    getSliceTimingTotals: optionalCwrap("GetSliceTimingTotals", "string", []),\n'
+            '    setSliceTimingEnabled: optionalCwrap("SetSliceTimingEnabled", null, ["number"]),\n'
             '    getStateLoadResult: cwrap("DolphinWeb_GetLastStateLoadResult", "number", []),')
     replace('function framePayload({ forceCausalTelemetry = false } = {}) {',
             'let gamecubeHeapSample=null;\n'
@@ -82,15 +160,17 @@ def patch_runtime(app, native_core_sha=None):
             '  const pointer=api?.getHeapStats?.();if (!pointer) return null;\n'
             '  const values=new Uint32Array(moduleInstance.HEAPU8.buffer,pointer,4);\n'
             '  return gamecubeHeapSample={inUseBytes:values[0],reusableBytes:values[1],extentBytes:values[2],reservedBytes:values[3],capturedAtMs:now,queryMs:performance.now()-now};\n'
-            '}\n\nfunction framePayload({ forceCausalTelemetry = false } = {}) {')
+            '}\n\nfunction framePayload({ forceCausalTelemetry = false } = {}) {\n'
+            '  gamecubeShaderTranslations?.checkpoint();')
     # A complete submitted present is an ordering-safe yield boundary. Leave
     # unread commands in their authoritative ring; never drop GX operations.
     replace('  if (!ring || !renderGpu) return;',
             '  if (!ring || !renderGpu) return;\n'
             '  if (gamecubeGpuFrames.blocked()) return;\n'
             '  if (gamecubeFrameLimit.remaining(performance.now()) > 0) { gamecubeFrameLimit.delayed++; return; }')
-    replace('      write === read || wgpuMappedCapacityBlocked ? 4 : 0',
-            '      Math.max(gamecubeFrameLimit.timerDelay(performance.now()), write === read || wgpuMappedCapacityBlocked || gamecubeGpuFrames.blocked() ? 4 : 0)')
+    text = patch_replay_pump(text)
+    replace('function clearWgpuReplayStateAfterDeviceLoss() {',
+            'function clearWgpuReplayStateAfterDeviceLoss() {\n  gamecubeGpuFrames.reset();')
     replace('          webGpuExecStats.present++;',
             '          webGpuExecStats.present++;\n'
             '          gamecubeGpuFrames.submitted(q);\n'
@@ -159,8 +239,10 @@ def patch_runtime(app, native_core_sha=None):
             '    frame: api.getFrame(),\n    capturedAtMs: performance.now(),\n'
             '    heapBytes: moduleInstance.HEAPU8.byteLength,\n'
             '    gamecubeDiagnostics: {fpsLimit:60,gpuQueue:gamecubeGpuFrames.snapshot(),render:gamecubeRenderStats.snapshot(performance.now()),heap:gamecubeHeapSample,replay:{...gamecubeReplayTiming},stream:streamedDisc?.stats() || null,\n'
+            '      nativeTiming:gamecubeReadNativeTiming(),\n'
             '      uploads:{transport:wgpuUploadTransport,stagingBytes:wgpuMappedStagingPool ? wgpuMappedStagingSlotCount*WGPU_MAPPED_STAGING_SLOT_BYTES : 0,scratchBytes:wgpuImmediateBufferScratch.byteLength,pendingRemaps:wgpuMappedRemapPromises.size},\n'
             '      rendererError:rendererDiagnostics.errors.at(-1) || null,\n'
+            '      shaderTranslationCache:gamecubeShaderTranslations ? {...gamecubeShaderTranslations.stats} : null,\n'
             '      backlog:webGpuCausalStats.backlogAfterLast,jit:jitState,compiled:api.getPpcWasmBlockCompileCount?.() || 0,\n'
             '      resources:{textures:webGpuObjects.textures.size,bindGroups:webGpuObjects.bindGroups.size,shaderOk:webGpuObjects.shaderOk,shaderFail:webGpuObjects.shaderFail},\n'
             '      draws:webGpuExecStats.drawIdx,missingPipelines:webGpuExecStats.missPipe,missingBindings:webGpuExecStats.missBg,skippedDraws:webGpuExecStats.skipDraw},\n'
@@ -175,6 +257,8 @@ def patch_runtime(app, native_core_sha=None):
             '      postStatus: message => { postStatus(message); self.postMessage({type:"gamecube-fatal",message}); },\n'
             '    });\n  });\n\n  return state;')
     replace('    coreBoot.accepted = Boolean(api.bootDisc(path));',
+            '    gamecubeShaderTranslations = new PersistentShaderTranslations(moduleInstance, gamecubeShaderBuild, api.getGameId());\n'
+            '    await gamecubeShaderTranslations.load();\n'
             '    configureGameCube(moduleInstance.FS, api.getGameId());\n'
             '    coreBoot.accepted = Boolean(api.bootDisc(path));')
     replace('  api.coreInit?.();', '''  moduleInstance.FS.mkdirTree("/dolphin-sys/GC");
@@ -191,6 +275,12 @@ def patch_runtime(app, native_core_sha=None):
             '    case "mountFile":\n      return mountFile(payload.file);\n'
             '    case "mountUrl":\n      return mountFile({...payload, remote:true});\n'
             '    case "heapStats":\n      return {heap:gamecubeHeapStats()};\n'
+            '    case "nativeTiming": {\n'
+            '      const available=typeof api?.setSliceTimingEnabled === "function" && typeof api?.getSliceTimingTotals === "function";\n'
+            '      gamecubeNativeTimingEnabled=available && payload.enabled === true;\n'
+            '      api?.setSliceTimingEnabled?.(gamecubeNativeTimingEnabled ? 1 : 0);\n'
+            '      return {available,enabled:gamecubeNativeTimingEnabled};\n'
+            '    }\n'
             '    case "streamStats":\n      return {stream:streamedDisc?.stats() || null};')
     replace('    case "setInputMask":', '''    case "importCards": {
       if (coreBoot.accepted) throw new Error("Load memory cards before boot");
@@ -289,4 +379,6 @@ def patch_runtime(app, native_core_sha=None):
             '      if (!payload.fsPath) { try { moduleInstance.FS.unlink(path); } catch {} }\n'
             '      const loaded = rc === 1 && api.getStateLoadResult() === 1;\n'
             '      return { loaded, error: loaded ? null : "The state could not be loaded. Resume to continue your previous game.", rc, beforeState, afterState,')
+    import runpy
+    text = runpy.run_path(str(Path(__file__).with_name("patch-texture-decode.py")))["patch_texture_decode"](text)
     worker.write_text(text)

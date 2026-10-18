@@ -1,6 +1,8 @@
 # Nextcloud sign-in handoff for CloudRcade and other trusted clients
 
-Installed app: `retroarcade_login` in AIO's persistent `custom_apps` volume. Install or update with `sh install.sh` after syncing this directory. It has no database schema or migrations; the installer records the code version to invalidate Nextcloud's version-keyed route cache, then enables the app. Version 1.2.0 also refreshes Nextcloud's version-derived JavaScript cache key so returning browsers receive the client-specific callback script.
+The optional `retroarcade_login` app adds trusted same-tab authorization to Nextcloud's native Login Flow v2. CloudRcade works without it when `NEXTCLOUD_HANDOFF=false`. The bundled app version is 1.5.0; its manifest permits Nextcloud 34–35, and the native-flow integration still needs validation on the particular Nextcloud version you deploy.
+
+Install or update from this directory on a host with Docker access to the intended Nextcloud container. The installer copies `retroarcade_login` into `custom_apps` (AIO uses a persistent volume), records the code version to invalidate version-keyed caches, enables the app and persists the configured settings. It has no database schema or migrations.
 
 ## Environment configuration
 
@@ -8,7 +10,15 @@ Copy `handoff.env.example` to `handoff.env` and configure it before running
 `sh install.sh`. `RETROARCADE_ENV_FILE` selects a different env file. Version
 1.5.0 reads these settings from Docker environment variables, falling back to
 persisted app configuration. The installer persists the env values with `occ`,
-which supports AIO without changing its managed child container. The example origin must be replaced before installation; no identity provider is selected by default.
+which supports AIO without changing its managed child container. Set `NEXTCLOUD_CONTAINER` to the actual container name: the example uses `nextcloud`, while the installer's fallback is `nextcloud-aio-nextcloud`. Replace the example origin and client name before installation; no identity provider is selected by default.
+
+```sh
+cp handoff.env.example handoff.env
+# Edit handoff.env for the intended Nextcloud container and trusted client.
+sh install.sh
+```
+
+Keep this operator file outside Git. `RETROARCADE_ENV_FILE=/absolute/path/handoff.env sh install.sh` uses an external file. The installer sources this as shell configuration, so use only a trusted operator-owned file. Every run writes all four app settings; missing values are written as empty values. An upgrade must retain the intended environment file rather than relying on previously persisted configuration.
 
 | Variable | Purpose |
 | --- | --- |
@@ -23,7 +33,7 @@ hosts. For CloudRcade, the configured `client` must equal the nonempty
 `NEXTCLOUD_CLIENT_NAME`, or otherwise `WEBRCADE_APP_NAME`, followed by
 ` cloud saves`. This lets visible branding change while an existing trusted
 client identity stays stable. Its callback is the configured public origin plus
-`/cloud-saves/?resume=1`; its back URL returns to that origin's library.
+`/cloud-saves/?resume=1`; the example back URL returns to `/cloud-saves/` for recovery. The example's `CloudRcade cloud saves` client string must be changed if the effective arcade name differs; the root `.env.example` uses `cloudЯcade` as its display name. After installation, set `NEXTCLOUD_HANDOFF=true` in CloudRcade and recreate its container. `NEXTCLOUD_AUTO_REDIRECT` independently controls whether the arcade initiates linking automatically.
 
 Connecting starts a same-tab form POST to `/apps/retroarcade_login/start` with
 the native Login Flow v2 URL in the `flow` field. The app validates the local
@@ -37,12 +47,12 @@ MFA screens still appear if the identity provider requires them.
 
 After authentication, the app prepares native Login Flow v2 session state. A Nextcloud-hosted guest page automatically POSTs to the native grant endpoint using the Nextcloud CSRF token. Native authentication, password-confirmation middleware, credential issuance and encryption remain intact. If Nextcloud specifically requests password confirmation, the page shows a password form and submits only to its native throttled `/login/confirm` endpoint. It never sends that password to the originating application. Other errors retain a native manual-approval link. Completion returns to that client's fixed callback; the application backend polls for the credential using its session-bound native poll token. Credentials never travel in redirect URLs. Repeat resume after completion does not mint a second credential.
 
-The original GET `/connect?flow=...` remains a manual SSO fallback with native approval. The games connection page retains a direct Nextcloud-password option. App credentials remain revocable in Nextcloud. CloudRcade remembers its credential in browser storage; Slate keeps its credential on its own backend and exposes only an opaque session cookie to its browser. Existing SAML access policies, MFA and automatic provisioning rules are unchanged. Localhost origins are intentionally not authorized for automatic consent; use native Login Flow v2 approval for local development.
+The original GET `/connect?flow=...` remains a manual SSO fallback with native approval. The games connection page retains a direct Nextcloud-password option. App credentials remain revocable in Nextcloud. CloudRcade remembers its credential in browser storage; Slate keeps its credential on its own backend and exposes only an opaque session cookie to its browser. Existing SAML access policies, MFA and automatic provisioning rules are unchanged. The example trust map excludes localhost; use native Login Flow v2 approval for local development and keep development origins out of the production trust map.
 
 ## Validation
 
 `php tests/connect-controller.php` runs isolated controller tests with stub Nextcloud services. Run from this directory, or use `docker run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli-alpine php tests/connect-controller.php`. They cover both clients, exact origin/client matching, rejected external flow URLs, expiration, cross-session state, native session preparation, SAML resume, fixed callbacks and compatibility with pending games sessions. Live SAML/MFA and native credential issuance still require a disposable account against the deployed Nextcloud; these unit tests do not claim to verify them.
 
-This integration uses the pinned Nextcloud34 Login Flow v2 controller's session constants and endpoints. Revalidate start/resume, native grant/confirmation, Origin/state rejection and session-reuse tests before upgrading Nextcloud.
+This integration uses Nextcloud 34 Login Flow v2 controller session constants and endpoints. Revalidate start/resume, native grant/confirmation, Origin/state rejection and session-reuse tests before upgrading Nextcloud, including an upgrade allowed by the app manifest.
 
-To roll back automatic linking, restore the previous CloudRcade `api.php`, `connect.js` and `index.html` together with the previous app source; set this app’s `installed_version` back to the restored XML version to invalidate route caches. To remove the entire handoff, restore CloudRcade’s native Login Flow v2 URL behavior and disable `retroarcade_login`. SAML can separately be disabled with `occ app:disable user_saml`; previous multiple-backend and require-provisioned flags were both `0`. Do not disable SAML automatically during app deployment.
+To stop using the handoff, set `NEXTCLOUD_HANDOFF=false` in CloudRcade and recreate its container. Native Login Flow v2 linking remains available. Once all clients using this Nextcloud app have moved to native linking, disable `retroarcade_login` through Nextcloud administration or `occ app:disable retroarcade_login`. Leave unrelated SAML settings intact. If reverting the app source itself, run its matching installer and environment file so its `installed_version` and route caches match the restored XML version; record and preserve the current trusted-client settings first.

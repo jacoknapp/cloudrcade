@@ -10,6 +10,7 @@ export class GameCubeSaves {
     await sdk.settings.load();
     this.manager = new sdk.SaveManager({getTitle:()=>this.title,getProps:()=>this.props},this.onError);
     this.manager.cloudRequestTimeoutMs=60000;
+    this.manager.cloudUploadTimeoutMs=180000;
     this.manager.createZip=sdk.createSaveZip;
     this.manager.getFiles=blob=>sdk.readSaveZip(blob);
     this.manager.getSaveMetadata=blob=>sdk.readSaveZip(blob,true);

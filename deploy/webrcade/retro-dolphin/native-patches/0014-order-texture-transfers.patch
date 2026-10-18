@@ -1,0 +1,55 @@
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUTexture.cpp
+@@ -95,6 +95,8 @@
+
+ bool WebGPUTexture::EmitUpload(u32 level, u32 width, u32 height, u32 layer)
+ {
++  if (g_gfx)
++    static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureTransfer();
+   WebGPUCommandStream& cs = GetCommandStream();
+   if (EnsureBridgeId() == 0)
+     return false;
+@@ -122,6 +124,10 @@
+ {
+   if (!src)
+     return;
++  // Publish every draw that produces the source before its immediate GPU copy.
++  // A blit while the producer still owns a private pass would poison/drop it.
++  if (g_gfx)
++    static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureTransfer();
+
+   const TextureConfig& src_config = src->GetConfig();
+   const size_t texel_size = GetTexelSizeForFormat(src_config.format);
+@@ -174,6 +180,10 @@
+ {
+   if (!src)
+     return;
++  // Publish every draw that produces the source before its immediate GPU copy.
++  // A blit while the producer still owns a private pass would poison/drop it.
++  if (g_gfx)
++    static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureTransfer();
+   // samples==1 in this backend, so an MSAA resolve is just a copy of
+   // `rect` (src layer/level) into the same region of `this`.
+   const u32 src_id = static_cast<const WebGPUTexture*>(src)->GetBridgeId();
+@@ -250,7 +260,7 @@
+   if (palette_size)
+     std::memcpy(reinterpret_cast<u8*>(packet.data() + 4) + data_size,
+                 shadow.palette.data(), palette_size);
+-  static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureDecode();
++  static_cast<WebGPUGfx*>(g_gfx.get())->PrepareTextureTransfer();
+   auto& cs = GetCommandStream();
+   const u32 bytes = static_cast<u32>(packet.size() * sizeof(u32));
+   const u32 src = cs.UploadAlloc(packet.data(), bytes, 4);
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
+@@ -56,8 +56,8 @@
+   void UploadUtilityUniforms(const void* data, u32 size);
+   // Release after publishing the pass that last referenced this texture.
+   void ReleaseTextureResource(u32 id);
+-  // Decode writes must follow any recorded draws that may reference a recycled texture.
+-  void PrepareTextureDecode() { EndPassIfOpen(); }
++  // Texture writes and copies must follow all recorded draws that use their resources.
++  void PrepareTextureTransfer() { EndPassIfOpen(); }
+
+   std::unique_ptr<AbstractTexture> CreateTexture(const TextureConfig& config,
+                                                  std::string_view name) override;

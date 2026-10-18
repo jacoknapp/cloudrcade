@@ -46,11 +46,30 @@ lockfiles at `/licenses/sources/psp-source.tar.gz`. Its build script pins the
 core, RetroArch, wrapper, scaffold, filesystem dependency and Emscripten.
 No PSP games or BIOS dumps are bundled.
 
-Beta GameCube uses GPL-2.0-or-later Dolphin through the pinned wasm-dolphin
-runtime. Its matching source archive, modified host/save SDK source and core
+GameCube uses GPL-2.0-or-later Dolphin, built from pinned sources with the
+wasm-dolphin integration and CloudRcade patches. It is enabled by default;
+the historical `/experimental/gamecube/` asset path is retained. Its matching
+source archive, modified host/save SDK source and core
 license ship at `/experimental/gamecube/`. The replacement GameCube fonts are
 Droid Sans derivatives under Apache-2.0; their full notice ships in `sys/GC`.
-The save SDK uses the same MIT-licensed webRcade common source as existing
+The save SDK uses the same Apache-2.0-licensed webRcade common source as existing
 cores and pinned npm packages recorded in its lockfile. Their license notices
 ship in `sdk-licenses/` and the generated bundle's legal notices. See
 `deploy/webrcade/retro-dolphin/README.md` for pins and build limits.
+
+## Experimental PlayStation 2
+
+The PS2 beta builds [Play!](https://github.com/jpd002/Play-) and its pinned
+submodules from source. Play!'s permissive license ships beside the core as
+`LICENSE.play`; dependency licenses are retained in the corresponding source
+archive. The CloudRcade host and shared webRcade save/menu SDK modifications
+are GPL-3.0. The exact patched source, recipe and modified save SDK are served
+at `/licenses/sources/ps2-source.tar.gz`. Native artifacts and source archive
+hashes are recorded in the packaged `core-info.json`. No external PS2 BIOS or
+game data is distributed. The device WebGPU GS compute renderer is derived
+from [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp) under MIT; its
+notice ships as `LICENSE.gs-webgpu`. Pinned Dawn WebGPU bindings retain their
+BSD/Emscripten notices as `LICENSE.dawn-webgpu` and `LICENSE.dawn-cpp`. The source
+archive includes original renderer inputs, modified GS/compute sources, Dawn
+sources and the exact extraction/build recipes. See
+`deploy/webrcade/retro-play/README.md`.

@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.0.0",
+    "date": "October 18, 2026",
+    "title": "PS2 and GameCube improvements",
+    "changes": [
+      "Optional PlayStation 2 support is now included in the stable image. Enable it in Experimental Settings; compatibility and speed depend on the game and device.",
+      "GameCube receives rendering, disc streaming, shader caching and save-state memory improvements, including the Zelda green-screen repair.",
+      "Touch sticks preserve fine movement and full diagonal range. Connected controllers hide touch controls, with a manual toggle available.",
+      "Cloud saves recover expired sessions and handle large Nextcloud transfers more reliably. Mobile audio resumes more reliably after interruptions."
+    ]
+  },
+  {
     "version": "2.0.11",
     "date": "October 14, 2026",
     "title": "Mobile save-state menus",

@@ -10,6 +10,22 @@ const path = require('node:path');
   assert(perfEnabled({getItem:()=> '1'}));
   assert.equal(perfEnabled({getItem:()=> '0'}),false);
   assert.equal(perfEnabled({getItem:()=>{throw new Error('storage blocked');}}),false);
+  const {nativeTimingDelta,nativeTimingDetails}=await import(pathToFileURL(path.resolve(__dirname,
+    '../deploy/webrcade/retro-dolphin/app/native-timings.mjs')));
+  const initial={v:1,enabled:true,epoch:1,slices:10,totalUs:100000,advanceInclUs:20000,
+    executeInclUs:80000,compileSubsetUs:30000,throttleBlockedSubsetUs:10000,dvdBlockedSubsetUs:1000};
+  const later={...initial,slices:30,totalUs:500000,advanceInclUs:100000,executeInclUs:400000,
+    compileSubsetUs:70000,throttleBlockedSubsetUs:30000,dvdBlockedSubsetUs:11000};
+  assert.equal(nativeTimingDelta(later,initial).compileSubsetUs,40000);
+  const phases=nativeTimingDetails(later,initial,20);
+  assert.match(phases.line,/execute 16.0 · compile 2.0 ms\/f/);
+  assert.match(phases.lines.join('\n'),/inclusive/);
+  assert.match(phases.lines.join('\n'),/subsets; do not add/);
+  for(const changed of [{...later,enabled:false},{...later,epoch:2},{...later,slices:0},
+    {...later,totalUs:NaN},{...later,totalUs:Number.MAX_SAFE_INTEGER+1}])
+    assert.equal(nativeTimingDelta(changed,initial),null,'off, changed epoch, reset and invalid counters never invent rates');
+  assert.equal(nativeTimingDetails(later,initial,0).line,'','no completed frames means no per-frame estimate');
+  assert.equal(nativeTimingDetails(initial,initial,1).line,'','no completed native slices means no estimate');
   globalThis.WrcadCloudConfig={storagePrefix:'monitor-fixture'};
   const configured=await import(pathToFileURL(path.resolve(__dirname,
     '../deploy/webrcade/retro-dolphin/app/perf.mjs'))+'?namespace');

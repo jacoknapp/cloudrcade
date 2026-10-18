@@ -11,8 +11,8 @@ Three locations are easy to confuse:
 | Location | Contains | Example |
 | --- | --- | --- |
 | Server's ROM directory | Original game and BIOS files supplied by the operator | `roms/nes/roms/Example.nes` |
-| Server's data directory | Generated feeds, scan records and converted discs | `data/feeds/combined.json` |
-| Player's browser/Nextcloud | That player's progress and preferences | Browser-local storage or their configured Nextcloud save folder |
+| Server's config directory | Generated data, TLS material and optional metadata credentials | `config/data/feeds/combined.json` |
+| Player's browser/cloud account | That player's progress and preferences | Browser-local storage, their configured Nextcloud save folder or Dropbox app folder |
 
 A directory named `roms` inside a system folder is where its games go. A directory named `bios` holds that system's BIOS/firmware. A **feed** is a JSON list of file URLs; it does not contain the games themselves. Do not put player saves in the server's ROM directory.
 
@@ -35,19 +35,23 @@ cloudrcade/
 │   ├── psx/
 │   │   ├── roms/                CHD/PBP or CUE plus its BIN tracks
 │   │   └── bios/                Required validated PlayStation BIOS
-│   └── 3DS/
-│       ├── Games/Example.3ds    3DS games may be directly here or nested
-│       └── bios/                Your external aes_keys.txt, if needed
-├── data/                        Writable generated data
-│   ├── feeds/combined.json     Created by a successful scan
-│   └── derived/                Converted discs; originals stay in roms/
-├── managed/                     Optional externally managed game files
-└── config/                      Optional external metadata credentials
+│   ├── 3DS/
+│   │   ├── Games/Example.3ds    3DS games may be directly here or nested
+│   │   └── bios/                Your external aes_keys.txt, if needed
+│   ├── GameCube/Example.iso     GameCube disc
+│   ├── PS2/Example.iso          Optional PS2 beta core
+│   └── managed/                Optional externally managed game files
+└── config/                      Writable application configuration
+    ├── data/
+    │   ├── feeds/combined.json  Created by a successful scan
+    │   └── derived/             Converted discs; originals stay in roms/
+    ├── tls/                     Generated or operator-supplied TLS material
+    └── metadata.json            Optional private IGDB credentials
 ```
 
-**Do not add `roms/3DS/roms/` merely to match the other systems.** The 3DS scanner searches beneath `3DS/` directly, including subfolders. The `3DS/bios/` directory is mounted separately for runtime keys. Use the exact system spelling: `segaMD` and `3DS` are case-sensitive examples.
+**Do not add `roms/3DS/roms/` merely to match the other systems.** The 3DS scanner searches beneath `3DS/` directly, including subfolders. Startup aliases `3DS/bios/` from the read-only ROM mount to the private runtime-key path. Use the exact system spelling: `segaMD` and `3DS` are case-sensitive examples.
 
-The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at `/var/www/html/content`. The scanner's `WEBRCADE_ROM_ROOT` uses that container path. Most systems scan recursively below `<folder>/roms`; 3DS scans below `3DS` directly. Folder spelling and case matter on case-sensitive filesystems.
+The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at `/roms` and `WEBRCADE_HOST_PATH` (default `./config`) writable at `/config`. Startup aliases `/var/www/html/content` to `/roms` and `/data` to `/config/data`; the scanner keeps using those internal paths. Most systems scan recursively below `<folder>/roms`; 3DS, GameCube and PS2 scan directly beneath their system folders. Folder spelling and case matter on case-sensitive filesystems.
 
 | Folder | System | Scanner extensions |
 | --- | --- | --- |
@@ -61,17 +65,21 @@ The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at
 | `segaMD/roms` | Genesis | `.bin`, `.gen`, `.smd`, `.md` |
 | `psp/roms` | PSP | `.iso`, `.cso`, `.pbp`, `.elf` |
 | `psx/roms` | PlayStation | `.chd`, `.pbp`, `.cue` |
+| `PS2` or `ps2` | PlayStation 2 (experimental beta) | `.iso`, `.chd` v5, homebrew `.elf` |
 | `3DS` | Nintendo 3DS | `.cia`, `.3ds`, `.cci` |
+| `GameCube` | Nintendo GameCube | `.iso`, `.gcm` |
 
 These are the integrated scanner's supported formats, not an exhaustive list of formats/apps possible in a hand-written webRcade feed. A matching extension does not guarantee a valid or compatible game. The scanner validates 3DS headers and application titles, excludes updates/DLC/system titles and known unsupported seed-protected titles, and applies operator exclusions. It also routes `.smc` files directly under `nes/roms` to SNES for compatibility with a misfiled library.
+
+GameCube and PS2 entries are generated only when the image includes their respective core. GameCube has no enable flag. PS2 is an opt-in beta: players must turn on **Settings → Experimental Settings → Enable PlayStation 2 (experimental)** and press **OK** to see its entries. ISO validation requires a PS2 `BOOT2` disc; `.elf` must be a supported PS2 executable. A v5 CHD in a PS2 folder is treated as PS2 input, so keep PlayStation CHDs under `psx/roms`. GameCube inputs must have a valid GameCube disc header; Wii discs are excluded.
 
 ## Add your first game or another game
 
 1. Identify its system and supported file extension in the table above. A ZIP containing a game needs extraction for this scanner; `.zip` is not one of its listed input formats.
 2. Copy the file under that system's ROM directory, for example `roms/gb/roms/Example.gb`. You can use subfolders to organize games. For a PlayStation CUE, keep its referenced track files available alongside it or at the paths the CUE names.
-3. Supply required BIOS files using the next section. Grant the container read access to originals and write access to `data/`.
+3. Supply required BIOS files using the next section. Grant the container read access to originals and write access to `config/`.
 4. Wait for the next scan or run the command under [Scanner lifecycle and output](#scanner-lifecycle-and-output).
-5. Read the logs and `data/last-scan.json`. Reload the library's operator feed, open the system folder and test the new game.
+5. Read the logs and `config/data/last-scan.json`. Reload the library's operator feed, open the system folder and test the new game.
 
 For a game stored in Drive, first follow [Google Drive setup](saves-and-storage.md#google-drive-setup). If you want direct Dropbox hosting instead of copying files to the server, use a [custom feed](#a-small-feed-example); the integrated scanner does not enumerate shared cloud links.
 
@@ -81,7 +89,7 @@ Supply your own required BIOS files. For generated PlayStation entries, `psx/bio
 
 For DS, `nds/bios/bios7.bin`, `bios9.bin` and `firmware.bin` are included in the generated feed when all three exist. Actual emulator/game requirements still apply. Other custom feeds may specify their own app-specific BIOS properties.
 
-Encrypted 3DS games use external Citra-format `aes_keys.txt` through a separate read-only BIOS mount, not a public feed property containing keys. See [3DS key setup](streaming-offline-and-3ds.md#3ds-setup). No ROM, BIOS, key set or console backup is bundled.
+Encrypted 3DS games use external Citra-format `aes_keys.txt` at `roms/3DS/bios/aes_keys.txt`, read through the private runtime endpoint rather than a public feed property containing keys. The root Compose layout needs only its two normal mounts. See [3DS key setup](streaming-offline-and-3ds.md#3ds-setup). No ROM, BIOS, key set or console backup is bundled.
 
 ## Scanner lifecycle and output
 
@@ -106,7 +114,7 @@ Only one scan runs at a time. Files are deduplicated, hashes are reused for unch
 | `data/last-scan.json` | Last successful completion, counts and metadata source |
 | `data/refresh-errors.json` | Disc conversion errors, removed after success |
 
-Paths above use `WEBRCADE_HOST_PATH=./data`. Apache serves feeds through an alias from the state mount; do not create a nested writable feed mount inside the ROM share. Preserve `psx-save-ids.json` and existing feeds during migrations to retain published save identities.
+Paths above are relative to `WEBRCADE_HOST_PATH` (default `./config`), so `data/last-scan.json` is `config/data/last-scan.json` on the host. Apache serves feeds through an alias from the state directory; do not create a nested writable feed mount inside the ROM share. Preserve `psx-save-ids.json` and existing feeds during migrations to retain published save identities.
 
 CUE input is converted to a derived CHD using its referenced track bytes. Original CUE/BIN files remain unchanged. Missing tracks or conversion errors stop feed publication. Allow adequate data-directory space and scan time for large disc collections. The scanner deduplicates identical content; duplicates may increase the scanned count without increasing entries.
 

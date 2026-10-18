@@ -77,7 +77,7 @@ async function close({leave=false}={}){
 }
 async function perform(action){
  if(busy||exiting)return;busy=true;
- if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
+ if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,nativeTimingEnabled:perfEnabled(),onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
  const owned=session,current=generation;controls();
  try{await action(owned);}
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}
@@ -213,7 +213,9 @@ const TOUCH_BUTTONS=[[0,'D_UP'],[1,'D_DOWN'],[2,'D_LEFT'],[3,'D_RIGHT'],[4,'A'],
 function mergeTouchInput(state){
  for(const [cid,name] of TOUCH_BUTTONS)if(controller.isControlDown(cid))state.mask|=BUTTONS[name];
  for(const [field,index,isX,invert] of [['stickX',0,true,false],['stickY',0,false,true],['cStickX',1,true,false],['cStickY',1,false,true]]){
-  const value=controller.getAxisValue(index,isX);if(Math.abs(value)>.2)state[field]=Math.round(128+(invert?-1:1)*96*value);
+  // The overlay already applies its radial deadzone. A second component
+  // threshold loses slow movement and snaps diagonals to cardinal directions.
+  const value=controller.getAxisValue(index,isX);if(value)state[field]=Math.round(128+(invert?-1:1)*96*value);
  }
  if(state.mask&BUTTONS.L)state.triggerLeft=255;if(state.mask&BUTTONS.R)state.triggerRight=255;
  if(state.mask&BUTTONS.A)state.analogA=255;if(state.mask&BUTTONS.B)state.analogB=255;

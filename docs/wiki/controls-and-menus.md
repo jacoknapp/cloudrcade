@@ -28,7 +28,7 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 
 **Controls on/off** enables/disables the touch game buttons; the edge tab remains available. This choice is remembered in the browser. Turning touch controls off leaves keyboard/gamepad input available.
 
-**Translucence** fades the game controls by up to 80%. The open drawer stays readable. **Mute audio** silences Web Audio output, including achievement sounds, while the emulator's audio clock continues. The app requests mixable ambient audio where supported; your phone may still require you to resume music or a podcast manually. Mute is remembered locally and can sync through Nextcloud.
+**Translucence** fades the game controls by up to 80%. The open drawer stays readable. **Mute audio** silences Web Audio output, including achievement sounds, while the emulator's audio clock continues. The app requests mixable ambient audio where supported; your phone may still require you to resume music or a podcast manually. Mute is remembered locally and can sync through the connected save provider.
 
 ## Edit a layout
 
@@ -39,15 +39,15 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 
 The game pauses during editing. Layouts save per platform and orientation in the browser, including separate GB/GBC/GBA layouts. Positions are screen-relative and clamped to the viewport. Editing works with controls switched off and preserves that visibility choice afterward. You cannot edit before a game is running.
 
-Buttons can overlap the game or sit below it; place them wherever you find comfortable. Game screens fit the available safe viewport independently of the controller. Moving buttons, opening the drawer or hiding controls never reserves a separate control area or shrinks the game. Saved positions are restored without restricting them to the default bottom pad.
+Buttons can overlap the game or sit below it; place them wherever you find comfortable. Moving buttons does not move the picture to follow them. Some systems, including PlayStation and the PS2 beta, use a default portrait picture area above the controls; PS2 uses the available safe viewport in landscape or with controls off. Saved button positions are restored without restricting them to the default bottom pad.
 
-With Nextcloud connected, saved layouts, tab positions, translucence, visibility, mute and DS/3DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
+With Nextcloud or Dropbox connected as the save provider, saved layouts, tab positions, translucence, visibility, mute and DS/3DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
 
 ## Platform-specific input
 
 Digital consoles use an eight-way D-pad. Multiple direction/action touches, sliding between action buttons and diagonals are supported. Directions release when the finger returns to a straight direction or neutral center. Held inputs also release on pause, focus loss, cancellation, hiding or rotation.
 
-N64 has independent analog, D-pad and C buttons. PlayStation adds left/right analog sticks when its emulator analog mode is enabled; change that in the game's settings. Stick and D-pad input remain independent. 3DS uses a Circle Pad, independent C-stick, D-pad and ZL/ZR. Nintendo face buttons put B below and A to the right.
+N64 has independent analog, D-pad and C buttons. PlayStation shows both DualShock analog sticks from startup, alongside its D-pad. The emulator's per-game controller-mode setting determines whether a game uses analog input. Stick and D-pad input remain independent. 3DS uses a Circle Pad, independent C-stick, D-pad and ZL/ZR. Nintendo face buttons put B below and A to the right.
 
 DS retains native stylus touch on the game screen. Its drawer has **DS screens**: **View** cycles the six layouts, **Single screen** switches top/touchscreen, and **Dual screens** cycles two-screen views. Vertical layouts fit both screens within the safe area; other layouts retain normal centering. Choosing a view exits rotated book mode. The native microphone control remains available.
 
@@ -61,7 +61,11 @@ The inherited **Experimental apps** preference is enabled once when the fork's m
 
 PSP is available by default without an Experimental Settings toggle or Docker enable setting. PSP uses an independent analog stick and D-pad, cross/circle/square/triangle, L/R, Select and Start. HTTPS, cross-origin isolation and WebGL2 are required. Compatibility and speed vary by browser and device.
 
-The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. There is no separate “Link 3DS” operation. That page contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. Disabling 3DS in the operator environment removes its registration and diagnostic switches; PSP remains available by default.
+The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. There is no separate “Link 3DS” operation. **Settings → Core Settings** contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. PSP remains available by default.
+
+GameCube is available when its core is packaged, without a player enable switch. Its **GameCube performance readout** is in **Core Settings**. Keyboard, gamepad and touch input include separate sticks and its own button layout. It requires device WebGPU; see [device requirements](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta).
+
+On the **PS2 beta**, open **Settings → Experimental Settings**, turn on **Enable PlayStation 2 (experimental)** and press **OK**. This and the separate **PS2 performance readout** start off; Cancel discards changes. Disabling PS2 hides its games and blocks direct launches while preserving saves and layouts. There is no Docker enable flag. PS2 controls include both analog sticks, D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu; Escape also opens its pause menu. Compatibility, rendering and speed remain experimental.
 
 3DS uses native 1x resolution and the original console model by default. See [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) before changing settings expecting full-speed playback.
 

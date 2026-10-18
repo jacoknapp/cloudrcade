@@ -126,12 +126,12 @@ const { chromium, webkit } = require('playwright');
         await page.locator('.kt-tab').tap();
         assert.deepEqual(await page.locator('canvas').boundingBox(), withControls,
           'opening the controller drawer must not shift the game screens');
-        await page.locator('.kt-toggle').tap();
+        await page.getByRole('button', {name: 'Touch controls: On', exact: true}).tap();
         await page.locator('.kt-close').tap();
         const withoutControls = await page.locator('canvas').boundingBox();
         assert.deepEqual(withoutControls, withControls, 'controls off does not resize the game');
         await page.locator('.kt-tab').tap();
-        await page.locator('.kt-toggle').tap();
+        await page.getByRole('button', {name: 'Touch controls: Off', exact: true}).tap();
         await page.locator('.kt-close').tap();
         assert.deepEqual(await page.locator('canvas').boundingBox(), withControls,
           'reenabling controls keeps the full game display');

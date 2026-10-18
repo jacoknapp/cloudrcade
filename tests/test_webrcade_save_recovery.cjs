@@ -4,7 +4,9 @@ const source = fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/cl
 const storage = new Map(), backups = new Map(), remote = new Map();
 const copy = files => files && files.map(f => ({name:f.name,content:f.content instanceof Blob?f.content:new Uint8Array(f.content)}));
 let offline = false, beforeFetch = null, revision = 0, loseAck = false, afterGet = null, hangPut = false;
+let csrfToken='test', csrfRejections=0, rotateAfterStatus=false, denyPut=false, invalidStatus=false, putRequests=0;
 const errors = [], writes = [];
+const deadlines=[],signalDeadlines=new WeakMap();
 function connect(uid) { storage.set('wrcad.nextcloud.connection.v1', JSON.stringify({uid,login:uid,password:'fake'})); }
 connect('alice');
 function fixture(server='https://nextcloud.test') {
@@ -12,7 +14,15 @@ function fixture(server='https://nextcloud.test') {
  const fetch = async (url, options = {}) => {
   if (beforeFetch) { const fn = beforeFetch;beforeFetch = null;await fn(); }
   const query = new URL(url, 'https://games.test').searchParams;
-  if (query.get('action') === 'status') return Response.json({csrf:'test'});
+  deadlines.push({method:options.method||'GET',action:query.get('action'),timeout:signalDeadlines.get(options.signal)});
+  if (query.get('action') === 'status') {
+   const response=Response.json(invalidStatus?{}:{csrf:csrfToken});
+   if(rotateAfterStatus){rotateAfterStatus=false;csrfToken+='-rotated';}
+   return response;
+  }
+  if(options.method==='PUT')putRequests++;
+  if(options.headers['X-CSRF-Token']!==csrfToken){csrfRejections++;return Response.json({code:'csrf_invalid',error:'Refresh the page and try again.'},{status:403});}
+  if(options.method==='PUT'&&denyPut)return Response.json({code:'access_denied',error:'Cloud permission denied for this connection.'},{status:403});
   if (offline) return Response.json({error:'offline'},{status:502});
   const uid = decodeURIComponent(options.headers['X-Nextcloud-User']), file = query.get('path');
   const key = JSON.stringify([uid,file]), old = remote.get(key), method = options.method;
@@ -27,7 +37,7 @@ function fixture(server='https://nextcloud.test') {
   if (method === 'GET' && afterGet) { const fn=afterGet;afterGet=null;fn(); }
   return new Response(method === 'HEAD' ? null : old.body,{headers:{ETag:old.etag}});
  };
- vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,AbortSignal,btoa,unescape,encodeURIComponent,console});
+ vm.runInNewContext(source,{window:win,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,fetch,Blob,TextEncoder,TextDecoder,Uint8Array,AbortSignal:{timeout(ms){const signal=AbortSignal.timeout(ms);signalDeadlines.set(signal,ms);return signal;}},btoa,unescape,encodeURIComponent,console});
  class Saves {
   constructor() {this.errorCallback = e=>errors.push(e);}
   getZipFileName(p) { return p.endsWith('.zip') ? p : p+'.zip'; }
@@ -47,6 +57,36 @@ const files = n => [{name:'sav',content:new Uint8Array([n])}];
 const value = f => f?.find(f=>f.name==='sav')?.content[0];
 const savePath = '/wrc/test/sav';
 (async()=>{
+ const bounded=fixture();bounded.manager.cloudRequestTimeoutMs=60000;bounded.manager.cloudUploadTimeoutMs=180000;
+ const startDeadlines=deadlines.length;
+ assert.equal(await bounded.manager.save('/large-state-deadline',files(1)),true);
+ assert.equal(await bounded.manager.saveCloud('/large-state-head',files(2)),true);
+ await bounded.manager.loadCloud('/large-state-deadline');
+ const observed=deadlines.slice(startDeadlines);
+ assert(observed.some(v=>v.method==='PUT'&&v.timeout===180000),'large uploads can finish server-side scanning');
+ assert(observed.some(v=>v.method==='HEAD'&&v.timeout===60000),'metadata reads retain their deadline');
+ assert(observed.some(v=>v.method==='GET'&&v.action==='file'&&v.timeout===60000),'downloads retain their deadline');
+ // Renew an expired PHP session before transmitting a save body. A session
+ // changed during the upload may still retry once, preserving its revision.
+ const session=fixture();await session.manager.load('/session-prime');
+ csrfToken='renewed-session';let rejects=csrfRejections;
+ assert.equal(await session.manager.save('/expired-session',files(1)),true);
+ assert.equal(csrfRejections,rejects,'expired session refreshed before PUT');
+ rotateAfterStatus=true;
+ assert.equal(await session.manager.save('/session-race',files(2)),true);
+ assert.equal(csrfRejections,rejects+1,'one bounded retry repairs a session race');
+ denyPut=true;let puts=putRequests;
+ assert.equal(await session.manager.save('/denied-session',files(3)),false);
+ assert.equal(putRequests,puts+1,'permission denial does not resend the body');
+ assert.match(errors.at(-1),/permission denied/);
+ assert.equal(value(await session.manager.loadLocal('/denied-session')),3);
+ denyPut=false;assert.equal(value(await fixture().manager.load('/denied-session')),3);
+ invalidStatus=true;puts=putRequests;
+ assert.equal(await session.manager.save('/invalid-session',files(4)),false);
+ assert.equal(putRequests,puts,'invalid bootstrap cannot upload a save');
+ assert.equal(value(await session.manager.loadLocal('/invalid-session')),4);
+ invalidStatus=false;
+ console.log('PASS fresh-session preflight, bounded CSRF retry, actionable denial, failed bootstrap and preserved local recovery');
  let a=fixture();
  assert.equal(await a.manager.save(savePath,files(1)),true);
  offline=true;assert.equal(await a.manager.save(savePath,files(2)),false);
@@ -207,6 +247,15 @@ const savePath = '/wrc/test/sav';
  gc.manager.gameSavesDisabled=true;
  await assert.rejects(gc.saveState(stateAdapter,1),/disabled/);
  assert.equal(remote.has(JSON.stringify(['gamecube-fixture',gc.statePrefix+'1.zip'])),false);
+ const {Ps2Saves}=await import('../deploy/webrcade/retro-play/app/saves.mjs');
+ const ps2=new Ps2Saves(null,{},'fixture',()=>{}),ps2Client=fixture();ps2.manager=ps2Client.manager;ps2.states='ps2/fixture/states/fixture/';
+ ps2.manager.errorCallback=text=>{ps2.lastCloudError=text;ps2.report(text);};
+ denyPut=true;
+ assert.equal(await ps2.save(1,new Uint8Array([7,8,9]),null),false);
+ assert.match(ps2.status,/saved locally; Cloud permission denied/);assert.equal(ps2.busy,false);
+ assert.deepEqual(Array.from(await ps2.load(1)),[7,8,9]);
+ denyPut=false;assert.equal(await ps2.save(1,new Uint8Array([10,11,12]),null),true);
+ assert.match(ps2.status,/uploaded to cloud/);assert(!ps2.status.includes('denied'),'successful retry clears stale errors');
  console.log('PASS GameCube Menu card upload, explicit state bytes, uploading status/coalescing, offline/timeout recovery and disabled-save guard through the shared bridge');
  console.log('PASS same-UID server isolation, safe legacy migration and in-flight server changes');
  console.log('PASS lost acknowledgements, newer offline progress, restart recovery, legacy pending records and competing-write protection');

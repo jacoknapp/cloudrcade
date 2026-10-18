@@ -11,14 +11,14 @@ Start here if you use an arcade someone else runs. You do not need to edit `.env
 | I cannot find my games | Open **Feeds** and load the intended feed; clear search and return to system folders | Ask the operator whether the scan finished and that game is supported |
 | I cannot link Nextcloud | Check **Settings → Cloud Storage**; use Link and the connection page's visible sign-in link | Give the operator the visible error; a cloud account alone does not enable this site |
 | I see Manage/Connected but my save failed | Restore connection/sign-in, check the account, and follow [save recovery](saves-and-storage.md#offline-saves-and-recovery) | Keep local data; ask for help with conflicts or revoked credentials |
-| My other device has older progress | Finish saving/exiting on the first device; link the same Nextcloud account before launching on the second | Check for first-device upload errors and changed game/feed identity |
+| My other device has older progress | Finish saving/exiting on the first device; link the same provider/account before launching on the second | Check for first-device upload errors and changed game/feed identity |
 | Recently Played is empty | Check the correct account/feed and allow cloud refresh; only games matching this feed appear | Preserve cached history; report account/feed details without credentials |
 | I cannot see touch buttons | Launch a game; wait for loading; resume from pause; open the edge tab and turn Controls on | Check that the device/browser is detected as touch |
 | Buttons are uncomfortable | Open the touch drawer → Edit layout → drag → Save; repeat in the other orientation | See [layout editing](controls-and-menus.md#edit-a-layout) |
 | There is no sound | Tap a control/menu, check Mute audio, volume and output device | Report game/browser/device; browsers can require a gesture |
 | A streamed game stops or pauses | Restore the connection to the game server | Ask the operator to check file/range responses; uncached chunks need access |
 | 3DS hitches on a new scene | Let new shaders compile; repeat visits can reuse observed shaders | Speed varies by game/device; see [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) |
-| Dropbox is missing from Choose storage | Check `DROPBOX_ENABLED`, the public `DROPBOX_APP_KEY` and HTTPS `WEBRCADE_PUBLIC_URL`; recreate the container after environment changes | Register the exact callback from [Dropbox setup](saves-and-storage.md#enable-dropbox-saves) |
+| Dropbox is missing from Choose storage | Ask the operator whether Dropbox is enabled on this site | The operator can follow [Dropbox setup](saves-and-storage.md#enable-dropbox-saves) |
 | Dropbox asks to reconnect | Link again through Choose storage; preserve browser data and pending saves | Check the app's scopes/authorization and the account's connected apps |
 | A Drive/Dropbox feed link fails | Confirm it is a feed JSON file, not a folder/preview page; use the documented setup route | Ask the feed author to test direct file access and browser permissions |
 | Offline launch fails | Try online in the same browser/profile; fully load/test required assets | A partly streamed game or uncached 3DS keys cannot be fixed by installing the app |
@@ -42,9 +42,10 @@ The root Compose file reads `.env`. URL, branding, cloud and scanner settings ar
 | Persistent identities | `WEBRCADE_STORAGE_PREFIX`, `NEXTCLOUD_SAVE_FOLDER`; preserve these to keep selecting existing data |
 | Scanner | `WEBRCADE_SCAN_ENABLED`, `WEBRCADE_SCAN_INTERVAL_SECONDS`, `WEBRCADE_ROM_ROOT`, `WEBRCADE_STATE_PATH`, `WEBRCADE_MANAGED_ROOT` |
 | Share validation | `WEBRCADE_REQUIRE_ROM_MOUNT`, `WEBRCADE_REQUIRED_ROM_DIR` |
-| Metadata | `WEBRCADE_METADATA_ENABLED`, `WEBRCADE_METADATA_CONFIG`, `WEBRCADE_METADATA_PATH_PREFIX`; see [metadata guide](library-administration.md#optional-direct-metadata) |
+| Metadata | `WEBRCADE_METADATA_ENABLED`, `WEBRCADE_METADATA_CONFIG`, `WEBRCADE_METADATA_PATH_PREFIX`; see [metadata guide](library-administration.md#metadata-on-demand) |
 | 3DS | `WEBRCADE_ENABLE_3DS`, `WEBRCADE_3DS_KEYS_FILE`, `WEBRCADE_3DS_SKIP_DIRS`, `WEBRCADE_3DS_SKIP_NAMES` |
 | Nextcloud | `NEXTCLOUD_URL`, `NEXTCLOUD_ENABLED`, `NEXTCLOUD_AUTO_REDIRECT`, `NEXTCLOUD_HANDOFF`, `NEXTCLOUD_CLIENT_NAME`, access-header pair and upgrade-only `NEXTCLOUD_LEGACY_URL`; see [access guide](nextcloud-and-access.md) |
+| Dropbox | `DROPBOX_ENABLED`, `DROPBOX_APP_KEY`; see [Dropbox setup](saves-and-storage.md#enable-dropbox-saves) |
 
 Host mount variables and scanner container variables are different. For example, `WEBRCADE_ROM_PATH=./roms` selects a host directory; `WEBRCADE_ROM_ROOT=/var/www/html/content` selects where the scanner reads it inside the container. Changing one does not automatically change every container path/Apache alias.
 
@@ -54,19 +55,17 @@ The root Compose example uses exactly two mounts: config writable and ROMs read-
 
 Preserve the app's writable data directory, including feeds, derived discs, identity/hash maps and metadata state. Preserve operator configuration separately in secure storage. ROMs, BIOS, runtime keys and TLS material belong to their own backups according to your deployment. Keep secret files out of source and build context.
 
-Back up Nextcloud saved files through your Nextcloud backup procedure. If you keep ROM source backups in Google Drive or Dropbox, that is a separate backup of those files; verify their restore/download path and keep it separate from player save synchronization. Browser-only saves/preferences live on each player device; a server-data backup does not capture them. Before origin/namespace/account/core migrations, preserve local progress and verify a restoration path for the relevant app. Record the current image tag/digest so a code rollback can use the exact former runtime.
+Back up cloud saves through the selected provider's backup procedure: the configured Nextcloud save folder or the Dropbox app folder. If you keep ROM source backups in Google Drive or Dropbox, that is a separate backup of those files; verify their restore/download path and keep it separate from player save synchronization. Browser-only saves/preferences live on each player device; a server-data backup does not capture them. Before origin/namespace/account/core migrations, preserve local progress and verify a restoration path for the relevant app. Record the current image tag/digest so a code rollback can use the exact former runtime.
 
 Do not delete data or clear browser storage as an initial troubleshooting step. Pending local saves can be the newest available progress.
 
 ## Upgrade and rollback
 
-The public image is `ghcr.io/jacoknapp/cloudrcade:latest`. Master merges build/publish images; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` tags are also published. Pin a known tag or digest when reproducibility matters.
+The stable public image is `ghcr.io/jacoknapp/cloudrcade:latest`. Pushes to `main` publish `latest`; configured beta branches publish separate aliases such as `beta-ps2-core`. Pull requests validate without publishing. Published builds also have commit-specific `sha-<full-commit>` tags, and `v*` tag pushes publish matching image tags. Pin a known tag or digest when reproducibility matters. PS2 remains an opt-in beta; use the explicitly selected beta image for its qualification work.
 
-The image works on Linux AMD64 and Linux ARM64. Use a 64-bit OS on an ARM server
+Stable images target Linux AMD64 and Linux ARM64; beta-branch images target AMD64 only. Use a 64-bit OS on an ARM server
 or Raspberry Pi; a 32-bit ARM OS is not supported. Docker automatically pulls
-the correct variant, so the Compose setup is the same for both. Both variants
-are tested for startup, web serving, library scans and disc conversion before
-they are published. Building your own multi-platform image is covered in
+the correct variant from a multi-platform stable image, so the Compose setup is the same for both. The release workflow checks each published platform for startup, web serving, library scans and disc conversion. These checks do not establish emulator gameplay compatibility. Building your own multi-platform image is covered in
 [build architecture](../architecture.md).
 
 ```sh
@@ -88,11 +87,16 @@ The startup update popup is an exception: [current notes](../../src/react/screen
 ```sh
 python3 scripts/check-release.py
 python3 scripts/test.py
-python3 scripts/prepare-core.py
+python3 scripts/restore-qualified-cores.py
+python3 scripts/core-cache.py prepare 3ds
+python3 scripts/core-cache.py prepare psp
+python3 scripts/core-cache.py prepare gamecube
+# Required by the Dockerfile on this PS2 beta branch:
+python3 scripts/core-cache.py prepare ps2
 docker build --target web -t cloudrcade:local .
 ```
 
-The checks require their documented interpreters, including PHP CLI for PHP validation/tests. Preparing a changed 3DS core requires Docker, Git, Python 3.12+, rsync and ample space; unchanged inputs can reuse the checksum-pinned public key-free package. First-time core builds are slower than overlay changes. See [architecture](../architecture.md).
+The checks require their documented interpreters, including PHP CLI for PHP validation/tests. The Dockerfile needs prepared output for every core it copies; preparing only 3DS leaves a clean checkout unable to build. Qualified release packages and exact-input caches can supply unchanged cores; changed inputs require their source-build prerequisites, Docker, Git, Python 3.12+, Node.js 22+, npm, rsync and ample space. First-time core builds are slower than overlay changes. See [architecture](../architecture.md) and each core's build guide.
 
 Synthetic tests do not establish live SSO, physical controller behavior or phone speed. Browser/native-core tests document their staged deployment, Playwright, own-ROM and optional build-source prerequisites in their headers. Use disposable accounts/profiles and avoid modifying a player's valuable progress during verification.
 
@@ -104,7 +108,7 @@ docker compose logs --tail=200 webrcade
 docker compose exec webrcade python3 /usr/local/share/cloudrcade/service.py scan
 ```
 
-Check `data/last-scan.json`, `data/refresh-errors.json` and the selected feed. Share sanitized counts/error text rather than secrets, credential files, ROM bytes or keys. The supervisor exits on a web-process failure so Docker's restart policy can recover it; a scanner failure retains the previous feed and retries.
+Check `config/data/last-scan.json`, `config/data/refresh-errors.json` and the selected feed (replace `config` with your `WEBRCADE_HOST_PATH`). Share sanitized counts/error text rather than secrets, credential files, ROM bytes or keys. The supervisor exits on a web-process failure so Docker's restart policy can recover it; a scanner failure retains the previous feed and retries.
 
 ## Troubleshooting by symptom
 
@@ -112,6 +116,7 @@ Check `data/last-scan.json`, `data/refresh-errors.json` and the selected feed. S
 | --- | --- |
 | Empty first library | Startup scan still running; supported folder/extension; mounted paths and read permissions; logs |
 | New game absent | Selected feed, last successful scan, unsupported/invalid format, 3DS exclusions, duplicate content |
+| PS2 folder absent | Image includes the PS2 beta core, valid PS2 inputs, successful scan, and the player's PlayStation 2 experimental setting is enabled |
 | Old feed persists after removal | Empty or failed scans deliberately retain the last feed; inspect logs rather than deleting state |
 | PlayStation scan fails | Valid BIOS set, CUE track references, chdman conversion output, writable data space |
 | Feed loads but ROM fails | Generated URL, gateway authorization, binary MIME/range responses, external-feed CORS and HTTPS |
@@ -119,8 +124,8 @@ Check `data/last-scan.json`, `data/refresh-errors.json` and the selected feed. S
 | Encrypted 3DS fails | Valid external key file, read-only mount readable inside container, configured file path, title/seed compatibility |
 | No audio | Tap a game control/menu to satisfy browser gesture requirements; check Mute audio and OS output |
 | Touch buttons unavailable | Running game required, controls switch, touch-device detection, loading/pause state |
-| Progress absent on another device | Same Nextcloud server/user and save folder, successful previous upload, same stable game identity |
-| Cloud upload error | Connectivity, account authorization, TLS, revision conflict or 64 MB bridge upload limit; retain local copy |
+| Progress absent on another device | Same provider/account (Nextcloud server/folder or Dropbox app key), successful previous upload, same stable game identity |
+| Cloud upload error | Connectivity, account authorization, TLS, revision conflict or 64 MiB per-file upload limit; retain local copy |
 | Offline game fails | Same browser/profile, complete required cached files, quota/eviction, partial streaming or uncached runtime keys |
 | Installed app has old presentation | Reopen/reinstall as needed; preserve saves before clearing any site data |
 

@@ -7,9 +7,9 @@ export function discValidator(headers) {
   if (modified && Number.isFinite(Date.parse(modified))) return {header:'Last-Modified',value:modified};
   return null;
 }
-export async function fetchDiscRange({url,size,first,last,validator}, target, {fetcher = fetch, signal} = {}) {
+export async function fetchDiscRange({url,size,first,last,validator}, target, {fetcher = fetch, signal, priority = 'high'} = {}) {
   const response = await fetcher(url,{headers:{Range:`bytes=${first}-${last}`,'If-Range':validator.value},
-    credentials:'same-origin',cache:'no-store',signal});
+    credentials:'same-origin',cache:'no-store',signal,priority});
   if (response.status !== 206 || response.headers.get('Content-Range') !== `bytes ${first}-${last}/${size}` ||
       response.headers.get(validator.header) !== validator.value) {
     await response.body?.cancel();

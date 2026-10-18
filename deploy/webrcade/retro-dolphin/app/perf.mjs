@@ -1,5 +1,6 @@
 // GameCube-only readout. Reuses the existing worker poll; no GPU probes or
 // browser animation counters. The Core Settings switch controls it.
+import {nativeTimingDetails} from './native-timings.mjs';
 export const PERF_KEY = (globalThis.WrcadCloudConfig?.storagePrefix || 'webrcade') + '.gamecube.perf.v1';
 export function perfEnabled(storage) {
   try { return (storage || globalThis.localStorage).getItem(PERF_KEY) === '1'; } catch { return false; }
@@ -50,6 +51,8 @@ export class GameCubePerf {
     const delta=(key)=>Math.max(0,(d.stream?.[key]||0)-(old.stream?.[key]||0));
     const number=value=>Number.isFinite(value)?value.toFixed(1):'unavailable';
     const replayMs=d.replay&&old.replay?Math.max(0,d.replay.totalMs-old.replay.totalMs)/seconds:null;
+    const native=nativeTimingDetails(d.nativeTiming,old.nativeTiming,
+      Number.isFinite(d.render?.frames)&&Number.isFinite(old.render?.frames)?d.render.frames-old.render.frames:0);
     this.details=[
       `Rendered: ${number(fps)} fps · ${Math.round(speed)}% normal speed`,
       this.targetFps === null ? 'Target: game-native frame rate · 100% normal speed' : `Target: ${this.targetFps} rendered fps · 100% normal speed`,
@@ -65,6 +68,7 @@ export class GameCubePerf {
       d.rendererError ? `Last renderer error: ${d.rendererError.kind}: ${d.rendererError.message}` : '',
       `GPU execution time: unavailable (no GPU timing/readback probes)`,
       `CPU/JIT: ${d.jit || 'unavailable'} · ${d.compiled ?? 'unavailable'} compiled blocks`,
+      ...native.lines,
       `Shaders: ${resources?.shaderOk ?? 'unavailable'} ready / ${resources?.shaderFail ?? 'unavailable'} failed`,
       `GPU resources: ${resources?.textures ?? 'unavailable'} textures · ${resources?.bindGroups ?? 'unavailable'} bindings`,
       `Render misses: ${d.missingPipelines ?? 'unavailable'} pipelines / ${d.missingBindings ?? 'unavailable'} bindings · skipped draws ${d.skippedDraws ?? 'unavailable'} (lifetime)`,
@@ -80,7 +84,8 @@ export class GameCubePerf {
     // Ticks measure emulated time, so 30 fps games need no guessed 60 fps target.
     this.element.textContent = `GameCube ${number(fps)} rendered fps  ${Math.round(speed)}% speed\n` +
       (this.targetFps === null ? '' : `Target ${this.targetFps} fps · 100% speed\n`) +
-      `WebGPU · ${frame.renderWidth || frame.width}×${frame.renderHeight || frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB`;
+      `WebGPU · ${frame.renderWidth || frame.width}×${frame.renderHeight || frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB` +
+      (native.line ? `\n${native.line}` : '');
   }
 }
 

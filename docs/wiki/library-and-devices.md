@@ -24,7 +24,7 @@ Use **Search all games** on mobile to search across the current feed's games rat
 
 After you launch a game, **Recently Played** collects up to 20 matching games, newest first. Replaying a game moves it to the front. The library initially highlights this folder when it has matching entries, but you still select it to open it. All system folders remain available.
 
-History is stored in this browser and syncs when Nextcloud is connected. A second linked device can receive the matching history. Games removed from the current feed are omitted from the view. The virtual folder uses the current feed's launch properties and artwork; it does not modify the shared generated feed or duplicate games in search.
+History is stored in this browser and syncs when Nextcloud or Dropbox is the connected save provider. A second device connected to the same provider/account can receive the matching history. Games removed from the current feed are omitted from the view. The virtual folder uses the current feed's launch properties and artwork; it does not modify the shared generated feed or duplicate games in search.
 
 On startup, the app restores the current account's cached history and fetches its cloud history automatically. You do not need to switch tabs or launch another game to make the folder appear.
 
@@ -35,6 +35,8 @@ On mobile, the **Feeds** button in the main header opens the feed picker, alongs
 A URL feed describes where its games and assets are served. Importing it does not copy those assets to this server. A JSON-file import saves the feed in the browser and still requires access to the URLs it describes. Third-party servers may need HTTPS, suitable CORS headers and compatible file responses. Availability, access permissions and emulator support still apply.
 
 The operator's `WEBRCADE_FEED_URL` supplies the native Default feed. Browser-selected or imported feeds can coexist with it. When troubleshooting a missing new ROM, confirm that you are viewing the operator's refreshed feed rather than another imported feed.
+
+On a PS2 beta deployment, PS2 games also require **Settings → Experimental Settings → Enable PlayStation 2 (experimental)** followed by **OK**. This browser preference starts off and filters PS2 games from the library while disabled. It does not delete those games or their saves.
 
 ## Install the web app
 
@@ -55,3 +57,5 @@ Installed iPhone/iPad apps request an opaque black system status bar to reduce i
 Use the same browser/profile when relying on local saves or offline files. Private browsing, another browser or another device has separate storage. Touch controls appear on touch devices; keyboard and physical gamepads remain available. Smaller desktop windows continue to use the desktop carousel when their primary pointer is a fine pointer. The compact library targets a primary coarse pointer at widths up to 1366 CSS pixels.
 
 A browser may require an explicit tap to start audio. Keep the game tab in the foreground for predictable timing. Rotation releases held inputs and switches to the appropriate saved touch layout. Some emulator apps require cross-origin isolation for shared memory; keep the runtime's security headers intact at your proxy.
+
+GameCube needs hardware WebGPU, shared-memory isolation and sufficient device memory; its core reserves 768 MiB of WASM memory before other browser/GPU use. The current PS2 beta needs hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). A browser that runs cartridge games may not meet these requirements, and meeting them does not guarantee a particular game's speed or compatibility.

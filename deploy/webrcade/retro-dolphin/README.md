@@ -1,6 +1,6 @@
 # GameCube
 
-The release image includes Nintendo GameCube to the CloudRcade library. Valid ISO/GCM
+The release image includes Nintendo GameCube in the CloudRcade library. Valid ISO/GCM
 files under the GameCube content directory launch Dolphin in the browser, using
 the device GPU through WebGPU. Keyboard, standard gamepad and touch controls,
 acknowledged pause/resume, Web Audio, memory cards and eight save-state slots are
@@ -15,7 +15,7 @@ Memory cards sync on pause (Menu or app backgrounding) and when returning to the
 library. There is no periodic upload during gameplay. Unchanged cards skip
 storage writes, and failed cloud sync remains retryable on the next pause/exit.
 The built-in
-GameCube performance readout is enabled by default; switch it off or on in the
+GameCube performance readout is off by default; switch it on or off in the
 library's Core Settings before launching. It samples native frame and
 emulated-time counters once per second. It reports rendered FPS, native game target
 and emulation speed, plus device WebGPU resolution and WASM memory. Sunshine NTSC
@@ -26,8 +26,9 @@ Local and connected Nextcloud saves use the existing CloudRcade account isolatio
 conflict handling and offline recovery bridge. States use the verified serialization-format namespace, allowing compatible
 native performance rebuilds to retain existing slots. Game compatibility and performance depend on the browser and device.
 
-PSP remains available without a beta flag. The beta publishes AMD64 images only.
-The standard release includes GameCube with no enable flag. The historical
+The standard release includes GameCube with no enable flag. The current Docker
+workflow builds `main` and version tags for AMD64 and ARM64; `beta/*` branches
+publish AMD64 only. The historical
 `/experimental/gamecube/` URL remains compatible with existing library links.
 GameCube availability follows the packaged core, with no global renderer/read
 change. Its disc URL threshold is50,000,000bytes. Larger games stream through
@@ -177,5 +178,5 @@ wasm host, Double Dash could stop submitting draws at the track preview while
 its native VI counter continued. This setting applies within the GameCube
 worker; the compiled core, state format, disc cache and other systems stay the
 same. Qualification checks both rendered and native progress and reviews the
-race image. The beta image disables automatic Watchtower updates so native
-browser verification can complete before an explicit app-only deployment.
+race image. The root image disables automatic Watchtower updates so native browser
+verification can complete before an explicit deployment.

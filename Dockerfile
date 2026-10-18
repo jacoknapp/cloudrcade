@@ -3,7 +3,7 @@
 # Upstream supplies architecture-independent browser assets, never native tools.
 ARG ASSET_PLATFORM=linux/amd64
 FROM --platform=$ASSET_PLATFORM webrcade/webrcade@sha256:77789de80c2963d58631b57306335638eec8f6425c66b7d6868576f0ea5f7a49 AS upstream
-FROM --platform=$BUILDPLATFORM python:3.12-alpine AS overlays
+FROM --platform=$BUILDPLATFORM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 AS overlays
 COPY --from=upstream /var/www/html/play /source/play
 WORKDIR /work
 COPY deploy/webrcade/patch-player.py deploy/webrcade/prepare-touch.py deploy/webrcade/patch-clock-core.py deploy/webrcade/patch-psx-stream.py ./
@@ -46,6 +46,9 @@ COPY release/psp/app/ /var/www/touch/apps/retro-ppsspp/
 COPY release/psp/sources/ /var/www/html/licenses/sources/
 COPY release/gamecube/app/ /var/www/html/experimental/gamecube/
 COPY deploy/webrcade/retro-dolphin/apache.conf /etc/apache2/conf-enabled/gamecube.conf
+COPY release/ps2/app/ /var/www/html/experimental/ps2/
+COPY release/ps2/sources/ /var/www/html/licenses/sources/
+COPY deploy/webrcade/retro-play/apache.conf /etc/apache2/conf-enabled/ps2.conf
 # Deploy qualified images explicitly, preserving the current release policy.
 LABEL com.centurylinklabs.watchtower.enable="false"
 COPY LICENSE LICENSE-third-party NOTICE THIRD_PARTY.md /var/www/html/licenses/
