@@ -7,6 +7,21 @@ switches default off, persist per browser/storage namespace, and honor Cancel.
 Native GPU timestamp collection runs only while the performance readout is on
 and the game is running. Supported hardware exposes sampled compute-pass time;
 turning the readout off releases completed mappings and starts no new queries.
+The same switch enables a bounded raw handoff trace. In browser developer tools,
+`WrcadPS2.module.handoffSnapshot()` returns native and host stage timestamps,
+opaque mailbox/message/request IDs, capture epochs and overflow counts. It
+contains no command contents, memory addresses or game identity. Native kinds1–7
+are enqueue, caller wait begin/end, execute begin/end and bridge post/return.
+Host stages include copy/queue/dispatch, GPU completion wait and ACK publication.
+Each realm stamps `performance.timeOrigin + performance.now()`; browser timer
+precision applies. These are observed wall times, not GPU execution or a speed
+analysis. All existing fences, acknowledgements and mailbox waits remain intact.
+Collection defaults off and stops while paused or disabled; existing records
+remain available until the core closes. Native16384/host8192 event limits retain
+the first records across toggle epochs and count later drops without wrapping.
+Snapshots return published records only and report native slots still pending;
+they do not pause gameplay or add synchronization. Reloading the core starts a
+fresh buffer. Turning the readout off starts no new clock reads or ID allocation.
 There is no Docker enable flag. Disabling PS2 hides its library entries and
 blocks direct launches while retaining its saves and control layouts.
 

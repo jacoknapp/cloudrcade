@@ -31,6 +31,8 @@ export class Ps2Performance {
  constructor(module,disc){
   this.module=module;this.disc=disc;this.previous=null;this.details='Waiting for a performance sample.';
   this.timings=new FrameTimings();module.cloudTimings=this.timings;
+  this.snapshotHandoff=()=>({native:module.nativeHandoffSnapshot?.()??null,host:module.cloudGpu?.handoffSnapshot?.()??null});
+  module.handoffSnapshot=this.snapshotHandoff;
   this.element=document.createElement('output');this.element.id='ps2-performance';this.element.setAttribute('aria-label','PS2 performance readout');this.element.hidden=!perfEnabled();document.body.append(this.element);
   this.reset();this.timer=setInterval(()=>this.sample(),1000);
  }
@@ -54,5 +56,5 @@ export class Ps2Performance {
   this.details=`Rendered: ${rendered.toFixed(1)} FPS\nEmulation: ${speed.toFixed(0)}% normal speed (${target} Hz video timing)\nFrame interval: ${ms(average)} ms average, ${ms(measured.last)} ms last, ${ms(measured.p95)} ms p95, ${measured.frames?ms(measured.max):'—'} ms max\n${enabled?stages:'Detailed timing is off.'}\nVideo tick: ${ms(timing>0?1000/timing:null)} ms (normal ${ms(target>0?1000/target:null)} ms)\nCPU + graphics WASM heaps: ${(heap/1048576).toFixed(0)} MiB\nDisc cache: ${((this.disc.cachedBytes||0)/1048576).toFixed(1)} / 16 MiB\nTiming uses one-second windows. Stages overlap across workers and are not additive. GPU submit CPU includes bridge copies and command encoding; GPU wait is wall time awaiting queue completion/readback, not GPU execution time. Disc I/O includes cache copies and network waits. ${gpuStage}. Hardware timestamps sample elapsed compute passes (including rasterization, textures, transfers and display composition); they exclude the final presentation blit and are not a measure of GPU utilization or all CPU wait time. Samples can cross the one-second window and are not per-frame totals. ${native.details} Presentation-blit GPU time is not measured. Frame intervals are observed GPU-presentation completions; p95 uses at most 240 recent intervals per window. Browser/GPU memory is not measured.`;
   this.element.textContent=`PS2 · ${rendered.toFixed(1)} FPS · ${speed.toFixed(0)}% · ${(heap/1048576).toFixed(0)} MiB\nFrame ${ms(average)} ms avg · p95 ${ms(measured.p95)} · last ${ms(measured.last)}\n${stages}\nVideo ${ms(timing>0?1000/timing:null)} / ${ms(target>0?1000/target:null)} ms\n1s averages · stages overlap\n${gpuStage}${native.line?'\n'+native.line:''}`;
  }
- dispose(){clearInterval(this.timer);this.timings.setEnabled(false);this.module.cloudGpu?.setTimingEnabled?.(false,this.timings.epoch);setNativeTimingEnabled(this.module,false);if(this.module.cloudTimings===this.timings)delete this.module.cloudTimings;this.element.remove();}
+ dispose(){clearInterval(this.timer);this.timings.setEnabled(false);this.module.cloudGpu?.setTimingEnabled?.(false,this.timings.epoch);setNativeTimingEnabled(this.module,false);if(this.module.cloudTimings===this.timings)delete this.module.cloudTimings;if(this.module.handoffSnapshot===this.snapshotHandoff)delete this.module.handoffSnapshot;this.element.remove();}
 }
