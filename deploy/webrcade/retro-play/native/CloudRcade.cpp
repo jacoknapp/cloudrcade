@@ -79,6 +79,24 @@ int operationStatus()
 EMSCRIPTEN_BINDINGS(CloudRcade)
 {
  using namespace emscripten;
+#ifdef CLOUD_HANDOFF_DIAGNOSTIC
+ function("nativeHandoffSnapshot", optional_override([]() {
+  auto out=val::object();auto events=val::array();
+  const auto reserved=CloudHandoff::Reserved().load(std::memory_order_acquire);
+  uint32_t pending=0;
+  for(uint32_t i=0;i<reserved;++i) {
+   const auto& e=CloudHandoff::Events()[i];
+   if(!e.ready.load(std::memory_order_acquire)){++pending;continue;}
+   auto row=val::object();row.set("seq",i);row.set("ms",e.ms);row.set("kind",e.kind);
+   row.set("epoch",e.epoch);row.set("thread",e.thread);row.set("mailbox",e.mailbox);
+   row.set("message",e.message);row.set("parent",e.parent);events.call<void>("push",row);
+  }
+  out.set("clock",std::string("performance.timeOrigin+performance.now"));
+  out.set("capacity",CloudHandoff::Capacity);out.set("reserved",reserved);out.set("pending",pending);
+  out.set("dropped",CloudHandoff::Dropped().load(std::memory_order_relaxed));out.set("epoch",CloudHandoff::Epoch());
+  out.set("events",events);return out;
+ }));
+#endif
  function("setNativeTimingEnabled", &CloudCpuTiming::SetEnabled);
  function("nativeCpuTiming", optional_override([]() {
   auto snapshot = val::object();

@@ -1,6 +1,8 @@
+import {HandoffTrace} from './handoff.mjs';
+
 // PS2 GS compute renderer. One bounded native request at a time; no software path.
 export class Ps2Gpu {
- constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;this.pending=0;this.timingEnabled=false;this.timingEpoch=null;}
+ constructor(core,onError){this.core=core;this.onError=onError;this.module=null;this.chain=Promise.resolve();this.closed=false;this.error=null;this.buffer=0;this.capacity=0;this.ackWords=null;this.pending=0;this.timingEnabled=false;this.timingEpoch=null;this.handoff=null;}
  async initialize(canvas){this.initializing=this.open(canvas);return this.initializing;}
  async open(canvas){
   if(!navigator.gpu)throw new Error('PlayStation 2 requires device WebGPU.');
@@ -26,8 +28,11 @@ export class Ps2Gpu {
   enabled=!!enabled&&!this.closed;
   if(enabled===this.timingEnabled&&epoch===this.timingEpoch)return;
   this.timingEnabled=enabled;this.timingEpoch=epoch;
+  if(enabled&&!this.handoff)this.handoff=new HandoffTrace();
+  this.handoff?.setEnabled(enabled,epoch);
   if(this.module&&!this.closed)this.module._gpu_set_timing(enabled?1:0);
  }
+ handoffSnapshot(){return this.handoff?.snapshot()??null;}
  sampleTiming(){
   const m=this.module;if(this.closed||!m?._gpu_has_timestamps)return null;
   return {supported:!!m._gpu_has_timestamps(),count:m._gpu_compute_samples(),ms:m._gpu_compute_ms()};
@@ -37,8 +42,10 @@ export class Ps2Gpu {
   if(size>this.capacity){if(this.buffer)this.module._free(this.buffer);this.capacity=Math.max(size,4*1024*1024);this.buffer=this.module._malloc(this.capacity);if(!this.buffer)throw new Error('PS2 graphics allocation failed.');}
   return this.buffer;
  }
- nativeCall(op,pointer,size,output,ack){
+ nativeCall(op,pointer,size,output,ack,request=0,message=0,nativeEpoch=0){
   if(this.closed||!this.core)return; // A terminated GS worker may have a queued proxy call.
+  const handoff=this.timingEnabled&&request?this.handoff:null,hostEpoch=this.timingEpoch;
+  if(handoff)handoff.mark('native_enter',request,message,nativeEpoch,hostEpoch);
   const timing=this.core.cloudTimings,epoch=timing?.epoch;
   const copyStart=timing?.begin()??null;
   // Finish the input copy before the native proxy returns. An idle GPU buffer
@@ -51,6 +58,7 @@ export class Ps2Gpu {
     this.module.HEAPU8.set(this.core.HEAPU8.subarray(pointer,pointer+size),staged);
    }else if(size)bytes=this.core.HEAPU8.slice(pointer,pointer+size);
   }catch(error){copyError=error;}
+  if(handoff)handoff.mark('copy_end',request,message,nativeEpoch,hostEpoch);
   this.pending++;
   if(copyStart!==null)timing.record('gpuSubmit',copyStart,epoch);
   const queued=timing?.begin()??null;
@@ -58,9 +66,11 @@ export class Ps2Gpu {
    // Memory growth replaces the shared buffer; refresh before acknowledging.
    const buffer=this.core.HEAPU8.buffer;
    if(this.ackWords?.buffer!==buffer)this.ackWords=new Int32Array(buffer);
+   if(handoff)handoff.mark('ack_publish',request,message,nativeEpoch,hostEpoch);
    const words=this.ackWords;Atomics.store(words,ack>>>2,value);Atomics.notify(words,ack>>>2);
   };
   this.chain=this.chain.then(async()=>{
+   if(handoff)handoff.mark('chain_enter',request,message,nativeEpoch,hostEpoch);
    if(copyError)throw copyError;
    if(this.closed||this.error)throw this.error||new Error('PS2 graphics has closed.');
    if(queued!==null){timing.record('bridge',queued,epoch);timing.gpuCall(epoch);}
@@ -68,6 +78,7 @@ export class Ps2Gpu {
    const m=this.module,buffer=staged??this.reserve(Math.max(size,op===7?4*1024*1024:0));
    if(bytes)m.HEAPU8.set(bytes,buffer);
    let result=1,display=false;
+   if(handoff)handoff.mark('dispatch_begin',request,message,nativeEpoch,hostEpoch);
    switch(op){
     case 1:m._gpu_write(buffer,size/4);break;
     case 2:m._gpu_image(buffer,size);break;
@@ -94,19 +105,22 @@ export class Ps2Gpu {
     case 10:if(size!==4*1024*1024)throw new Error('Invalid PS2 snapshot seed.');m._gpu_seed_download_snapshot(buffer,size);break;
     default:throw new Error('Invalid PS2 graphics command.');
    }
+   if(handoff)handoff.mark('dispatch_end',request,message,nativeEpoch,hostEpoch);
    if(submitStart!==null){
     if(op===1||op===2||op===3||op===8)timing.record('gpuSubmit',submitStart,epoch);
     else if(op===7||op===9)timing.record('gpuWait',submitStart,epoch);
    }
    if(display){
     const waitStart=timing?.begin()??null;
+    if(handoff)handoff.mark('gpu_wait_begin',request,message,nativeEpoch,hostEpoch);
     await m.ccall('gpu_wait',null,[],[],{async:true});
+    if(handoff)handoff.mark('gpu_wait_end',request,message,nativeEpoch,hostEpoch);
     if(waitStart!==null)timing.record('gpuWait',waitStart,epoch);
    }
    if(this.error)throw this.error;
    if(display&&result===2)timing?.present(epoch);
    finish(result);
-  }).catch(error=>{this.fail(error);finish(-1);}).finally(()=>{this.pending--;});
+  }).catch(error=>{this.fail(error);finish(-1);}).finally(()=>{this.pending--;if(handoff)handoff.mark('request_final',request,message,nativeEpoch,hostEpoch);});
  }
  dispose(){
   if(this.closePromise)return this.closePromise;this.setTimingEnabled(false);this.closed=true;

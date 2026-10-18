@@ -251,3 +251,4 @@ subprocess.run([sys.executable, str(here / 'patch-gs-registers.py'), str(root)],
 subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], check=True)
 # Batch only contiguous ordinary V4-32 unpack; preserve the FIFO/tag machinery.
 subprocess.run([sys.executable, str(here / 'patch-vif-bulk.py'), str(root)], check=True)
+subprocess.run([sys.executable, str(here / 'patch-handoff.py'), str(root)], check=True)

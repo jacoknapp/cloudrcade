@@ -2,6 +2,9 @@
 #pragma once
 #include "gs/GSHandler.h"
 #include "CloudCpuTiming.h"
+#ifdef CLOUD_HANDOFF_DIAGNOSTIC
+#include "CloudHandoffTrace.h"
+#endif
 #include "CloudReadbackRange.h"
 #include "states/MemoryStateFile.h"
 #include <emscripten.h>
@@ -30,12 +33,23 @@ class CGSH_WebGPU final : public CGSHandler {
  }
  int CallUntimed(int op, const void* data, uint32 size, void* output) {
   std::atomic<int> done{0};
+#ifdef CLOUD_HANDOFF_DIAGNOSTIC
+  const auto diagnosticEpoch=CloudHandoff::Epoch();
+  const auto diagnosticRequest=(diagnosticEpoch&1)?CloudHandoff::Id():0;
+  const auto diagnosticMessage=(diagnosticEpoch&1)?CloudHandoff::CurrentMessage():0;
+  CloudHandoff::Record(diagnosticEpoch,CloudHandoff::BridgePost,0,diagnosticRequest,diagnosticMessage);
+  MAIN_THREAD_EM_ASM({ Module.cloudGpu.nativeCall($0,$1,$2,$3,$4,$5,$6,$7); },op,data,size,output,&done,diagnosticRequest,diagnosticMessage,diagnosticEpoch);
+#else
   MAIN_THREAD_EM_ASM({ Module.cloudGpu.nativeCall($0,$1,$2,$3,$4); },op,data,size,output,&done);
+#endif
   const auto end=emscripten_get_now()+65000;
   while(done.load()==0) {
    if(emscripten_get_now()>end) throw std::runtime_error("PS2 graphics timed out.");
    emscripten_futex_wait(&done,0,1000);
   }
+#ifdef CLOUD_HANDOFF_DIAGNOSTIC
+  CloudHandoff::Record(diagnosticEpoch,CloudHandoff::BridgeReturn,0,diagnosticRequest,diagnosticMessage);
+#endif
   if(done.load()<0) throw std::runtime_error("PS2 WebGPU operation failed.");
   return done.load();
  }
