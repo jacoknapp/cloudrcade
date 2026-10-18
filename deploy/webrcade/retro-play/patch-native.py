@@ -217,3 +217,4 @@ path.write_text(text)
 import subprocess
 subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
+subprocess.run([sys.executable, str(here / 'patch-vu-flags.py'), str(root)], check=True)
