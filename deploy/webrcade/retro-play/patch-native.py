@@ -94,6 +94,17 @@ edit('Source/CMakeLists.txt', 'LIST(APPEND PROJECT_LIBS xxHash::xxhash)',
      ' target_compile_options(xxhash PRIVATE "-msimd128")\n'
      'endif()')
 
+# Keep the exact page-comparison SIMD isolated from all existing core sources.
+for name in ['h', 'cpp']:
+    (root / ('Source/CloudInstructionPage.' + name)).write_bytes(
+        (here / ('native/CloudInstructionPage.' + name)).read_bytes())
+edit('Source/CMakeLists.txt', '\tee/EeExecutor.cpp',
+     '\tCloudInstructionPage.cpp\n\tee/EeExecutor.cpp')
+with (root / 'Source/CMakeLists.txt').open('a') as stream:
+    stream.write('\nif(EMSCRIPTEN)\n set_source_files_properties(CloudInstructionPage.cpp PROPERTIES COMPILE_OPTIONS "-msimd128")\nendif()\n')
+edit('Source/ee/EeExecutor.h', '#include <optional>',
+     '#include <optional>\n#ifdef __EMSCRIPTEN__\n#include "../CloudInstructionPage.h"\n#endif')
+
 # Browsers cannot protect EE RAM pages to catch writes to compiled code. Games
 # replace executable overlays and call FlushCache before running the new code.
 # Compare only active instruction ranges at that safe point; unchanged blocks
@@ -105,16 +116,21 @@ edit('Source/ee/EeExecutor.h', '\tvoid Reset() override;', '''#ifdef __EMSCRIPTE
 edit('Source/ee/EeExecutor.h', '\tCachedBlockMap m_cachedBlocks;', '''\tCachedBlockMap m_cachedBlocks;
 #ifdef __EMSCRIPTEN__
  struct InstructionPage {
-  uint128 hash;
+  uint128 hash = {};
+  std::unique_ptr<CloudInstructionPage> snapshot;
   std::set<uint32> entries;
  };
  std::map<uint32, uint128> m_instructionHashes;
  std::map<uint32, InstructionPage> m_instructionPages;
+ // Bound extra host memory on phones; all remaining pages retain page hashes.
+ static constexpr uint32 MAX_INSTRUCTION_SNAPSHOTS = 512;
+ uint32 m_instructionSnapshotCount = 0;
 #endif''')
 edit('Source/ee/EeExecutor.cpp', '\tm_cachedBlocks.clear();', '''\tm_cachedBlocks.clear();
 #ifdef __EMSCRIPTEN__
  m_instructionHashes.clear();
  m_instructionPages.clear();
+ m_instructionSnapshotCount = 0;
 #endif''')
 edit('Source/ee/EeExecutor.cpp', '\tmemcpy(&hash, &xxHash, sizeof(xxHash));', '''\tmemcpy(&hash, &xxHash, sizeof(xxHash));
 #ifdef __EMSCRIPTEN__
@@ -124,8 +140,14 @@ edit('Source/ee/EeExecutor.cpp', '\tmemcpy(&hash, &xxHash, sizeof(xxHash));', ''
    auto found = m_instructionPages.find(page);
    if(found == m_instructionPages.end()) {
     InstructionPage entry;
-    const auto actual = XXH3_128bits(m_ram + page, 0x1000);
-    memcpy(&entry.hash, &actual, sizeof(actual));
+    if(m_instructionSnapshotCount < MAX_INSTRUCTION_SNAPSHOTS) {
+     entry.snapshot = std::make_unique<CloudInstructionPage>();
+     entry.snapshot->Assign(m_ram + page);
+     ++m_instructionSnapshotCount;
+    } else {
+     const auto actual = XXH3_128bits(m_ram + page, 0x1000);
+     memcpy(&entry.hash, &actual, sizeof(actual));
+    }
     found = m_instructionPages.emplace(page, std::move(entry)).first;
    }
    found->second.entries.insert(start);
@@ -151,8 +173,10 @@ edit('Source/ee/EeExecutor.cpp',
    if(!HasBlockAt(*entry)) entry = entries.erase(entry);
    else ++entry;
   }
-  if(entries.empty()) it = m_instructionPages.erase(it);
-  else ++it;
+  if(entries.empty()) {
+   if(it->second.snapshot) --m_instructionSnapshotCount;
+   it = m_instructionPages.erase(it);
+  } else ++it;
  }
 #endif''')
 with (root / 'Source/ee/EeExecutor.cpp').open('a') as stream:
@@ -161,16 +185,22 @@ with (root / 'Source/ee/EeExecutor.cpp').open('a') as stream:
 void CEeExecutor::SyncInstructionCache()
 {
  std::vector<std::pair<uint32, uint32>> changed;
- // Most flushes only write back data. Hash each compiled code page once,
- // then inspect instructions only on pages whose bytes changed.
+ // Every flush still checks every compiled page, covering direct generated
+ // stores, DMA and HLE writes without write hooks. Bounded exact copies avoid
+ // hashing unchanged pages; excess pages use the existing hash filter.
  for(auto& pair : m_instructionPages)
  {
   auto& page = pair.second;
-  const auto actual = XXH3_128bits(m_ram + pair.first, 0x1000);
   uint128 hash;
-  memcpy(&hash, &actual, sizeof(actual));
-  if(page.hash == hash) continue;
-  page.hash = hash;
+  if(page.snapshot) {
+   if(page.snapshot->Equals(m_ram + pair.first)) continue;
+   page.snapshot->Assign(m_ram + pair.first);
+  } else {
+   const auto actual = XXH3_128bits(m_ram + pair.first, 0x1000);
+   memcpy(&hash, &actual, sizeof(actual));
+   if(page.hash == hash) continue;
+   page.hash = hash;
+  }
   for(const auto start : page.entries)
   {
    const auto* block = FindBlockStartingAt(start);

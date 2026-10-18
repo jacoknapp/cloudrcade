@@ -105,6 +105,11 @@ Generate with `--code-cache` and run `tests/browser_webrcade_ps2.cjs` with
 instruction replacement across overlapping entry points in the real WASM core.
 The probe paints a fixed success color; the normal fixture verifies animation.
 
+The bounded exact instruction-page snapshot fixture is documented in
+[tests/fixtures/ps2-page-snapshot/README.md](../../../tests/fixtures/ps2-page-snapshot/README.md).
+It checks the actual coherence patch, the 2MiB snapshot cap/hash fallback and
+ordinary target-local SIMD code generation without running a browser.
+
 The builder requires Docker, Git, Node22+, npm and Python3.10+. `WORK` is owned
 disposable scratch; `OUT` must be a new directory (default `release/ps2`).
 `PS2_BUILD_JOBS` defaults to4. Pinned Play!/submodule revisions, Emscripten SDK
