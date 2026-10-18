@@ -249,3 +249,4 @@ subprocess.run([sys.executable, str(here / 'patch-movie.py'), str(root)], check=
 subprocess.run([sys.executable, str(here / 'patch-cpu-timing.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-registers.py'), str(root)], check=True)
 subprocess.run([sys.executable, str(here / 'patch-gs-readback.py'), str(root)], check=True)
+subprocess.run([sys.executable, str(here / 'patch-vu-newest-slot.py'), str(root)], check=True)
