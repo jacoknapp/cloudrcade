@@ -29,7 +29,6 @@ const schedulerTrials=Number(process.env.PS2_AUDIO_SCHEDULER_TRIALS||0),expectFr
   }
   await context.addInitScript(()=>{
    let config;Object.defineProperty(window,'WrcadCloudConfig',{configurable:true,get:()=>config,set:v=>{config={...v,enabled:false,accessAllowed:false,autoRedirect:false,storagePrefix:'ps2-audio-replay',dropbox:{enabled:false}};}});
-   localStorage.setItem('ps2-audio-replay.ps2.enabled.v1','1');
    const ids=new WeakMap(),counts=new WeakMap();let next=0;
    window.audioReplayFixture={starts:[],duplicates:[],nonzero:0,created:[],stalls:[],armStall:false};
    const create=AudioContext.prototype.createBuffer;

@@ -36,7 +36,7 @@ A URL feed describes where its games and assets are served. Importing it does no
 
 The operator's `WEBRCADE_FEED_URL` supplies the native Default feed. Browser-selected or imported feeds can coexist with it. When troubleshooting a missing new ROM, confirm that you are viewing the operator's refreshed feed rather than another imported feed.
 
-On a PS2 beta deployment, PS2 games also require **Settings → Experimental Settings → Enable PlayStation 2 (experimental)** followed by **OK**. This browser preference starts off and filters PS2 games from the library while disabled. It does not delete those games or their saves.
+PlayStation 2 games are available by default when the core is packaged. There is no enable setting; old disabled preferences are ignored and existing saves are preserved.
 
 ## Install the web app
 
@@ -58,4 +58,4 @@ Use the same browser/profile when relying on local saves or offline files. Priva
 
 A browser may require an explicit tap to start audio. Keep the game tab in the foreground for predictable timing. Rotation releases held inputs and switches to the appropriate saved touch layout. Some emulator apps require cross-origin isolation for shared memory; keep the runtime's security headers intact at your proxy.
 
-GameCube needs hardware WebGPU, shared-memory isolation and sufficient device memory; its core reserves 768 MiB of WASM memory before other browser/GPU use. The current PS2 beta needs hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). A browser that runs cartridge games may not meet these requirements, and meeting them does not guarantee a particular game's speed or compatibility.
+GameCube needs hardware WebGPU, shared-memory isolation and sufficient device memory; its core reserves 768 MiB of WASM memory before other browser/GPU use. PlayStation 2 needs hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). A browser that runs cartridge games may not meet these requirements, and meeting them does not guarantee a particular game's speed or compatibility.

@@ -127,12 +127,13 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         assert config['gamecubeUrl'] == ('/experimental/gamecube/' if gamecube else '')
         assert config['ps2Url'] == '/experimental/ps2/'
         with get('/experimental/ps2/') as response:
-            assert b'PlayStation 2 (experimental)' in response.read()
+            page=response.read()
+            assert b'<h1>PlayStation 2</h1>' in page and b'PlayStation 2 (experimental)' not in page
             assert response.headers['Cross-Origin-Opener-Policy'] == 'same-origin'
             assert response.headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
         with get('/experimental/ps2/core-info.json') as response:
             ps2_info=json.load(response)
-            assert ps2_info['experimental'] and ps2_info['binaryOrigin']=='cloudrcade-linux-source-build'
+            assert 'experimental' not in ps2_info and ps2_info['binaryOrigin']=='cloudrcade-linux-source-build'
             assert ps2_info['streamCacheBytes']==16*1024**2
             native_lock=json.loads(Path('deploy/webrcade/retro-play/native-build.json').read_text())
             assert ps2_info['nativeBuild']==native_lock and ps2_info['artifacts']==native_lock['artifacts']

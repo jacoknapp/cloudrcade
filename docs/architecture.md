@@ -25,7 +25,7 @@ and runtime keys are never committed. To build locally:
 python3 scripts/core-cache.py prepare 3ds
 python3 scripts/core-cache.py prepare psp
 python3 scripts/core-cache.py prepare gamecube
-# Required by the Dockerfile on beta/ps2-core:
+# Required by the Dockerfile:
 python3 scripts/core-cache.py prepare ps2
 docker build --target web -t cloudrcade:local .
 ```
@@ -67,10 +67,12 @@ or Docker enable flag. The standard `web` release includes the
 with no experimental opt-in. `main` publishes `latest` for AMD64 and ARM64;
 GameCube renders in the client browser using WebGPU on its device GPU. The
 historical `/experimental/gamecube/` launch URL remains compatible with existing
-links. The `beta/ps2-core` branch adds the opt-in
-[Play! PS2 core](../deploy/webrcade/retro-play/README.md); its image alias is
-`beta-ps2-core` and its publication is AMD64-only. PS2 availability in this branch
-does not imply inclusion in the stable image.
+links. The standard image also includes the
+[PlayStation 2 core](../deploy/webrcade/retro-play/README.md), available by default
+with no enable setting. Its optional performance readout lives in Core Settings.
+The historical `/experimental/ps2/` launch URL remains compatible. The
+`beta/ps2-core` candidate branch publishes `beta-ps2-core` for AMD64 only;
+main publishes the standard cores for both AMD64 and ARM64.
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 
@@ -93,7 +95,7 @@ pointers retain the original carousel. Browser regression:
 ## Reusing unchanged cores in CI
 
 The release workflow maintains separate exact-input caches for the GameCube,
-3DS and PSP packages, plus PS2 on `beta/ps2-core`, including their corresponding
+3DS, PSP and PlayStation 2 packages, including their corresponding
 source distributions.
 `scripts/core-cache.py` hashes each core directory, upstream pins, patches,
 build/packaging scripts, SDK locks and shared inputs. It verifies a complete

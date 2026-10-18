@@ -176,7 +176,7 @@ def prepare(work, out):
             tar.add(HERE.parent / 'retro-dolphin/sdk', arcname='ps2/save-sdk', filter=source_filter)
             tar.add(common / 'src', arcname='ps2/common/src', filter=source_filter)
             tar.add(common / 'LICENSE', arcname='ps2/common/LICENSE')
-        (app / 'core-info.json').write_text(json.dumps({**LOCK, 'experimental': True, 'binaryOrigin': 'cloudrcade-linux-source-build',
+        (app / 'core-info.json').write_text(json.dumps({**LOCK, 'binaryOrigin': 'cloudrcade-linux-source-build',
             'nativeInputSha256': native_key(), 'artifacts': {name: sha(artifacts / name) for name in names},
             'nativeBuild': native_lock,
             'sourceSha256': sha(archive), 'streamChunkBytes': 512 * 1024, 'streamCacheBytes': 16 * 1024 * 1024}, indent=2) + '\n')

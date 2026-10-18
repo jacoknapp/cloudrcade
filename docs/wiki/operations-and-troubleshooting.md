@@ -61,7 +61,7 @@ Do not delete data or clear browser storage as an initial troubleshooting step. 
 
 ## Upgrade and rollback
 
-The stable public image is `ghcr.io/jacoknapp/cloudrcade:latest`. Pushes to `main` publish `latest`; configured beta branches publish separate aliases such as `beta-ps2-core`. Pull requests validate without publishing. Published builds also have commit-specific `sha-<full-commit>` tags, and `v*` tag pushes publish matching image tags. Pin a known tag or digest when reproducibility matters. PS2 remains an opt-in beta; use the explicitly selected beta image for its qualification work.
+The stable public image is `ghcr.io/jacoknapp/cloudrcade:latest`. Pushes to `main` publish `latest`; configured beta branches publish separate aliases such as `beta-ps2-core`. Pull requests validate without publishing. Published builds also have commit-specific `sha-<full-commit>` tags, and `v*` tag pushes publish matching image tags. Pin a known tag or digest when reproducibility matters. PlayStation 2 is included in stable images without an enable setting; beta aliases remain separate candidate channels.
 
 Stable images target Linux AMD64 and Linux ARM64; beta-branch images target AMD64 only. Use a 64-bit OS on an ARM server
 or Raspberry Pi; a 32-bit ARM OS is not supported. Docker automatically pulls
@@ -91,7 +91,7 @@ python3 scripts/restore-qualified-cores.py
 python3 scripts/core-cache.py prepare 3ds
 python3 scripts/core-cache.py prepare psp
 python3 scripts/core-cache.py prepare gamecube
-# Required by the Dockerfile on this PS2 beta branch:
+# Required by the Dockerfile:
 python3 scripts/core-cache.py prepare ps2
 docker build --target web -t cloudrcade:local .
 ```
@@ -116,7 +116,7 @@ Check `config/data/last-scan.json`, `config/data/refresh-errors.json` and the se
 | --- | --- |
 | Empty first library | Startup scan still running; supported folder/extension; mounted paths and read permissions; logs |
 | New game absent | Selected feed, last successful scan, unsupported/invalid format, 3DS exclusions, duplicate content |
-| PS2 folder absent | Image includes the PS2 beta core, valid PS2 inputs, successful scan, and the player's PlayStation 2 experimental setting is enabled |
+| PS2 folder absent | Image includes the PlayStation 2 core, valid PS2 inputs and a successful scan; no player enable setting is required |
 | Old feed persists after removal | Empty or failed scans deliberately retain the last feed; inspect logs rather than deleting state |
 | PlayStation scan fails | Valid BIOS set, CUE track references, chdman conversion output, writable data space |
 | Feed loads but ROM fails | Generated URL, gateway authorization, binary MIME/range responses, external-feed CORS and HTTPS |

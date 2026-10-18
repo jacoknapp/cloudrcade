@@ -39,7 +39,7 @@ While a game is running, tap the **‹** edge tab or pull it inward. The tab is 
 
 The game pauses during editing. Layouts save per platform and orientation in the browser, including separate GB/GBC/GBA layouts. Positions are screen-relative and clamped to the viewport. Editing works with controls switched off and preserves that visibility choice afterward. You cannot edit before a game is running.
 
-Buttons can overlap the game or sit below it; place them wherever you find comfortable. Moving buttons does not move the picture to follow them. Some systems, including PlayStation and the PS2 beta, use a default portrait picture area above the controls; PS2 uses the available safe viewport in landscape or with controls off. Saved button positions are restored without restricting them to the default bottom pad.
+Buttons can overlap the game or sit below it; place them wherever you find comfortable. Moving buttons does not move the picture to follow them. Some systems, including PlayStation and PlayStation 2, use a default portrait picture area above the controls; PS2 uses the available safe viewport in landscape or with controls off. Saved button positions are restored without restricting them to the default bottom pad.
 
 With Nextcloud or Dropbox connected as the save provider, saved layouts, tab positions, translucence, visibility, mute and DS/3DS view choices sync through the controller profile. Unsaved drags and Cancel do not publish a layout. Offline edits queue for the connected account and retry after reconnection. See [cloud preferences](saves-and-storage.md#history-and-controller-preferences).
 
@@ -65,7 +65,7 @@ The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator s
 
 GameCube is available when its core is packaged, without a player enable switch. Its **GameCube performance readout** is in **Core Settings**. Keyboard, gamepad and touch input include separate sticks and its own button layout. It requires device WebGPU; see [device requirements](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta).
 
-On the **PS2 beta**, open **Settings → Experimental Settings**, turn on **Enable PlayStation 2 (experimental)** and press **OK**. This and the separate **PS2 performance readout** start off; Cancel discards changes. Disabling PS2 hides its games and blocks direct launches while preserving saves and layouts. There is no Docker enable flag. PS2 controls include both analog sticks, D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu; Escape also opens its pause menu. Compatibility, rendering and speed remain experimental.
+PlayStation 2 is available by default with no player or Docker enable switch. The optional **PS2 performance readout** is in **Settings → Core Settings** and starts off; Cancel discards changes. PS2 controls include both analog sticks, D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu; Escape also opens its pause menu. Compatibility and speed vary by game and device.
 
 3DS uses native 1x resolution and the original console model by default. See [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) before changing settings expecting full-speed playback.
 

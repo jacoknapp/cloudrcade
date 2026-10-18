@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.0.1",
+    "date": "October 18, 2026",
+    "title": "PlayStation 2 available by default",
+    "changes": [
+      "PlayStation 2 is available without an enable switch, including browsers that previously disabled it.",
+      "PlayStation 2 uses its standard name throughout the library and launcher. Its optional performance readout is in Core Settings."
+    ]
+  },
+  {
     "version": "3.0.0",
     "date": "October 18, 2026",
     "title": "PS2 and GameCube improvements",

@@ -1,9 +1,10 @@
-# Experimental PlayStation 2 core
+# PlayStation 2 core
 
-On the PS2 beta, open **Settings → Experimental Settings**, turn on **Enable
-PlayStation 2 (experimental)** and press **OK**. The separate **PS2 performance
-readout** switch shows rendered FPS, emulation speed and WASM heap usage. Both
-switches default off, persist per browser/storage namespace, and honor Cancel.
+PlayStation 2 is available by default when its core is packaged. It has no
+player or Docker enable switch; old disabled preferences are ignored. Open
+**Settings → Core Settings** for the optional **PS2 performance readout**, which
+shows rendered FPS, emulation speed and WASM heap usage. It defaults off,
+persists per browser/storage namespace, and honors Cancel.
 Native GPU timestamp collection runs only while the performance readout is on
 and the game is running. Supported hardware exposes sampled compute-pass time;
 turning the readout off releases completed mappings and starts no new queries.
@@ -22,8 +23,7 @@ the first records across toggle epochs and count later drops without wrapping.
 Snapshots return published records only and report native slots still pending;
 they do not pause gameplay or add synchronization. Reloading the core starts a
 fresh buffer. Turning the readout off starts no new clock reads or ID allocation.
-There is no Docker enable flag. Disabling PS2 hides its library entries and
-blocks direct launches while retaining its saves and control layouts.
+Existing game/save identities and control layouts are preserved.
 
 The scanner reads ISO, CHD v5 and homebrew ELF files recursively under `PS2/`
 or `ps2/` on the ROM share, including `roms/` subdirectories. Existing game files
@@ -40,7 +40,7 @@ pinned Dawn WebGPU bindings and has no WebGL or software-adapter fallback.
 Save states include GS registers, VRAM, the palette and partial image transfers.
 HTTPS/localhost, cross-origin isolation and SharedArrayBuffer are required.
 The CPU module initially reserves256MiB and graphics module64MiB; both can grow.
-Compatibility, rendering and speed remain experimental. Homebrew tests do not
+Compatibility and speed vary by game and device. Homebrew tests do not
 establish commercial compatibility or physical-phone performance.
 
 The browser CPU keeps executable overlays coherent at guest `FlushCache` calls.
@@ -154,8 +154,7 @@ Play and return flow, including portrait/landscape frames extending60px beyond
 the visible parent window. PS2 picture sizing intersects that visible window;
 the default portrait controller reservation stays independent of moved controls.
 
-Beta builds publish `beta-ps2-core` for `linux/amd64` only. Main's architecture
-policy remains independent. This source directory contains no games, BIOS,
+Beta builds publish `beta-ps2-core` for `linux/amd64` only. Stable main images include PlayStation 2 for AMD64 and ARM64. This source directory contains no games, BIOS,
 keys, accounts or operator settings.
 
 The GS worker batches ordered register and image commands into bounded 4MiB
@@ -172,7 +171,7 @@ Each workgroup decodes a disjoint portion of one texture before rasterization;
 this reduces command and synchronization overhead while preserving texture data,
 palette selection, draw order and the existing raster tile size.
 
-When the experimental performance readout is enabled, its overlay shows last,
+When the optional performance readout is enabled, its overlay shows last,
 average and p95 presentation intervals, GPU command submission CPU time, GPU
 completion/readback wait, disc service time, input/layout work and bridge queue
 delay/call rate. Stage values are one-second averages per completed rendered

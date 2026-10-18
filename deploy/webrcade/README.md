@@ -9,7 +9,7 @@ terminate public HTTPS at your proxy, or place your certificates in `config/tls/
 ROMs and BIOS files are supplied by the operator. Place games under
 `./roms/<system>/roms/` (for example `nes/roms`) and BIOS files under
 `./roms/<system>/bios/`. The included 3DS and GameCube apps scan `./roms/3DS/`
-and `./roms/GameCube/` recursively; the PS2 beta scans `./roms/ps2/` and
+and `./roms/GameCube/` recursively; PlayStation 2 scans `./roms/ps2/` and
 `./roms/PS2/` recursively.
 
 `WEBRCADE_PUBLIC_URL` is the public HTTPS origin; `WEBRCADE_FEED_URL` selects the

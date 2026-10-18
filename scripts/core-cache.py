@@ -2,6 +2,7 @@
 """Exact-input release caches. No partial keys; validate every byte before reuse."""
 import argparse
 import ast
+import fnmatch
 import hashlib
 import json
 import os
@@ -116,8 +117,14 @@ def input_records(core, root=ROOT, revision=None):
     # Include new, nonignored files for local validation before a commit, too.
     command = (['git', 'ls-tree', '-rz', '--name-only', revision] if revision else
                ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'])
-    paths = subprocess.check_output([*command, '--', *INPUTS[core]], cwd=root)
-    names = sorted(set(p.decode() for p in paths.split(b'\0') if p and p.decode() not in NONBUILD_DOCS))
+    # ls-tree does not expand wildcard pathspecs like ls-files does. Filter the
+    # complete Git inventory consistently so historical native patch inputs
+    # cannot disappear from comparisons used to restore qualified artifacts.
+    paths = subprocess.check_output(command, cwd=root)
+    names = sorted({p.decode() for p in paths.split(b'\0') if p and
+                    p.decode() not in NONBUILD_DOCS and any(
+                        fnmatch.fnmatchcase(p.decode(), scope) or p.decode().startswith(scope + '/')
+                        for scope in INPUTS[core])})
     if not names:
         raise ValueError('No core inputs')
     records = {name: hashlib.sha256(read_at(root, name, revision)).hexdigest() for name in names}

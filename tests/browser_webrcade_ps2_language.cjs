@@ -8,7 +8,7 @@ if(!fixture)throw Error('PS2_LANGUAGE_ELF must be generated with ps2_homebrew.py
   for(const [locale,expected]of [['en-US',1],['fr-CA',2],['ja-JP',0],['zh-Hant-TW',10],['sv-SE',1]]){
    const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,locale,viewport:{width:390,height:844}});
    try{
-    await context.addInitScript(()=>{let config;Object.defineProperty(window,'WrcadCloudConfig',{configurable:true,get:()=>config,set(v){config={...v,enabled:false,autoRedirect:false,storagePrefix:'ps2_language_private'};}});localStorage.setItem('ps2_language_private.ps2.enabled.v1','1');});
+    await context.addInitScript(()=>{let config;Object.defineProperty(window,'WrcadCloudConfig',{configurable:true,get:()=>config,set(v){config={...v,enabled:false,autoRedirect:false,storagePrefix:'ps2_language_private'};}});});
     if(process.env.PS2_LANGUAGE_APP){const app=process.env.PS2_LANGUAGE_APP;for(const filename of ['host.mjs','language.mjs'])await context.route('**/'+filename,route=>route.fulfill({status:200,contentType:'text/javascript',body:fs.readFileSync(path.join(app,filename))}));for(const filename of ['Play.js','Play.wasm'])await context.route('**/core/'+filename,async route=>{const response=await route.fetch();await route.fulfill({response,body:fs.readFileSync(path.join(app,'core',filename))});});}
     await context.route('**/ps2-language-probe.elf',route=>{
      const bytes=fs.readFileSync(fixture),headers={'content-type':'application/octet-stream','content-length':String(bytes.length),etag:'"language-probe"'};

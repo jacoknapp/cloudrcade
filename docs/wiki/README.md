@@ -47,7 +47,7 @@ The release supplies the browser app, emulator integration and integrated scanne
 
 Desktop uses a carousel; phones and touch tablets use a compact full-viewport library. Games and controls vary by system. Speed and compatibility depend on the game, device and browser, particularly for 3DS. Test the game and its save behavior on the device you intend to use.
 
-GameCube requires hardware WebGPU on the player's device. On the PS2 beta, PlayStation 2 is separately enabled in **Settings → Experimental Settings** and starts off. See [device requirements and streaming](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta); beta availability does not establish game compatibility or phone performance.
+GameCube requires hardware WebGPU on the player's device. PlayStation 2 is available by default without an enable switch. See [device requirements and streaming](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta); availability does not establish game compatibility or phone performance.
 
 ## About these pages
 

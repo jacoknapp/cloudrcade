@@ -54,9 +54,9 @@ def patch_bundle(raw):
   b'location:"/experimental/gamecube/",background:"/experimental/gamecube/gamecube.svg",'
   b'thumbnail:"/experimental/gamecube/gamecube.svg",description:"GameCube browser core. Requires device WebGPU and HTTPS.",'
   b'validate:Je,extensions:["iso","gcm"],multiThreaded:!0,defaults:{rom:""}},')
- ps2_type=(b'{key:"play-ps2",alias:"ps2",name:"PlayStation 2 (experimental)",coreName:"Play!",slowExit:!0,'
+ ps2_type=(b'{key:"play-ps2",alias:"ps2",name:"PlayStation 2",coreName:"Play!",slowExit:!0,'
   b'location:"/experimental/ps2/",background:"/experimental/ps2/ps2.svg",thumbnail:"/experimental/ps2/ps2.svg",'
-  b'description:"Experimental PS2 browser core. Requires WebGL2 and HTTPS.",'
+  b'description:"PlayStation 2 browser core. Requires device WebGPU and HTTPS.",'
   b'validate:Je,extensions:["iso","chd","elf"],multiThreaded:!0,defaults:{rom:""}},')
  # A settings page like the pinned ones (same base class, row, label and switch
  # components), defined right after the Advanced page it follows.
@@ -69,14 +69,14 @@ def patch_bundle(raw):
  litcpu=b'(function(){try{return localStorage.getItem("wrcad.3ds.litcpu.v1")==="1"}catch(e){return!1}})()'
  gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")==="1"}catch(e){return!1}})()'
  gc_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)'
- ps2_enabled=b'(function(){try{return localStorage.getItem("wrcad.ps2.enabled.v1")==="1"}catch(e){return!1}})()'
  ps2_perf=b'(function(){try{return localStorage.getItem("wrcad.ps2.perf.v1")==="1"}catch(e){return!1}})()'
- ps2_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url&&'+ps2_enabled+b')'
+ ps2_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url)'
  page=(b'var WrcadCoreSettings=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
-  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
-  b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)?[[t.gcPerfRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
+  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.ps2PerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
+  b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)?[[t.gcPerfRef]]:[]),'
+  b'...('+ps2_available+b'?[[t.ps2PerfRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
   b'var n=this.gridComps,a=this.props.setFocusGridComps,i=this.props.isActive;i&&i!==e.isActive&&a(n)},'
-  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef;return['
+  b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef,p=this.ps2PerfRef,c=this.props.values,u=this.props.setValues;return['
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"3DS performance readout"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:r,onPad:function(e){return t.moveFocus(e.type,r)},onChange:function(e){'
   b'try{e.target.checked?localStorage.setItem("wrcad.3ds.perf.v1","1"):localStorage.removeItem("wrcad.3ds.perf.v1")}catch(x){}'
@@ -89,40 +89,31 @@ def patch_bundle(raw):
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"GameCube performance readout"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:g,onPad:function(e){return t.moveFocus(e.type,g)},onChange:function(e){'
   b'try{localStorage.setItem("wrcad.gamecube.perf.v1",e.target.checked?"1":"0")}catch(x){}'
-  b'n.forceUpdate()},checked:'+gcperf+b'}))):null'
+  b'n.forceUpdate()},checked:'+gcperf+b'}))):null,'
+  +ps2_available+b'?i.a.createElement(ka,null,i.a.createElement(Ta,null,"PS2 performance readout"),i.a.createElement(La,null,'
+  b'i.a.createElement(Va,{ref:p,onPad:function(e){return t.moveFocus(e.type,p)},onChange:function(e){u(j({},c,{ps2Perf:e.target.checked}))},checked:c.ps2Perf}))):null'
   b']},t}(_a);'
   b'WrcadCoreSettings.contextType=Wn;')
  icon=(b'data:image/svg+xml;base64,'+__import__('base64').b64encode(
   b'<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#FFFFFF">'
   b'<path d="M0 0h24v24H0z" fill="none"/><path d="M19.8 18.4L14 10.67V6.5l1.35-1.69c.26-.33.03-.81-.39-.81H9.04'
   b'c-.42 0-.65.48-.39.81L10 6.5v4.17L4.2 18.4c-.49.66-.02 1.6.8 1.6h14c.82 0 1.29-.94.8-1.6z"/></svg>'))
- tab=(b',...((window.WrcadCloudConfig&&(window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl))?[{image:"'+icon+b'",label:"Core Settings",content:i.a.createElement(WrcadCoreSettings,'
+ tab=(b',...((window.WrcadCloudConfig&&(window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl||window.WrcadCloudConfig.ps2Url))?[{image:"'+icon+b'",label:"Core Settings",content:i.a.createElement(WrcadCoreSettings,'
   b'{isActive:5===l,setFocusGridComps:d,values:c,setValues:g})}] : [])')
- experimental=(b'var WrcadPs2Experimental=function(e){function t(){var t;return(t=e.call(this)||this).enabledRef=i.a.createRef(),'
-  b't.perfRef=i.a.createRef(),t.gridComps=[[t.enabledRef],[t.perfRef]],t}C(t,e);var n=t.prototype;'
-  b'n.componentDidUpdate=function(e){this.props.isActive&&this.props.isActive!==e.isActive&&this.props.setFocusGridComps(this.gridComps)};'
-  b'n.render=function(){var t=this.context.focusGrid,r=this.enabledRef,p=this.perfRef,c=this.props.values,u=this.props.setValues;return['
-  b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"Enable PlayStation 2 (experimental)"),i.a.createElement(La,null,'
-  b'i.a.createElement(Va,{ref:r,onPad:function(e){return t.moveFocus(e.type,r)},onChange:function(e){u(j({},c,{ps2Enabled:e.target.checked}))},checked:c.ps2Enabled}))),'
-  b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"PS2 performance readout"),i.a.createElement(La,null,'
-  b'i.a.createElement(Va,{ref:p,onPad:function(e){return t.moveFocus(e.type,p)},onChange:function(e){u(j({},c,{ps2Perf:e.target.checked}))},checked:c.ps2Perf})))'
-  b']};return t}(_a);WrcadPs2Experimental.contextType=Wn;')
- tab+=(b',...((window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url)?[{image:"'+icon+b'",label:"Experimental Settings",'
-  b'content:i.a.createElement(WrcadPs2Experimental,{isActive:((window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl)?6:5)===l,setFocusGridComps:d,values:c,setValues:g})}]:[])')
  patched = raw.replace(old,new).replace(marker,hook+marker).replace(cloud_tab,cloud_tab+cloud_hook).replace(
   b'"'+default_feed+b'"',b'(new URL(window.WrcadCloudConfig&&window.WrcadCloudConfig.feedUrl||"/content/feeds/combined.json",location.href).href)' ).replace(
   ds_type,psp_type+b'...('+gc_available+b'?['+gamecube_type.rstrip(b',')+b'] : []),'+b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)?['+n3ds_type.rstrip(b',')+b'] : []),'+ds_type).replace(ds_alias,ds_alias+b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)&&st(rt,"3ds","retro-azahar"),'+gc_available+b'&&st(rt,"gamecube","retro-dolphin"),st(rt,"psp","retro-ppsspp"),').replace(
-  after_advanced,after_advanced+page+experimental).replace(
+  after_advanced,after_advanced+page).replace(
   last_tab,last_tab[:-len(b']})')]+tab+b']})')
  patched=patched.replace(psp_type,psp_type+b'...('+ps2_available+b'?['+ps2_type.rstrip(b',')+b'] : []),').replace(
   b'st(rt,"psp","retro-ppsspp"),',b'st(rt,"psp","retro-ppsspp"),'+ps2_available+b'&&st(rt,"ps2","play-ps2"),')
- # Native OK applies both experimental preferences. Cancel discards edits.
+ # Native OK applies the optional performance readout. Cancel discards edits.
  values=b'expApps:Yt.isExpAppsEnabled(),vsync:'
  save=b's.expApps!==c.expApps?n.showAlertScreen'
  assert patched.count(values)==patched.count(save)==1,'Unexpected settings save'
- patched=patched.replace(values,b'ps2Enabled:'+ps2_enabled+b',ps2Perf:'+ps2_perf+b','+values).replace(save,
-  b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url&&(s.ps2Enabled!==c.ps2Enabled||s.ps2Perf!==c.ps2Perf))?'
-  b'(function(){try{localStorage.setItem("wrcad.ps2.enabled.v1",c.ps2Enabled?"1":"0");localStorage.setItem("wrcad.ps2.perf.v1",c.ps2Perf?"1":"0")}catch(e){}'
+ patched=patched.replace(values,b'ps2Perf:'+ps2_perf+b','+values).replace(save,
+  b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url&&s.ps2Perf!==c.ps2Perf)?'
+  b'(function(){try{localStorage.setItem("wrcad.ps2.perf.v1",c.ps2Perf?"1":"0")}catch(e){}'
   b'return Yt.save().finally((function(){window.location.reload()}))})():'+save)
  parse=b'_parseFeed=function(e){var t=this,n=Pt.instance;'
  assert patched.count(parse)==1,'Unexpected feed parser'

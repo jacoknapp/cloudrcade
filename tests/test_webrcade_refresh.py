@@ -27,6 +27,7 @@ class RefreshTests(unittest.TestCase):
   old=[i for c in before['categories'] for i in c['items']];new=[i for c in after['categories'] for i in c['items']]
   self.assertEqual([i for i in new if i['type']!='ps2'],old)
   games=[i for i in new if i['type']=='ps2'];self.assertEqual(len(games),1);self.assertTrue(games[0]['props']['uid'].startswith('cloudrcade-ps2-'))
+  self.assertEqual([c['title'] for c in after['categories'] if any(i['type']=='ps2' for i in c['items'])],['PlayStation 2'])
   self.assertEqual(m.ps2_game(path),identity)
  def test_gamecube_header_without_disc_hash(self):
   self.put('GameCube/game.iso',b'TEST01'+bytes(22)+bytes.fromhex('c2339f3d'))

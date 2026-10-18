@@ -2,7 +2,6 @@ import {remoteDisc,localDisc,DiscDevice,CHUNK,THRESHOLD} from './disc.mjs';
 import {Ps2Saves} from './saves.mjs';
 import {inputState,inputWriter,KEYS} from './input.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
-import {enabled} from './preferences.mjs';
 import {Ps2Performance} from './perf.mjs';
 import {Ps2Gpu} from './gpu.mjs';
 import {pictureBounds,viewportKey} from './viewport.mjs';
@@ -123,7 +122,6 @@ function fitCanvas(force=true){
  for(const [name,value]of Object.entries({position:'fixed',width:rect.width+'px',height:rect.height+'px',left:rect.left+'px',top:rect.top+'px',transform:'none'}))if(canvas.style[name]!==value)canvas.style[name]=value;
 }
 async function boot(selected){
- if(!enabled())throw new Error('Enable PlayStation 2 in Settings → Experimental Settings before launching.');
  window.WrcadCoreCrash?.begin();journalStarted=true;
  const ownedGeneration=++generation;
  disc=selected;status('Loading PlayStation 2 core…');get('file').disabled=true;
@@ -197,6 +195,6 @@ get('retry-save').onclick=()=>{get('failure').hidden=true;void exit().catch(()=>
 try{
  const encoded=new URLSearchParams(location.search).get('props');if(encoded)props=JSON.parse(decodeURIComponent(atob(encoded)));
  if(embedded){if(frameElement)frameElement.style.display='block';parent.postMessage('appLoaded',location.origin);}
- if(props.rom){document.body.classList.add('library');if(!enabled())throw new Error('Enable PlayStation 2 in Settings → Experimental Settings before launching.');const selected=await remoteDisc(props.rom,{signal:launchAbort.signal});if(closing)selected.close();else await boot(selected);}
- else{get('launcher').hidden=false;if(enabled())status('Select a PS2 game.');else{get('file').disabled=true;status('Enable PlayStation 2 in Settings → Experimental Settings before launching.');}}
+ if(props.rom){document.body.classList.add('library');const selected=await remoteDisc(props.rom,{signal:launchAbort.signal});if(closing)selected.close();else await boot(selected);}
+ else{get('launcher').hidden=false;status('Select a PS2 game.');}
 }catch(error){if(!closing)failure(error);}

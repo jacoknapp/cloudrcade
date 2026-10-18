@@ -24,12 +24,12 @@ GameCube is also enabled by default. It requires HTTPS and browser WebGPU suppor
 compatibility and performance depend on the game and device. See the
 [GameCube guide](deploy/webrcade/retro-dolphin/README.md).
 
-The **PS2 beta** adds Play! under **Settings → Experimental Settings**. Enable
-PlayStation 2 and optionally its performance readout, then press OK. Both switches
-default off. Existing ISO/CHD/homebrew ELF files under `roms/PS2/` or `roms/ps2/`
+PlayStation 2 is available by default and requires HTTPS and device WebGPU.
+Its optional **PS2 performance readout** is in **Settings → Core Settings** and
+defaults off. Existing ISO/CHD/homebrew ELF files under `roms/PS2/` or `roms/ps2/`
 are scanned in place. No external PS2 BIOS is needed. Large discs stream with a
-16 MiB cache; compatibility and speed vary. The `beta-ps2-core` image is AMD64
-only. See the [PS2 beta guide](deploy/webrcade/retro-play/README.md).
+16 MiB cache; compatibility and speed vary. See the
+[PlayStation 2 guide](deploy/webrcade/retro-play/README.md).
 
 <a id="nextcloud-and-sso"></a>
 
@@ -37,7 +37,7 @@ Nextcloud and Dropbox can sync supported game saves, state slots, controller pre
 
 <a id="internet-connection-for-streamed-games"></a>
 
-**Keep a connection while playing streamed discs or large 3DS ROMs.** This includes streamed PlayStation, PSP, GameCube and PS2 beta discs. Loading the first screen does not download the whole game. **3DS shaders cache as they are created:** new shaders can cause hitches, and many new shaders together can cause longer pauses. Performance varies by game, browser and device.
+**Keep a connection while playing streamed discs or large 3DS ROMs.** This includes streamed PlayStation, PSP, GameCube and PlayStation 2 discs. Loading the first screen does not download the whole game. **3DS shaders cache as they are created:** new shaders can cause hitches, and many new shaders together can cause longer pauses. Performance varies by game, browser and device.
 
 <a id="run-with-docker"></a>
 

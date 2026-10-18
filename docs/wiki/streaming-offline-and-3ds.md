@@ -15,7 +15,7 @@ For an ordinary cartridge game, the browser usually downloads the required game 
 
 ## Streamed games require a connection
 
-**Streamed games require a connection to their game server during play.** This includes streamed PlayStation, GameCube and PS2 beta discs and large PSP/3DS files. They fetch game bytes on demand. Startup success does not mean the rest of the file is available offline; keep access to the server throughout play. Network latency or a missing chunk can briefly pause emulation. A local server can remain reachable without public internet access, but external assets and cloud transfers may still need it.
+**Streamed games require a connection to their game server during play.** This includes streamed PlayStation, GameCube and PlayStation 2 discs and large PSP/3DS files. They fetch game bytes on demand. Startup success does not mean the rest of the file is available offline; keep access to the server throughout play. Network latency or a missing chunk can briefly pause emulation. A local server can remain reachable without public internet access, but external assets and cloud transfers may still need it.
 
 Direct same-origin PlayStation CHD/PBP files use HTTP byte ranges when their server advertises compatible binary/range responses. Startup probes with HEAD and fetches an initial chunk. A bounded resident chunk cache reduces whole-disc transfer and memory use. Existing BIOS selection, disc selection, memory cards, save states and feed save IDs remain the native PlayStation interfaces.
 
@@ -25,13 +25,15 @@ The 3DS loader streams ROMs **larger than 512 MiB**. Its bounded chunk cache is 
 
 PSP files **larger than 128 MiB** use a bounded HTTP range reader with at most 16 MiB of game chunks retained. Keep the game server reachable during play; those chunks do not form a complete offline download. PSP needs no external console BIOS. See the [PSP guide](../../deploy/webrcade/retro-ppsspp/README.md).
 
-## GameCube and the PS2 beta
+<a id="gamecube-and-the-ps2-beta"></a>
+
+## GameCube and PlayStation 2
 
 GameCube is included when the Dolphin core is packaged and has no enable flag. Supply valid ISO/GCM files under `roms/GameCube/`; RVZ and Wii discs are unsupported. Games larger than 50,000,000 bytes use strict HTTP 206 streaming with a bounded cache. The player's browser needs HTTPS (or localhost), shared-memory isolation, OffscreenCanvas and hardware WebGPU. Software GPU fallback is rejected. The core reserves 768 MiB of WASM memory; browser and GPU allocations add to that. Compatibility and performance depend on the game, browser and device.
 
-On the **PS2 beta**, enable **Settings → Experimental Settings → Enable PlayStation 2 (experimental)** and press **OK**. It starts off; there is no Docker enable flag. ISO, CHD v5 and homebrew ELF files are scanned recursively under `roms/PS2/` or `roms/ps2/`. Play! supplies an HLE BIOS and does not need an external PS2 BIOS. The current beta requires hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). Remote ISO/CHD discs use strict HTTP 206 ranges and a bounded cache throughout play; a server returning the full file instead of the requested range fails the launch/read.
+PlayStation 2 is available by default with no player or Docker enable flag. ISO, CHD v5 and homebrew ELF files are scanned recursively under `roms/PS2/` or `roms/ps2/`. Play! supplies an HLE BIOS and does not need an external PS2 BIOS. PlayStation 2 requires hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). Remote ISO/CHD discs use strict HTTP 206 ranges and a bounded cache throughout play; a server returning the full file instead of the requested range fails the launch/read.
 
-PS2 beta images are AMD64 only. PS2 rendering, game compatibility and speed remain experimental; passing a homebrew test does not establish commercial-game compatibility or phone performance. See the [PS2 beta guide](../../deploy/webrcade/retro-play/README.md) and [GameCube guide](../../deploy/webrcade/retro-dolphin/README.md) for qualification details.
+Stable images support AMD64 and ARM64; beta candidate images remain AMD64 only. PlayStation 2 compatibility and speed vary by game and device; passing a homebrew test does not establish commercial-game compatibility or phone performance. See the [PlayStation 2 guide](../../deploy/webrcade/retro-play/README.md) and [GameCube guide](../../deploy/webrcade/retro-dolphin/README.md) for qualification details.
 
 ## What offline caching does
 

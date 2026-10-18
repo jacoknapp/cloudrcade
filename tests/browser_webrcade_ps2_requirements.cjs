@@ -8,7 +8,6 @@ const origin=process.env.WEBRCADE_TEST_ORIGIN||'https://localhost:8443';
   page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>requests.push(request.url()));
   await context.route('**/cloud-saves/config.php',route=>route.fulfill({contentType:'application/javascript',body:'window.WrcadCloudConfig={storagePrefix:"ps2_requirements",enabled:false};'}));
   await context.addInitScript(mode=>{
-   localStorage.setItem('ps2_requirements.ps2.enabled.v1','1');
    Object.defineProperty(navigator,'gpu',{value:mode==='missing'?undefined:{requestAdapter:async()=>mode==='unavailable'?null:{isFallbackAdapter:true,info:{vendor:'SwiftShader'}}}});
    const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){if(/webgl/i.test(kind))throw new Error('Unexpected WebGL fallback');return original.call(this,kind,...args);};
    let current;Object.defineProperty(window,'Module',{configurable:true,get:()=>current,set:value=>{current=value;if(value)window.ownedNative=value;}});

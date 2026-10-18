@@ -61,7 +61,7 @@ Then reload the feed/library. Only one scan runs at a time. Empty scans do not r
 - [Nextcloud](nextcloud-and-access.md): enable the configured server and manually Link first, then decide whether to enable automatic login.
 - [Mobile controls](controls-and-menus.md): adjust buttons while a game is running; save portrait and landscape separately.
 - [Installed web app](library-and-devices.md#install-the-web-app): use your browser's installation action.
-- [Disc streaming and 3DS](streaming-offline-and-3ds.md): supply any required BIOS/keys and keep a connection for streamed files. GameCube needs device WebGPU; PS2 remains an opt-in beta.
+- [Disc streaming and 3DS](streaming-offline-and-3ds.md): supply any required BIOS/keys and keep a connection for streamed files. GameCube needs device WebGPU; PlayStation 2 is available by default and requires device WebGPU.
 - [Metadata](library-administration.md): optionally configure server-only IGDB credentials in `config/metadata.json`; no Gaseous service is required.
 
 Before using the deployment for lasting progress, establish a backup plan for app data, browser-local saves and any Nextcloud files. See [operations](operations-and-troubleshooting.md#back-up-before-changing-a-deployment).

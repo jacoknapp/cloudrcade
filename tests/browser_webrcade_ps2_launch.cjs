@@ -2,7 +2,7 @@
  * Original homebrew only. PS2_TEST_ROM, WEBRCADE_TEST_ORIGIN, CHROME and
  * WEBRCADE_TEST_WEBKIT_PATH select the isolated fixture/browser executables.
  */
-const assert=require('node:assert/strict'),{chromium,webkit}=require('playwright');
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{chromium,webkit}=require('playwright');
 const origin=process.env.WEBRCADE_TEST_ORIGIN||'https://localhost:8443',rom=process.env.PS2_TEST_ROM;
 if(!rom)throw new Error('PS2_TEST_ROM is required.');
 const config={appName:'PS2 Launch Test',storagePrefix:'ps2_launch_test',enabled:false,enable3DS:false,ps2Url:'/experimental/ps2/',feedUrl:'/content/feeds/combined.json'};
@@ -12,7 +12,24 @@ const feed={title:'PS2 launch',categories:[{title:'PlayStation 2',items:[{title:
  try{
   const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,viewport:{width:390,height:844}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
-  await context.addInitScript(()=>localStorage.setItem('ps2_launch_test.ps2.enabled.v1','1'));
+  await context.addInitScript(()=>localStorage.setItem('ps2_launch_test.ps2.enabled.v1','0'));
+  if(process.env.STAGE_PLAYER)await context.route('**/main.7ac86965.chunk.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.STAGE_PLAYER)}));
+  if(process.env.PS2_APP_ROOT)await context.route('**/experimental/ps2/**',async route=>{
+   const name=new URL(route.request().url()).pathname.slice('/experimental/ps2/'.length)||'index.html';
+   const file=path.join(process.env.PS2_APP_ROOT,name);
+   if(!fs.existsSync(file)||!fs.statSync(file).isFile())return route.continue();
+   const response=await route.fetch();await route.fulfill({response,body:fs.readFileSync(file)});
+  });
+  // Optional original sparse ISO fixture, served only inside this browser.
+  if(process.env.PS2_FIXTURE_ISO)await context.route(new URL(rom,origin).href,async route=>{
+   const file=process.env.PS2_FIXTURE_ISO,size=fs.statSync(file).size,request=route.request();
+   const headers={'Accept-Ranges':'bytes','Content-Type':'application/octet-stream','ETag':'"original-ps2-fixture"'};
+   if(request.method()==='HEAD')return route.fulfill({status:200,headers:{...headers,'Content-Length':String(size)},body:Buffer.alloc(0)});
+   const match=/^bytes=(\d+)-(\d*)$/.exec(request.headers().range||'');assert(match,'original fixture must use byte ranges');
+   const first=Number(match[1]),last=Math.min(size-1,match[2]?Number(match[2]):size-1),body=Buffer.alloc(last-first+1),fd=fs.openSync(file,'r');
+   try{assert.equal(fs.readSync(fd,body,0,body.length,first),body.length);}finally{fs.closeSync(fd);}
+   await route.fulfill({status:206,headers:{...headers,'Content-Range':`bytes ${first}-${last}/${size}`,'Content-Length':String(body.length)},body});
+  });
   await context.route('**/cloud-saves/config.php',route=>route.fulfill({contentType:'application/javascript',body:'window.WrcadCloudConfig='+JSON.stringify(config)+';'}));
   await context.route('**/content/feeds/combined.json',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(feed)}));
   await page.goto(origin+'/play/');await page.locator('.cr-mobile-card').filter({hasText:'PlayStation 2'}).waitFor();await page.waitForTimeout(1500);
