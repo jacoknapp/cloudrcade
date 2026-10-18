@@ -42,3 +42,11 @@ edit('void CGSHandler::LoadState(Framework::CZipArchiveReader& archive)\n{',
      '\tm_writeBufferProcessIndex = 0;\n'
      '\tm_writeBufferSubmitIndex = 0;')
 path.write_text(source)
+
+# Keep transfers, snapshots and each vblank as explicit submission boundaries.
+# Coalesce only ordinary processed register tails between those boundaries.
+path = root / 'Source/gs/GSHandler.h'
+source = path.read_text()
+edit('REGISTERWRITEBUFFER_SUBMIT_THRESHOLD = 0x100',
+     'REGISTERWRITEBUFFER_SUBMIT_THRESHOLD = 0x400')
+path.write_text(source)
