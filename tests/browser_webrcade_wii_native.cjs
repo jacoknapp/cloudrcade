@@ -33,7 +33,7 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
      await adapter.request('importNand',{files});const nand=await adapter.request('exportNand');
      let rejected=false;try{await adapter.request('importNand',{files:[{name:'../../keys.bin',content:new Uint8Array(1)}]});}catch(e){rejected=/Invalid Wii save path/.test(e.message);}
      let rejectedGC=false;const gc=new Uint8Array(32);new DataView(gc.buffer).setUint32(28,0xc2339f3d);
-     try{await inspectDisc({name:'cube.iso',slice:()=>new Blob([gc])});}catch(e){rejectedGC=/no Wii disc header/.test(e.message);}
+     try{await inspectDisc({name:'cube.iso',size:32,slice:()=>new Blob([gc])});}catch(e){rejectedGC=/no Wii disc header/.test(e.message);}
      const disc=await remoteDisc('./fixtures/'+name);
      const mounted=await adapter.request('mountUrl',{...disc,inspectOnly:true});
      const stats=await adapter.request('streamStats');

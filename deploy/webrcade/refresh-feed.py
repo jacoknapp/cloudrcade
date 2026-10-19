@@ -32,12 +32,13 @@ SYSTEMS = {
  'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
  'ps2': ('PlayStation 2', 'ps2', {'.iso', '.chd', '.elf'}, 8),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
- 'Wii': ('Nintendo Wii (experimental)', 'wii', {'.iso'}, 5),
+ 'Wii': ('Nintendo Wii (experimental)', 'wii', {'.iso', '.wbfs', '.ciso'}, 5),
  'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
 
 def managed_matches(path,folder,extensions):
  if path.suffix.lower() not in extensions:return False
+ if folder=='Wii':return wii_game(path) is not None
  if folder=='ps2':return path.suffix.lower()=='.iso' and ps2_game(path) is not None
  if path.suffix.lower()=='.pbp':return pbp_platform(path)==folder
  if path.suffix.lower()=='.iso':
@@ -75,10 +76,35 @@ def pbp_platform(path):
   return 'psp'
 
 def wii_game(path):
- with path.open('rb') as stream: head=stream.read(0x20)
+ # Match Dolphin's single-game WBFS and Wii CISO readers. Only bounded
+ # container metadata/header reads; never hash or convert multi-GB discs.
+ size=path.stat().st_size
+ with path.open('rb') as stream:
+  head=stream.read(0x20)
+  if len(head)!=0x20:return None
+  if path.suffix.lower()=='.wbfs':
+   if head[:4]!=b'WBFS' or not 9<=head[8]<=16 or not 15<=head[9]<=26 or head[9]<head[8]:return None
+   sector=1<<head[8];block=1<<head[9]
+   if int.from_bytes(head[4:8],'big')*sector!=size:return None
+   stream.seek(0);slots=stream.read(512)[12:]
+   if len(slots)!=500 or not slots[0] or any(slots[1:]):return None
+   count=(143432*2*0x8000+block-1)//block
+   stream.seek(sector+256);table=stream.read(count*2)
+   if len(table)!=count*2:return None
+   entries=[v[0] for v in struct.iter_unpack('>H',table)]
+   if not entries[0] or any((entry+1)*block>size for entry in entries):return None
+   stream.seek(entries[0]*block);head=stream.read(0x20)
+  elif path.suffix.lower()=='.ciso':
+   stream.seek(0);header=stream.read(0x8000)
+   if len(header)!=0x8000 or header[:4]!=b'CISO':return None
+   block=int.from_bytes(header[4:8],'little');mapping=header[8:]
+   if not 0x8000<=block<=1<<26 or block&(block-1) or mapping[0]!=1 or any(v>1 for v in mapping):return None
+   if 0x8000+sum(mapping)*block!=size:return None
+   head=stream.read(0x20)
+  elif path.suffix.lower()!='.iso':return None
  if len(head)!=0x20 or head[0x18:0x1c]!=bytes.fromhex('5d1c9ea3'): return None
  if not re.fullmatch(b'[A-Z0-9]{6}',head[:6]): return None
- return 'wii:'+head[:8].hex()+':'+str(path.stat().st_size)
+ return 'wii:'+head[:8].hex()+':'+str(size)
 
 def gamecube_game(path):
  # Disc identity and format validation need only the header, never a GB hash.
@@ -267,6 +293,8 @@ def main():
    if folder == 'ps2' and not PS2_CORE_INFO.is_file(): continue
    items=[]
    candidates=sorted((ROOT/folder if folder in ('3DS','GameCube','Wii','ps2') else ROOT/folder/'roms').rglob('*'))
+   if folder=='Wii':
+    candidates=sorted(p for directory in ROOT.iterdir() if directory.is_dir() and directory.name.casefold()=='wii' for p in directory.rglob('*'))
    if folder=='ps2':candidates+=sorted((ROOT/'PS2').rglob('*'))
    candidates += [p for p in managed_files if managed_platforms.get(str(p))==platform or (str(p) not in managed_platforms and managed_matches(p,folder,extensions))]
    # A SNES hack was filed under NES; route it by format.

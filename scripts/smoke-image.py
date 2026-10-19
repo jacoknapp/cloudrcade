@@ -78,6 +78,17 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
     (roms / 'Wii').mkdir()
     wii_header=bytearray(32);wii_header[:6]=b'WIIE01';wii_header[24:28]=bytes.fromhex('5d1c9ea3')
     (roms / 'Wii/wii-fixture.iso').write_bytes(wii_header)
+    (roms / 'wii').mkdir()
+    block=2*1024**2
+    for extension,gameid in [('wbfs',b'WBFSE1'),('ciso',b'CISOE1')]:
+        meta=bytearray(0x8000);header=bytearray(wii_header);header[:6]=gameid
+        if extension=='wbfs':
+            size=2*block;meta[:4]=b'WBFS';meta[4:8]=(size//512).to_bytes(4,'big');meta[8]=9;meta[9]=21;meta[12]=1
+            meta[512:544]=header;meta[768:770]=(1).to_bytes(2,'big');offset=block
+        else:
+            size=0x8000+block;meta[:4]=b'CISO';meta[4:8]=block.to_bytes(4,'little');meta[8]=1;offset=0x8000
+        with (roms/('wii/compressed-fixture.'+extension)).open('wb') as fixture:
+            fixture.write(meta);fixture.seek(offset);fixture.write(header);fixture.truncate(size)
     (roms / 'fixtures/disc.bin').write_bytes(bytes(2352 * 32))
     (roms / 'fixtures/disc.cue').write_text('FILE "disc.bin" BINARY\n TRACK 01 MODE1/2352\n INDEX 01 00:00:00\n')
     synthetic_keys = 'slot0x18KeyX=' + '00' * 16 + '\n'
@@ -116,6 +127,10 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         assert any(item['title'] == 'portable-fixture' and item['type'] == 'psp' for item in items())
         assert any(item['title'] == 'ps2-fixture' and item['type'] == 'ps2' and item['props']['uid'].startswith('release_test-ps2-') for item in items())
         assert any(item['title']=='wii-fixture' and item['type']=='wii' for item in items())
+        assert len([item for item in items() if item['type']=='wii'])==3
+        for extension in ('wbfs','ciso'):
+            with get('/content/wii/compressed-fixture.'+extension) as response:
+                assert response.headers.get_content_type()=='application/octet-stream'
         assert any(item['title']=='gamecube-fixture' and item['type']=='gamecube' for item in items()) == gamecube
         assert not any(item['title']=='invalid' for item in items())
         # Real tool conversion without supplying a copyrighted PSX BIOS to CI.

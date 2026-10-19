@@ -56,6 +56,50 @@ class RefreshTests(unittest.TestCase):
   self.assertIsNone(m.gamecube_game(self.root/'GameCube/wii.iso'))
   self.put('GameCube/invalid.iso',bytes(32))
   self.assertIsNone(m.gamecube_game(self.root/'GameCube/invalid.iso'))
+ def wii_container(self,name,gameid=b'TEST01'):
+  block=2*1024**2;header=gameid+bytes(18)+bytes.fromhex('5d1c9ea3')+bytes(4)
+  p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True)
+  with p.open('wb') as f:
+   if p.suffix=='.wbfs':
+    size=5*1024**3;meta=bytearray(0x8000);meta[:4]=b'WBFS';meta[4:8]=(size//512).to_bytes(4,'big');meta[8]=9;meta[9]=21;meta[12]=1
+    meta[512:544]=header;meta[768:770]=(3).to_bytes(2,'big')
+    f.write(meta);f.seek(3*block);f.write(header);f.truncate(size)
+   else:
+    meta=bytearray(0x8000);meta[:4]=b'CISO';meta[4:8]=block.to_bytes(4,'little');meta[8:8+4096]=bytes([1])*4096
+    f.write(meta);f.write(header);f.truncate(0x8000+4096*block)
+  return p
+ def test_wii_compressed_containers_case_insensitive_folders_and_bounded_scan(self):
+  wbfs=self.wii_container('wii/WBFS.wbfs')
+  ciso=self.wii_container('WII/CISO.ciso',b'OTHR01')
+  for p in (wbfs,ciso):
+   self.assertTrue(m.wii_game(p).startswith('wii:'))
+   self.assertTrue(m.managed_matches(p,'Wii',{'.wbfs','.ciso'}))
+   self.assertIsNone(m.gamecube_game(p))
+  self.put('nes/roms/existing.nes',b'existing-game');m.main()
+  before=json.loads((self.state/'feeds/combined.json').read_text())
+  info=Path(self.tmp.name)/'wii-core.json';info.write_text('{}')
+  with patch.object(m,'WII_CORE_INFO',info),patch.object(m,'digest',wraps=m.digest) as digest:
+   m.main();after=json.loads((self.state/'feeds/combined.json').read_text())
+   self.assertFalse(any(call.args[0] in (wbfs,ciso) for call in digest.call_args_list))
+  category=next(c for c in after['categories'] if c['title']=='Nintendo Wii (experimental)')
+  self.assertEqual(len(category['items']),2)
+  self.assertEqual({i['props']['rom'] for i in category['items']},{'/content/wii/WBFS.wbfs','/content/WII/CISO.ciso'})
+  self.assertEqual([c for c in after['categories'] if c is not category],before['categories'])
+  with ciso.open('r+b') as f:f.truncate(ciso.stat().st_size-1)
+  self.assertIsNone(m.wii_game(ciso))
+  with wbfs.open('r+b') as f:f.seek(768);f.write(b'\xff\xff')
+  self.assertIsNone(m.wii_game(wbfs))
+ def test_wii_invalid_compressed_containers_are_not_published(self):
+  p=self.wii_container('wii/split.wbfs')
+  with p.open('r+b') as f:f.truncate(p.stat().st_size-512)
+  self.assertIsNone(m.wii_game(p))
+  p=self.wii_container('wii/multi.wbfs')
+  with p.open('r+b') as f:f.seek(13);f.write(b'\x01')
+  self.assertIsNone(m.wii_game(p))
+  p=self.wii_container('wii/map.ciso')
+  with p.open('r+b') as f:f.seek(8);f.write(b'\x02')
+  self.assertIsNone(m.wii_game(p))
+  self.put('wii/bad.ciso',bytes(12));self.assertIsNone(m.wii_game(self.root/'wii/bad.ciso'))
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=Path(self.tmp.name)/'roms';self.state=Path(self.tmp.name)/'state'

@@ -8,9 +8,13 @@ The GameCube package and its save compatibility remain unchanged.
 Enable **Wii (experimental)** in library Settings → Core Settings. The separate
 **Wii performance readout (experimental)** switch uses the same metrics and
 placement as GameCube. Both default off and follow OK/Cancel. The direct lab is
-`/experimental/wii/`; it accepts Wii ISO files and range-capable HTTP URLs.
-The scanner recognizes Wii ISO headers in `Wii/` and managed platform 5 games.
-WBFS, RVZ, WAD, multiple Remotes and MotionPlus roll are not implemented.
+`/experimental/wii/`; it accepts Wii ISO, single-file WBFS and Wii CISO files
+and range-capable HTTP URLs. The scanner recognizes these containers in `Wii/`
+(case insensitive) and managed platform 5 games. Dolphin reads the original
+containers directly with bounded streaming, without conversion or a second copy.
+WBFS must contain one game in its first slot and include all its data in one file;
+split WBFS parts are rejected rather than listed as complete games. Wii CISO is
+distinct from PSP CSO. RVZ, WAD, multiple Remotes and MotionPlus roll are not implemented.
 
 Wii has its own category, controller profile and independently saved layouts.
 The Remote/Nunchuk layout follows the shared screen/dock placement and editor behavior, with Wii button geometry:
@@ -32,10 +36,10 @@ limit. Titles/content/tickets/console keys are never included in save archives.
 After preparing Wii, run `python3 scripts/run-wii-beta.py`. It leaves an isolated
 container at `https://localhost:18573/play/` and the Wii disc launcher at
 `https://localhost:18573/experimental/wii/`. Development HTTPS uses a local
-certificate. Enable Wii in Settings → Core Settings, then select your Wii ISO
+certificate. Enable Wii in Settings → Core Settings, then select your Wii disc
 in the launcher. State lives under ignored `release/wii-local/`; the helper
 mounts its empty ROM folder read-only and disables automatic scanning and cloud accounts.
-For the separate Wii library category, put ISOs in `release/wii-local/roms/Wii/`
+For the separate Wii library category, put games in `release/wii-local/roms/Wii/`
 and run `docker exec cloudrcade-wii-beta python3 /usr/local/share/cloudrcade/service.py scan`,
 then refresh the library. Your independently saved Wii touch layout follows your
 account's controller sync settings when cloud storage is enabled on a normal server.

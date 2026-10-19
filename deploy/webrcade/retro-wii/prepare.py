@@ -51,18 +51,10 @@ def prepare(base, native, out):
             text=text.replace('.gamecube.perf.v1','.wii.perf.v1').replace('./gamecube.svg','./wii.svg')
             path.write_text(text)
         session=app/'session.mjs';text=session.read_text();start=text.index('export async function inspectDisc(');end=text.index('\nexport class GameCubeSession',start)
-        text=text[:start]+'''export async function inspectDisc(file) {
-  if (!file || !/\\.iso$/i.test(file.name || '')) throw new Error('Choose a Wii ISO disc image.');
-  const bytes=new Uint8Array(await file.slice(0,32).arrayBuffer());
-  if(bytes.length!==32 || new DataView(bytes.buffer).getUint32(0x18)!==0x5d1c9ea3)
-    throw new Error('This image has no Wii disc header.');
-  const gameId=String.fromCharCode(...bytes.slice(0,6));
-  if(!/^[A-Z0-9]{6}$/.test(gameId))throw new Error('Invalid Wii disc identity.');
-  return {gameId,size:file.size};
-}
-''' + text[end:];session.write_text(text)
-        transport=app/'transport.mjs';text=transport.read_text().replace(r'/\.(iso|gcm)$/i',r'/\.iso$/i').replace('Wii ISO or GCM URL.','Wii ISO URL.');transport.write_text(text)
-        for name in ('input.mjs','nand.mjs','wii.svg'):shutil.copy2(HERE/name,app/name)
+        text=text[:start]+"import {inspectDisc} from './disc.mjs';\nexport {inspectDisc};\n"+text[end:]
+        text=replace(text,"await inspectDisc(file.remote ? {...file,slice:()=>new Blob([file.header])} : file)","file.remote ? {...file.disc} : await inspectDisc(file)")
+        session.write_text(text)
+        for name in ('disc.mjs','transport.mjs','input.mjs','nand.mjs','wii.svg'):shutil.copy2(HERE/name,app/name)
         lab=app/'lab.mjs';text=lab.read_text().replace("import {KEYS, padState, BUTTONS}","import {KEYS, padState, BUTTONS, attachMotion, applyMotion}")
         text=text.replace("const pressed=new Set(), input={};",'''const pressed=new Set(), input={};
 const motion=attachMotion(window,{getCanvas:()=>canvas,isActive:()=>!!session?.booted&&!session.paused&&!menuVisible&&!controllerMenuVisible&&!busy&&!exiting});
@@ -104,7 +96,7 @@ const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.'
   api.coreInit?.();
   api.setInputState?.({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:128,triggerRight:128,analogA:154,analogB:128,inputGeneration:1});''')
         worker.write_text(text)
-        html=app/'index.html';text=html.read_text().replace('data-cloudrcade-core="gamecube"','data-cloudrcade-core="wii"').replace('GameCube','Wii').replace('gamecube-source.tar.gz','wii-source.tar.gz').replace('adapter-source/README.md','adapter-source/wii/README.md').replace('ISO or GCM','ISO').replace('accept=".iso,.gcm"','accept=".iso"')
+        html=app/'index.html';text=html.read_text().replace('data-cloudrcade-core="gamecube"','data-cloudrcade-core="wii"').replace('GameCube','Wii').replace('gamecube-source.tar.gz','wii-source.tar.gz').replace('adapter-source/README.md','adapter-source/wii/README.md').replace('ISO or GCM','ISO, WBFS or CISO').replace('accept=".iso,.gcm"','accept=".iso,.wbfs,.ciso"')
         text=text.replace('<h1 id="title">Wii</h1>','<h1 id="title">Wii · Experimental</h1>')
         first=text.index('<p>Keyboard:');last=text.index('</p>',first)
         text=text[:first]+'''<p>Touch or move the mouse over the game to point. Tap/click = A, right click = B; drag for tilt and swing/shake. Wii Remote + Nunchuk: X/Z = A/B, 1/2, Q/E = C/Z, Enter = Plus, minus = Minus, Home = Home; arrows = D-pad; WASD = Nunchuk. Escape = standard pause menu. No device motion sensors are used. Dragging also supplies simulated MotionPlus pitch/yaw.</p>'''+text[last+4:]
