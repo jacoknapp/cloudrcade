@@ -106,6 +106,20 @@ jobs:
           python3 deploy/webrcade/retro-wii/prepare.py
           mkdir -p release/wii-native-cache
           cp release/wii-native/dolphin-core-upstream.{js,wasm} release/wii-native-cache/
+      - name: Retain Wii native mismatch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wii-native-mismatch
+          retention-days: 1
+          if-no-files-found: ignore
+          path: |
+            release/wii-native/actual-native-build.json
+            release/wii-native/dolphin-core-upstream.js
+            release/wii-native/dolphin-core-upstream.wasm
+            /tmp/cloudrcade-wii-build/build/linux-native/CMakeCache.txt
+            /tmp/cloudrcade-wii-build/build/linux-native/compile_commands.json
+            /tmp/cloudrcade-wii-build/build/linux-native/build.ninja
       - name: Prepare 3DS (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare 3ds
       - name: Prepare PSP (reuse unchanged builds)

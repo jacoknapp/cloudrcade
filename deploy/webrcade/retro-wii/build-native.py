@@ -59,7 +59,10 @@ def build():
     for name in baseline['artifacts']:shutil.copy2(artifacts/name,out/name)
     lock['artifacts']={name:sha(out/name) for name in baseline['artifacts']}
     lock['stateFormatId']=lock['artifacts']['dolphin-core-upstream.wasm']
-    if not qualify and previous['artifacts']!=lock['artifacts']:raise SystemExit('Wii native artifact mismatch')
+    (out/'actual-native-build.json').write_text(json.dumps(lock,indent=2)+'\n')
+    if not qualify and previous['artifacts']!=lock['artifacts']:
+        raise SystemExit('Wii native artifact mismatch: '+json.dumps({
+            'expected':previous['artifacts'],'actual':lock['artifacts']},sort_keys=True))
     if qualify:(HERE/'native-build.json').write_text(json.dumps(lock,indent=2)+'\n')
     # Distribute the fully patched source and the precise additional recipe/lock.
     readme=work/'README.md'
