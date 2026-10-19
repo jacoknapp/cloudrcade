@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       rebuild_cores:
-        description: Rebuild all cores from source, bypassing caches
+        description: Rebuild all stable-release cores from source (ignored on beta)
         type: boolean
         default: false
 
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      FORCE_CORE_REBUILD: ${{ inputs.rebuild_cores == true && 'true' || 'false' }}
+      FORCE_CORE_REBUILD: ${{ inputs.rebuild_cores == true && !startsWith(github.ref, 'refs/heads/beta/') && 'true' || 'false' }}
     permissions:
       actions: read
       contents: read
@@ -85,6 +85,20 @@ jobs:
         with:
           path: release/ps2-native
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2-native'] }}
+      - name: Restore wii build
+        id: cache_wii
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/wii
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['wii'] }}
+      - name: Restore wii-native build
+        id: cache_wii_native
+        if: env.FORCE_CORE_REBUILD != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: release/wii-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['wii-native'] }}
       - name: Bootstrap unchanged cores from a qualified release
         if: env.FORCE_CORE_REBUILD != 'true'
         env:
@@ -92,20 +106,14 @@ jobs:
         run: python3 scripts/restore-qualified-cores.py
       - name: Prepare GameCube (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare gamecube
-      - name: Restore qualified Wii native bytes
-        uses: actions/cache@v4
+      - name: Restore first-release Wii native cache for migration
+        if: env.FORCE_CORE_REBUILD != 'true' && steps.cache_wii_native.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
         with:
           path: release/wii-native-cache
           key: ${{ runner.os }}-${{ runner.arch }}-wii-native-${{ hashFiles('deploy/webrcade/retro-wii/wii-input.patch', 'deploy/webrcade/retro-wii/native-build.json', 'deploy/webrcade/retro-wii/build-native.py', 'deploy/webrcade/retro-dolphin/native-build.json', 'deploy/webrcade/retro-dolphin/build-linux.sh') }}
-      - name: Prepare experimental Wii from the current GameCube source
-        run: |
-          if [ "$FORCE_CORE_REBUILD" != true ] && [ -f release/wii-native-cache/dolphin-core-upstream.wasm ]; then
-            export WII_NATIVE_CACHE="$PWD/release/wii-native-cache"
-          fi
-          python3 deploy/webrcade/retro-wii/build-native.py
-          python3 deploy/webrcade/retro-wii/prepare.py
-          mkdir -p release/wii-native-cache
-          cp release/wii-native/dolphin-core-upstream.{js,wasm} release/wii-native-cache/
+      - name: Prepare Wii (reuse unchanged builds)
+        run: python3 scripts/core-cache.py prepare wii
       - name: Retain Wii native mismatch diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -114,12 +122,12 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
           path: |
-            release/wii-native/actual-native-build.json
-            release/wii-native/dolphin-core-upstream.js
-            release/wii-native/dolphin-core-upstream.wasm
-            /tmp/cloudrcade-wii-build/build/linux-native/CMakeCache.txt
-            /tmp/cloudrcade-wii-build/build/linux-native/compile_commands.json
-            /tmp/cloudrcade-wii-build/build/linux-native/build.ninja
+            release/wii-native-build/actual-native-build.json
+            release/wii-native-build/dolphin-core-upstream.js
+            release/wii-native-build/dolphin-core-upstream.wasm
+            release/wii-native-build/CMakeCache.txt
+            release/wii-native-build/compile_commands.json
+            release/wii-native-build/build.ninja
       - name: Prepare 3DS (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare 3ds
       - name: Prepare PSP (reuse unchanged builds)
@@ -229,3 +237,15 @@ jobs:
         with:
           path: release/ps2-native
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['ps2-native'] }}
+      - name: Cache verified wii build
+        if: github.event_name != 'pull_request' && steps.cache_wii.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/wii
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['wii'] }}
+      - name: Cache verified wii-native build
+        if: github.event_name != 'pull_request' && steps.cache_wii_native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: release/wii-native
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.core_keys.outputs['wii-native'] }}
