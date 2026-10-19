@@ -52,7 +52,12 @@ def build():
     if cache:artifacts=Path(cache)
     else:
         toolchain=Path(os.environ.get('WII_TOOLCHAIN','/tmp/cloudrcade-wii-toolchain')).resolve();toolchain.mkdir(parents=True,exist_ok=True)
-        subprocess.run(['docker','run','--rm','--platform',baseline['platform'],'-e','GAMECUBE_BUILD_JOBS='+os.environ.get('GAMECUBE_BUILD_JOBS','8'),'-v',f'{work}:/work','-v',f'{toolchain}:/toolchain','-v',f'{GC}:/recipe:ro',baseline['image'],'bash','/recipe/build-linux.sh'],check=True)
+        subprocess.run(['docker','run','--rm','--platform',baseline['platform'],
+                        '-e','GAMECUBE_BUILD_JOBS='+os.environ.get('GAMECUBE_BUILD_JOBS','8'),
+                        '-e','GAMECUBE_BUILD_UID='+str(os.getuid()),
+                        '-e','GAMECUBE_BUILD_GID='+str(os.getgid()),
+                        '-v',f'{work}:/work','-v',f'{toolchain}:/toolchain',
+                        '-v',f'{GC}:/recipe:ro',baseline['image'],'bash','/recipe/build-linux.sh'],check=True)
         artifacts=work/'build/linux-artifacts'
     if module.source_digest(work)!=source_digest:raise SystemExit('Build changed its source inputs')
     out.mkdir(parents=True)
