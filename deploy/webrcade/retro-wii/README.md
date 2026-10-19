@@ -16,6 +16,14 @@ WBFS must contain one game in its first slot and include all its data in one fil
 split WBFS parts are rejected rather than listed as complete games. Wii CISO is
 distinct from PSP CSO. RVZ, WAD, multiple Remotes and MotionPlus roll are not implemented.
 
+The Wii native build also gives the Wasm PPC JIT and its C++ fast helpers a direct
+path to MEM2 (EXRAM). Accesses through the cached `0x9xxxxxxx` window skip the MMU
+helper when the live DBATs map it onto EXRAM. The JIT proves the mapped prefix when
+it compiles each block; DBAT changes flush the JIT. The uncached `0xDxxxxxxx` window,
+real mode and unmapped pages keep the helper. The helper stats report the window as
+`mem2win`. `RunPpcWasmMem2Smoke` checks every load/store family against fake MEM1
+and EXRAM. GameCube native bytes are unchanged.
+
 Wii has its own category, controller profile and independently saved layouts.
 The Remote/Nunchuk layout follows the shared screen/dock placement and editor behavior, with Wii button geometry:
 A/B, 1/2, C/Z, Plus/Minus and Home. Its left stick controls the Nunchuk.
