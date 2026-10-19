@@ -54,14 +54,16 @@ def prepare(base, native, out):
         text=text[:start]+"import {inspectDisc} from './disc.mjs';\nexport {inspectDisc};\n"+text[end:]
         text=replace(text,"await inspectDisc(file.remote ? {...file,slice:()=>new Blob([file.header])} : file)","file.remote ? {...file.disc} : await inspectDisc(file)")
         session.write_text(text)
-        for name in ('disc.mjs','transport.mjs','input.mjs','nand.mjs','wii.svg'):shutil.copy2(HERE/name,app/name)
-        lab=app/'lab.mjs';text=lab.read_text().replace("import {KEYS, padState, BUTTONS}","import {KEYS, padState, BUTTONS, attachMotion, applyMotion}")
+        for name in ('disc.mjs','transport.mjs','input.mjs','nand.mjs','wii.svg','controls.mjs','controls.css'):shutil.copy2(HERE/name,app/name)
+        lab=app/'lab.mjs';text=lab.read_text().replace("import {KEYS, padState, BUTTONS}","import {KEYS, padState, BUTTONS, attachMotion, applyMotion, applyControllerLayout, applyPhoneMotion}")
         text=text.replace("const pressed=new Set(), input={};",'''const pressed=new Set(), input={};
 const motion=attachMotion(window,{getCanvas:()=>canvas,isActive:()=>!!session?.booted&&!session.paused&&!menuVisible&&!controllerMenuVisible&&!busy&&!exiting});
 const wiiEnabled=()=>{try{return localStorage.getItem((window.WrcadCloudConfig?.storagePrefix||'webrcade')+'.wii.enabled.v1')==='1';}catch{return false;}};
+const wiiControls=createWiiControls(window,{isActive:()=>!!session?.booted&&!session.paused&&!menuVisible&&!controllerMenuVisible&&!busy&&!exiting,onChange:()=>{motion.clear();pressed.clear();}});
 const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.';''')
-        text=replace(text,' session.setInput(input);session.poll();',' applyMotion(input,motion.sample());session.setInput(input);session.poll();')
-        text=replace(text,' backgroundPause.reset();',' motion.clear();backgroundPause.reset();')
+        text="import {createWiiControls} from './controls.mjs';\n"+text
+        text=replace(text,' session.setInput(input);session.poll();',' applyMotion(input,motion.sample());applyPhoneMotion(input,wiiControls.phone.sample());applyControllerLayout(input,wiiControls.layout);session.setInput(input);session.poll();')
+        text=replace(text,' backgroundPause.reset();',' motion.clear();wiiControls.stop();backgroundPause.reset();')
         text=replace(text,' if(busy||exiting)return;busy=true;', ' if(!wiiEnabled()){status(disabledMessage);return;}\n if(busy||exiting)return;busy=true;')
         text=replace(text,' if(busy||session?.booted)return;busy=true;', ' if(!wiiEnabled()){status(disabledMessage);return;}\n if(busy||session?.booted)return;busy=true;')
         text=text.replace(' pressed.clear();if(pausing)', ' motion.clear();pressed.clear();if(pausing)')
@@ -72,9 +74,15 @@ const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.'
         text=text.replace("controls();\nif(document.hidden)", "controls();\nif(!wiiEnabled())status(disabledMessage);\nif(document.hidden)")
         # Native menu release must contain neutral accelerometer bytes.
         text=text.replace('triggerLeft:0,triggerRight:0,analogA:0,analogB:0','triggerLeft:128,triggerRight:128,analogA:154,analogB:128')
+        text=text.replace('if(open)session?.setInput({mask:0,', "if(open)session?.setInput({mask:wiiControls.layout==='nunchuk'?0:(1<<14),")
+        text=text.replace('window.WrcadGameCube={', 'window.WrcadGameCube={get controllerLayout(){return wiiControls.layout;},')
         text=text.replace('window.WrcadGameCube=', 'window.WrcadWii=').replace('Memory cards','Wii saves').replace('memory cards','Wii saves')
         lab.write_text(text)
-        session.write_text(session.read_text().replace('triggerLeft: 0, triggerRight: 0, analogA: 0, analogB: 0','triggerLeft: 128, triggerRight: 128, analogA: 154, analogB: 128'))
+        text=session.read_text().replace('triggerLeft: 0, triggerRight: 0, analogA: 0, analogB: 0','triggerLeft: 128, triggerRight: 128, analogA: 154, analogB: 128')
+        text="import {padState,applyControllerLayout} from './input.mjs';\n"+text
+        text=text.replace('await this.bounded(adapter.load());', "await this.bounded(adapter.load());\n      adapter.setInputState(applyControllerLayout(padState(),this.scope.WrcadWii?.controllerLayout || 'nunchuk'));")
+        text=text.replace('this.adapter.setInputState({mask: 0,', "this.adapter.setInputState({mask: this.scope.WrcadWii?.controllerLayout && this.scope.WrcadWii.controllerLayout !== 'nunchuk' ? (1<<14) : 0,")
+        session.write_text(text)
         saves=app/'saves.mjs';text=saves.read_text().replace('gamecube/${disc.gameId}', 'wii/${disc.gameId}').replace('/cards`','/nand`')
         text=text.replace("const cards=(files || []).filter(f=>/\\.gci$/i.test(f.name));",'const cards=files || [];')
         text=text.replace('gamecube.svg','wii.svg')
@@ -85,7 +93,7 @@ const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.'
         text=replace(text,'    case "setInputMask":','''    case "wiiInputProbe": {
       if (coreBoot.accepted && api.getCoreStateName() !== "Paused") throw new Error("Pause Wii before inspecting controller output");
       const pointer=moduleInstance._DolphinWeb_GetWiiReport();
-      return {report:Array.from(new Uint32Array(moduleInstance.HEAPU8.buffer,pointer,12))};
+      return {report:Array.from(new Uint32Array(moduleInstance.HEAPU8.buffer,pointer,13))};
     }
     case "importNand": return {imported:importNand(moduleInstance.FS,payload.files || [])};
     case "exportNand": return {files:exportNand(moduleInstance.FS)};
@@ -99,8 +107,8 @@ const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.'
         html=app/'index.html';text=html.read_text().replace('data-cloudrcade-core="gamecube"','data-cloudrcade-core="wii"').replace('GameCube','Wii').replace('gamecube-source.tar.gz','wii-source.tar.gz').replace('adapter-source/README.md','adapter-source/wii/README.md').replace('ISO or GCM','ISO, WBFS or CISO').replace('accept=".iso,.gcm"','accept=".iso,.wbfs,.ciso"')
         text=text.replace('<h1 id="title">Wii</h1>','<h1 id="title">Wii · Experimental</h1>')
         first=text.index('<p>Keyboard:');last=text.index('</p>',first)
-        text=text[:first]+'''<p>Touch or move the mouse over the game to point. Tap/click = A, right click = B; drag for tilt and swing/shake. Wii Remote + Nunchuk: X/Z = A/B, 1/2, Q/E = C/Z, Enter = Plus, minus = Minus, Home = Home; arrows = D-pad; WASD = Nunchuk. Escape = standard pause menu. No device motion sensors are used. Dragging also supplies simulated MotionPlus pitch/yaw.</p>'''+text[last+4:]
-        text=text.replace('<style>','<style>\n #screen {touch-action:none;}\n #wii-experimental {position:fixed;right:8px;top:8px;z-index:5;font:11px system-ui;background:#111b;padding:4px 8px;pointer-events:none;}')
+        text=text[:first]+'''<p>Touch or move the mouse over the game to point. Tap/click = A, right click = B; drag for tilt and swing/shake. Wii Remote + Nunchuk: X/Z = A/B, 1/2, Q/E = C/Z, Enter = Plus, minus = Minus, Home = Home; arrows = D-pad; WASD = Nunchuk. Escape = standard pause menu. Choose Remote + Nunchuk, upright or sideways Remote in the controller panel. Enable phone motion there to grant sensor access, then recenter in your comfortable holding position. Portrait and landscape rotations are handled automatically. Touch/mouse motion remains available.</p>'''+text[last+4:]
+        text=text.replace('<style>','<link rel="stylesheet" href="controls.css"><style>\n #screen {touch-action:none;}\n #wii-experimental {position:fixed;right:8px;top:8px;z-index:5;font:11px system-ui;background:#111b;padding:4px 8px;pointer-events:none;}')
         text=text.replace('<p id="status"', '<span id="wii-experimental">Wii · Experimental</span>\n<p id="status"')
         for name in ['brand.js','controller.js','viewport.css','controller.css','menus.css']:
             import re

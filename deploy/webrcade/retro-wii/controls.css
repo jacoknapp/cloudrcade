@@ -1,0 +1,15 @@
+.wii-controller-options { display:grid; gap:8px; margin:8px 0; }
+.wii-controller-options label { display:grid; gap:4px; }
+.wii-controller-options select { width:100%; min-height:40px; font:inherit; color:inherit; background:#172033; border:1px solid #becff059; border-radius:6px; padding:6px; }
+.wii-controller-options small { font-size:12px; line-height:1.4; }
+#wrcad-touch[data-wii-layout="upright"] .kt-extra-dpad { bottom:176px; left:0; width:104px; height:104px; --kt-arrow-offset:34px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-extra-dpad { bottom:72px; left:0; width:104px; height:104px; --kt-arrow-offset:34px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-actions { width:140px; height:120px; bottom:64px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-actions [data-cid="4"] { left:0; top:0; width:40px; height:40px; font-size:18px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-actions [data-cid="5"] { left:76px; top:0; width:40px; height:40px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-actions [data-cid="6"] { left:0; top:56px; width:58px; height:58px; }
+#wrcad-touch[data-wii-layout="sideways"] .kt-actions [data-cid="7"] { left:76px; top:56px; width:58px; height:58px; }
+@media (orientation:landscape) {
+ #wrcad-touch[data-wii-layout="upright"] .kt-extra-dpad { bottom:78px; }
+}
+#wrcad-touch[data-wii-layout="sideways"] .kt-pad { height:244px; }

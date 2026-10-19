@@ -19,7 +19,7 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
    await page.evaluate(()=>localStorage.setItem((WrcadCloudConfig.storagePrefix||'webrcade')+'.wii.enabled.v1','1'));
    const result=await page.evaluate(async name=>{
     const {UpstreamWorkerAdapter}=await import('./vendor/src/upstream-worker-adapter.js');
-    const {padState,applyMotion,BUTTONS}=await import('./input.mjs');
+    const {padState,applyMotion,BUTTONS,applyControllerLayout,applyPhoneMotion}=await import('./input.mjs');
     const {PERF_KEY,GameCubePerf}=await import('./perf.mjs');const element={};new GameCubePerf(element).reset();
     const {inspectDisc}=await import('./session.mjs');const {remoteDisc}=await import('./transport.mjs');
     const adapter=new UpstreamWorkerAdapter({videoBackend:'Null',ppcWasmJit:false,noJitCache:true});
@@ -29,6 +29,14 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
      adapter.setInputState(padState());const rest=(await adapter.request('wiiInputProbe')).report;
      const input=applyMotion(padState(new Set(['A','B','X','Y','START','Z','HOME','L','R','D_UP','STICK_UP'])),{active:true,down:false,x:.75,y:.25,dx:.5,dy:-.5});
      adapter.setInputState(input);const report=(await adapter.request('wiiInputProbe')).report;
+     adapter.setInputState(applyControllerLayout(padState(new Set(['D_UP'])),'sideways'));
+     const sideways=(await adapter.request('wiiInputProbe')).report;
+     adapter.setInputState(applyControllerLayout(padState(),'upright'));
+     const upright=(await adapter.request('wiiInputProbe')).report;
+     adapter.setInputState(applyPhoneMotion(padState(),{x:1,y:0,z:1,pitch:1,yaw:0}));
+     const phone=(await adapter.request('wiiInputProbe')).report;
+     adapter.setInputState(padState());
+     const reconnected=(await adapter.request('wiiInputProbe')).report;
      const files=[{name:'00010000/54455354/data/progress.bin',content:new Uint8Array([9,8,7])}];
      await adapter.request('importNand',{files});const nand=await adapter.request('exportNand');
      let rejected=false;try{await adapter.request('importNand',{files:[{name:'../../keys.bin',content:new Uint8Array(1)}]});}catch(e){rejected=/Invalid Wii save path/.test(e.message);}
@@ -37,7 +45,7 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
      const disc=await remoteDisc('./fixtures/'+name);
      const mounted=await adapter.request('mountUrl',{...disc,inspectOnly:true});
      const stats=await adapter.request('streamStats');
-     return {initial,rest,report,perfKey:PERF_KEY,perfText:element.textContent,nand:nand.files.map(f=>({name:f.name,bytes:Array.from(f.content)})),rejected,rejectedGC,remote:disc.remote,size:disc.size,gameId:mounted.gameId,platform:mounted.platform,boot:mounted.coreBoot,stream:stats.stream};
+     return {initial,rest,report,sideways,upright,phone,reconnected,perfKey:PERF_KEY,perfText:element.textContent,nand:nand.files.map(f=>({name:f.name,bytes:Array.from(f.content)})),rejected,rejectedGC,remote:disc.remote,size:disc.size,gameId:mounted.gameId,platform:mounted.platform,boot:mounted.coreBoot,stream:stats.stream};
     }finally{adapter.rejectAll('Wii native fixture exit');adapter.worker?.terminate();}
    },path.basename(fixture));
    assert.equal(result.perfKey,'cloudrcade-wii-beta.wii.perf.v1');assert.match(result.perfText,/^Wii measuring/,'Wii owns its experimental performance overlay');
@@ -48,6 +56,12 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
    assert.equal(result.report[0],0x0800|0x0400|0x0200|0x0100|0x10|0x1000|0x8000|0x08,'actual Wii Remote button bits');
    assert(result.report[4]<result.report[6]&&result.report[7]>=0&&result.report[7]<768,'native paired IR sensor points');
    assert.deepEqual(result.report.slice(8,12),[128,224,3,1],'native Nunchuk stick/C/Z and MotionPlus attachment');
+   assert.equal(result.sideways[0],2,'screen Up becomes physical Remote Right when sideways');
+   assert.equal(result.sideways[12],0,'sideways really disconnects the Nunchuk');
+   assert.equal(result.upright[12],0,'upright Remote also disconnects the Nunchuk');
+   assert.equal(result.reconnected[12],1,'selecting Nunchuk reconnects its extension');
+   assert.deepEqual(result.phone.slice(1,4),[616,512,616],'phone acceleration reaches actual native report');
+   assert.deepEqual(result.phone.slice(4,8),[65535,65535,65535,65535],'sensor motion alone does not invent IR points');
    assert.deepEqual(result.nand,[{name:'00010000/54455354/data/progress.bin',bytes:[9,8,7]}]);
    assert(result.rejected&&result.rejectedGC&&result.remote);assert.equal(result.size,5*1024**3,'Wii disc sizes survive beyond4GiB');assert.equal(result.gameId,'TEST01');assert.equal(result.platform,'Wii');assert.equal(result.boot.accepted,false,'disc inspection is not gameplay');
    assert(result.stream.cachedChunks<=8);assert(result.stream.cachedBytes<=16*1024*1024);

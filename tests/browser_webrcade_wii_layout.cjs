@@ -3,8 +3,8 @@ const {chromium,webkit}=require('playwright');const fs=require('fs'),path=requir
 (async()=>{for(const engine of[chromium,webkit]){
  const browser=await engine.launch({args:engine===chromium?['--no-sandbox']:[],executablePath:engine===chromium?process.env.CHROME:process.env.WEBRCADE_TEST_WEBKIT_PATH});
  try{
-  const context=await browser.newContext({hasTouch:true,viewport:{width:390,height:844}});const page=await context.newPage();
-  await page.route('http://controller.test/**',r=>r.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'}));await page.goto('http://controller.test/experimental/wii/');
+  const context=await browser.newContext({ignoreHTTPSErrors:true,hasTouch:true,viewport:{width:390,height:844}});const page=await context.newPage();
+  await page.route('https://controller.test/**',r=>{const name=new URL(r.request().url()).pathname.split('/').pop();if(['input.mjs','controls.mjs'].includes(name))return r.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'../deploy/webrcade/retro-wii',name),'utf8')});return r.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'});});await page.goto('https://controller.test/experimental/wii/');
   const gameHtml=fs.readFileSync(path.join(__dirname,'../deploy/webrcade/retro-dolphin/app/index.html'),'utf8');
   await page.addStyleTag({content:gameHtml.match(/<style>([\s\S]*?)<\/style>/)[1]});
   await page.addStyleTag({content:fs.readFileSync(path.join(__dirname,'../deploy/webrcade/touch/assets/controller.css'),'utf8')});
@@ -32,6 +32,32 @@ const {chromium,webkit}=require('playwright');const fs=require('fs'),path=requir
   }
   await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);
   if(process.env.WEBRCADE_WII_SCREENSHOT)await page.screenshot({path:process.env.WEBRCADE_WII_SCREENSHOT+'-'+engine.name()+'.png'});
+  await page.addStyleTag({content:fs.readFileSync(path.join(__dirname,'../deploy/webrcade/retro-wii/controls.css'),'utf8')});
+  await page.evaluate(async()=>{const {createWiiControls}=await import('./controls.mjs');window.wiiControls=createWiiControls(window,{isActive:()=>false});});
+  await page.locator('.kt-tab').tap();
+  const selector=page.getByRole('combobox',{name:'Wii controller layout'});
+  await page.evaluate(()=>{window.deviceMotionPermission='denied';window.sensorRequests=0;Object.defineProperty(window,'DeviceMotionEvent',{configurable:true,value:{requestPermission(){window.sensorRequests++;return Promise.resolve(window.deviceMotionPermission);}}});});
+  assert.equal(await page.evaluate(()=>window.sensorRequests),0);
+  await page.getByRole('button',{name:'Enable phone motion',exact:true}).click();await page.getByText('Phone motion: Permission denied',{exact:true}).waitFor();
+  await page.evaluate(()=>window.deviceMotionPermission='granted');
+  await page.getByRole('button',{name:'Enable phone motion',exact:true}).click();await page.getByRole('button',{name:'Disable phone motion',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.sensorRequests),2);
+  await page.getByRole('button',{name:'Recenter phone',exact:true}).click();
+  await page.getByRole('button',{name:'Disable phone motion',exact:true}).click();
+  if(process.env.WEBRCADE_WII_SCREENSHOT)await page.screenshot({path:process.env.WEBRCADE_WII_SCREENSHOT+'-panel-'+engine.name()+'.png'});
+  for(const mode of ['upright','sideways']){
+   await selector.selectOption(mode);await page.locator('.kt-close').tap();
+   for(const viewport of [{width:320,height:568},{width:844,height:390}]){
+    await page.setViewportSize(viewport);await page.waitForTimeout(200);
+    assert(!(await page.locator('.kt-shoulders [data-cid="8"]').isVisible()));
+    assert(!(await page.locator('.kt-stick:not(.kt-extra-dpad)').isVisible()));
+    const rectangles=await page.locator('.kt-pad button,.kt-stick').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().width).map(e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height,id:e.dataset.layoutId};}));
+    for(const r of rectangles)assert(r.x>=0&&r.y>=0&&r.x+r.w<=viewport.width+.1&&r.y+r.h<=viewport.height+.1,JSON.stringify({mode,viewport,r}));
+    for(let i=0;i<rectangles.length;i++)for(let j=i+1;j<rectangles.length;j++){const a=rectangles[i],b=rectangles[j];assert(!(a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y),JSON.stringify({mode,viewport,a,b}));}
+   }
+   await page.locator('.kt-tab').tap();
+  }
+  await selector.selectOption('nunchuk');await page.locator('.kt-close').tap();await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);
   const saved={'wii:portrait':{'button-4':[.72,.45],dock:[0,.25]},'psp:portrait':{'button-4':[.4,.6]},'gamecube:portrait':{'button-4':[.8,.7]}};
   await page.evaluate(saved=>{const key='webrcade.touch.layouts.v1';localStorage.setItem(key,JSON.stringify(saved));dispatchEvent(new StorageEvent('storage',{key}));},saved);
   const restored=await page.locator('.kt-actions [data-cid="4"]').boundingBox();assert(Math.abs(restored.x+restored.width/2-390*.72)<1&&Math.abs(restored.y+restored.height/2-844*.45)<1,'saved per-system coordinates still apply');

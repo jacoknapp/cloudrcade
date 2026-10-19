@@ -22,8 +22,7 @@ A/B, 1/2, C/Z, Plus/Minus and Home. Its left stick controls the Nunchuk.
 Touch the video or move the desktop mouse to point; tap/click is A and right
 click is B. Position supplies tilt and quick drags supply swing/shake acceleration.
 Pointer coordinates use the visible game rectangle. Touch cancellation, pause,
-menus, backgrounding and exit release motion/buttons. No device sensor permission
-is requested. Dragging also supplies simulated MotionPlus pitch/yaw. Games needing richer gestures or roll need further
+menus, backgrounding and exit release motion/buttons. The controller panel offers Remote + Nunchuk, upright Remote and sideways Remote. Sideways rotates D-pad and motion axes and disconnects the Nunchuk. Phone motion is opt-in: tap Enable phone motion to request accelerometer/gyroscope access, then Recenter phone to set a comfortable neutral position. Sensor axes follow portrait/landscape screen orientation; denied or unavailable sensors leave touch/mouse controls available. Dragging also supplies simulated MotionPlus pitch/yaw. Games needing richer gestures or roll need further
 input work; see their requirements before assuming compatibility.
 
 Wii saves live under a separate `wii/<game ID>/` namespace. Standard save feedback,

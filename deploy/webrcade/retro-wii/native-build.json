@@ -22,12 +22,12 @@
     "0014-order-texture-transfers.patch": "2d297b1d7bbe5523dda2cfcfe7e722a9b6e29af6cb61dbc97ec56609e88a453c"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "3f689a9cb815ad3dfd77dc635ce5462cf4114d26ba1b2968fb99542daaa86d7d",
+    "dolphin-core-upstream.wasm": "4453636e4b0e9cd30c7a78e9ce6818e47e04ce98cdf4097025d7dcc474681b99",
     "dolphin-core-upstream.js": "0333fc35a10aaac1cdbf96cd60da83a81b70a2720c4dbeeb0a165ef86a63127b"
   },
   "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
-  "sourceTreeSha256": "c34d5e434792df36b76c0b7e891c243bb2db9c506577a874794b586476902e35",
-  "stateFormatId": "3f689a9cb815ad3dfd77dc635ce5462cf4114d26ba1b2968fb99542daaa86d7d",
+  "sourceTreeSha256": "6d94e48f11e030cc02553b72c324e1f4d39b9707d757f13591590725fb9570d1",
+  "stateFormatId": "4453636e4b0e9cd30c7a78e9ce6818e47e04ce98cdf4097025d7dcc474681b99",
   "baseNativeSourceSha256": "4da754437489d9c34db1716126d41b713692000551b803293bb4e97926adba91",
-  "patchSha256": "db364bfc3957a1039d43a8460cdd78e4c3191c76fa3ca1bf4616eb1208fe88b0"
+  "patchSha256": "139a3941b81c807171f95503510ed0650698837a5ef42f0e714064a433037877"
 }

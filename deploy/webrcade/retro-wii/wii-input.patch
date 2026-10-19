@@ -1,3 +1,5 @@
+diff --git a/core/upstream/dolphin_web_core.cpp b/core/upstream/dolphin_web_core.cpp
+index 9f07725..b225e30 100644
 --- a/core/upstream/dolphin_web_core.cpp
 +++ b/core/upstream/dolphin_web_core.cpp
 @@ -38,6 +38,9 @@
@@ -10,7 +12,7 @@
  #include "Core/HW/SystemTimers.h"
  #include "Core/Host.h"
  #include "Core/PowerPC/PowerPC.h"
-@@ -646,6 +649,10 @@
+@@ -646,6 +649,10 @@ void EnsureRuntime()
    Pad::Initialize();
    Pad::InitializeGBA();
    Keyboard::Initialize();
@@ -21,9 +23,11 @@
  
    // §27 savestate-load backend resync. Probe evidence: after
    // State::Load the WebGPU command-ring producer (the dual-core GPU
+diff --git a/core/upstream/dolphin_web_discio.cpp b/core/upstream/dolphin_web_discio.cpp
+index be24a6b..7adf19c 100644
 --- a/core/upstream/dolphin_web_discio.cpp
 +++ b/core/upstream/dolphin_web_discio.cpp
-@@ -1085,6 +1085,23 @@
+@@ -1085,6 +1085,23 @@ const char* GetVideoStats()
    return current_video_stats.c_str();
  }
  
@@ -47,6 +51,8 @@
  int DolphinWeb_GetPadStatus(int pad_num, GCPadStatus* status)
  {
    if (!status || pad_num != 0)
+diff --git a/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp b/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
+index 7fc81f6..b9045df 100644
 --- a/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
 +++ b/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
 @@ -27,6 +27,10 @@
@@ -60,18 +66,18 @@
  #include "Core/HW/WiimoteEmu/Extension/Classic.h"
  #include "Core/HW/WiimoteEmu/Extension/DesiredExtensionState.h"
  #include "Core/HW/WiimoteEmu/Extension/DrawsomeTablet.h"
-@@ -49,6 +53,10 @@
- #include "InputCommon/ControllerEmu/ControlGroup/IRPassthrough.h"
+@@ -50,6 +54,10 @@
  #include "InputCommon/ControllerEmu/ControlGroup/ModifySettingsButton.h"
  #include "InputCommon/ControllerEmu/ControlGroup/Tilt.h"
-+
+ 
 +#ifdef __EMSCRIPTEN__
 +extern "C" int DolphinWeb_GetWiiInput(int index, u32* mask, u8* values);
 +#endif
- 
++
  namespace WiimoteEmu
  {
-@@ -479,6 +487,42 @@
+ using namespace WiimoteCommon;
+@@ -479,6 +487,45 @@ GetPassthroughCameraPoints(ControllerEmu::IRPassthrough* ir_passthrough)
  void Wiimote::BuildDesiredWiimoteState(DesiredWiimoteState* target_state,
                                         SensorBarState sensor_bar_state)
  {
@@ -103,8 +109,11 @@
 +                      Nunchuk::ACCEL_ONE_G << 2});
 +    nunchuk.SetButtons((mask & (1u << 5) ? Nunchuk::BUTTON_C : 0) |
 +                       (mask & (1u << 6) ? Nunchuk::BUTTON_Z : 0));
-+    target_state->extension.data = nunchuk;
-+    const bool pointing = mask & (1u << 13);
++    // Upright/sideways Remote layouts must really unplug the Nunchuk.
++    // Dolphin's regular Update handles the extension-port disconnect event.
++    if (mask & (1u << 14)) target_state->extension.data = std::monostate{};
++    else target_state->extension.data = nunchuk;
++    const bool pointing = mask & ((1u << 13) | (1u << 15));
 +    target_state->motion_plus = MotionPlus::GetGyroscopeData({
 +        pointing ? (int((mask >> 16) & 255) - 128) / 12.f : 0.f,
 +        pointing ? (int(input[7]) - 128) / 12.f : 0.f, 0.f});
@@ -114,7 +123,7 @@
    // Hotkey / settings modifier
    // Data is later accessed in IsSideways and IsUpright
    m_hotkeys->UpdateState();
-@@ -675,6 +719,12 @@
+@@ -675,6 +722,12 @@ void Wiimote::SendDataReport(const DesiredWiimoteState& target_state)
  ButtonData Wiimote::GetCurrentlyPressedButtons()
  {
    const auto lock = GetStateLock();
@@ -127,7 +136,7 @@
  
    ButtonData buttons{};
    m_buttons->GetState(&buttons.hex, button_bitmasks, m_input_override_function);
-@@ -966,4 +1016,23 @@
+@@ -966,4 +1019,24 @@ Common::Matrix44 Wiimote::GetTotalTransformation() const
        Common::Quaternion::RotateX(m_imu_cursor_state.recentered_pitch)));
  }
  
@@ -136,16 +145,17 @@
 +// Never called in the frame loop and never changes controller state.
 +extern "C" EMSCRIPTEN_KEEPALIVE const u32* DolphinWeb_GetWiiReport()
 +{
-+  static std::array<u32, 12> report{};
++  static std::array<u32, 13> report{};
 +  auto* remote = static_cast<Wiimote*>(::Wiimote::GetConfig()->GetController(0));
 +  DesiredWiimoteState state;
 +  remote->PrepareInput(&state, WiimoteCommon::HIDWiimote::SensorBarState::Enabled);
-+  const auto nunchuk = std::get<Nunchuk::DesiredState>(state.extension.data);
++  const auto* nunchuk = std::get_if<Nunchuk::DesiredState>(&state.extension.data);
 +  report = {remote->GetCurrentlyPressedButtons().hex, state.acceleration.value.x, state.acceleration.value.y,
 +      state.acceleration.value.z, state.camera_points[0].position.x,
 +      state.camera_points[0].position.y, state.camera_points[1].position.x,
-+      state.camera_points[1].position.y, nunchuk.jx, nunchuk.jy, nunchuk.GetButtons(),
-+      state.motion_plus.has_value() ? 1u : 0u};
++      state.camera_points[1].position.y, nunchuk ? u32(nunchuk->jx) : 128u, nunchuk ? u32(nunchuk->jy) : 128u,
++      nunchuk ? u32(nunchuk->GetButtons()) : 0u,
++      state.motion_plus.has_value() ? 1u : 0u, u32(state.extension.data.index())};
 +  return report.data();
 +}
 +#endif

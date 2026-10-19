@@ -399,11 +399,11 @@
     element.dataset.layoutId ||= element === stick ? 'stick' : element.dataset.cid !== undefined ?
       `button-${element.dataset.cid}` : element.dataset.axis ? `axis-${element.dataset.axis}` : 'menu';
   }
-  const layoutKey = () => `${system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
+  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
   function currentLayout() {
     // Keep layouts saved before platform names replaced emulator URL names.
     const legacyKey = `${emulatorPath}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
-    const value = layouts[layoutKey()] ?? layouts[legacyKey];
+    const value = layouts[layoutKey()] ?? (wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? null : layouts[legacyKey]);
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
   // A game iframe can be taller than the visible installed-app window. Its
