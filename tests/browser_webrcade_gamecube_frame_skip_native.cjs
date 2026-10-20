@@ -8,7 +8,7 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
  try{
   const c=await b.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,isMobile:true,viewport:{width:390,height:844}}),p=await c.newPage(),errors=[];
   p.on('pageerror',e=>errors.push(e.message));
-  await c.route('**/cloud-saves/config.php',r=>r.fulfill({contentType:'text/javascript',body:'window.WrcadCloudConfig={enabled:false,storagePrefix:"frame-skip-native"};'}));
+  await c.route('**/cloud-saves/config.php*',r=>r.fulfill({contentType:'text/javascript',body:'window.WrcadCloudConfig={enabled:false,storagePrefix:"frame-skip-native"};'}));
   await c.addInitScript(system=>{
    localStorage.setItem('frame-skip-native.'+system+'.enabled.v1','1');
    const gpu=navigator.gpu;if(gpu){const request=gpu.requestAdapter.bind(gpu);gpu.requestAdapter=async o=>(await request(o))||request(o);}

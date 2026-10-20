@@ -28,15 +28,24 @@ const b=first.cache.insert('verified-bytes',[1,0],functions.b);assert.notEqual(a
 const c=first.cache.insert('different-code',[0,1],functions.b);assert.notEqual(c,a);
 const second=owned();assert.equal(second.cache.get('verified-bytes',[0,1]),undefined,'each CPU worker has its own table/cache');
 second.cache.insert('verified-bytes',[0,1],functions.b);assert.equal(second.table.get(2)(5),7);assert.equal(first.table.get(a)(5),6);
-for(let i=3;i<32768;i++)first.cache.insert('block-'+i,[0,1],functions.a);
+for(let i=3;i<16384;i++)first.cache.insert('block-'+i,[0,1],functions.a);
 assert(first.cache.full());const length=first.table.length;assert.equal(first.cache.insert('over-budget',[0,1],functions.b),0,'new blocks fall back without growing executable memory');assert.equal(first.table.length,length);assert.equal(first.cache.get('verified-bytes',[0,1]),a,'already compiled blocks remain accelerated at the budget');assert.equal(first.table.get(a)(5),6);
+// Native callers must unlink all users first. Retiring one cold handle preserves
+// every other executable and does not make a permanent helper reusable.
+first.cache.retire(c);assert.equal(first.table.get(c),null);
+assert.equal(first.cache.get('different-code',[0,1]),undefined);
+first.cache.retire(c);first.cache.retire(0);
+assert.equal(first.table.get(a)(5),6);assert.equal(first.table.get(b)(5),7);
+const replacement=first.cache.insert('cold-replacement',[0,1],functions.b);
+assert.equal(replacement,c);assert(first.cache.full());assert.equal(first.cache.size(),16384);
+assert.equal(first.table.length,length);assert.equal(first.table.get(0)(5),6);
 // Only the CPU safe-point after ClearCache may call reset. All retired callback
 // slots become null, while permanent helper slots and another worker survive.
 first.cache.reset();assert.equal(first.cache.size(),0);assert(!first.cache.full());
 for(let i=2;i<length;i++)assert.equal(first.table.get(i),null,'retired instances must not stay rooted by the table');
 assert.equal(first.table.get(0)(5),6);assert.equal(first.table.get(1)(5),7);
 assert.equal(second.table.get(2)(5),7);
-for(let i=0;i<32768;i++)first.cache.insert('next-scene-'+i,[0,1],functions.b);
+for(let i=0;i<16384;i++)first.cache.insert('next-scene-'+i,[0,1],functions.b);
 assert.equal(first.table.length,length,'next scene reuses all handles without growing the table');
 assert(first.cache.full());assert.equal(first.table.get(first.cache.get('next-scene-0',[0,1]))(5),7);
 first.cache.reset();assert.equal(first.cache.size(),0);

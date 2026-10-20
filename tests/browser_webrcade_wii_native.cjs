@@ -11,7 +11,9 @@ const app=process.env.WEBRCADE_WII_ROOT||path.resolve(__dirname,'../release/wii/
   const browser=await engine.launch(engine===chromium?{executablePath:process.env.CHROME,args:['--no-sandbox']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH});
   try{
    const context=await browser.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block'}),page=await context.newPage(),errors=[];
-   page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/experimental/wii/');
+   page.on('pageerror',e=>errors.push(e.message));
+   await page.route('**/cloud-saves/config.php*',r=>r.fulfill({contentType:'text/javascript',body:'window.WrcadCloudConfig={enabled:false,storagePrefix:"cloudrcade-wii-beta"};'}));
+   await page.goto(origin+'/experimental/wii/');
    await page.getByRole('status').filter({hasText:'Enable Wii (experimental)'}).waitFor();
    assert(await page.evaluate(()=>!!window.WrcadWii&&!window.WrcadGameCube),'Wii has its own controller interface');
    await page.getByRole('button',{name:'Initialize core',exact:true}).click();

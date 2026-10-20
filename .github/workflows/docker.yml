@@ -114,6 +114,10 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-wii-native-${{ hashFiles('deploy/webrcade/retro-wii/wii-input.patch', 'deploy/webrcade/retro-wii/native-build.json', 'deploy/webrcade/retro-wii/build-native.py', 'deploy/webrcade/retro-dolphin/native-build.json', 'deploy/webrcade/retro-dolphin/build-linux.sh') }}
       - name: Prepare Wii (reuse unchanged builds)
         run: python3 scripts/core-cache.py prepare wii
+      - name: Validate packaged native cache lifetimes
+        run: |
+          GAMECUBE_SOURCE_ARCHIVE=release/gamecube/app/gamecube-source.tar.gz python3 tests/test_native_gamecube_clock.py
+          GAMECUBE_SOURCE_ARCHIVE=release/wii/app/wii-source.tar.gz python3 tests/test_native_gamecube_clock.py
       - name: Retain Wii native mismatch diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

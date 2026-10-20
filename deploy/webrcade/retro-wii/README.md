@@ -4,6 +4,9 @@ Wii reuses the current GameCube Dolphin improvements, all its native patches, de
 renderer, bounded disc streaming, lifecycle/audio recovery, standard pause menu
 and save slots. A separate native build adds one emulated Wii Remote + Nunchuk.
 The GameCube package and its save compatibility remain unchanged.
+Wii retains its32768 executable-instance budget and128MiB callback arena.
+It shares safe cold-function retirement at cache pressure; GameCube uses separate,
+smaller budgets. Save namespaces and formats are unchanged.
 
 Enable **Wii (experimental)** in library Settings → Core Settings. The separate
 **Wii performance readout (experimental)** switch uses the same metrics and

@@ -81,11 +81,14 @@ the owning render pass publishes. Physical resource destruction follows GPU
 submission. Slow scenes keep guarded JIT acceleration while native frames advance;
 five seconds without progress still trips the JIT fuse. Byte-identical compiled
 functions with identical helper imports reuse their worker-local handles. The
-instance cache caps at32768. Once full, a CPU slice boundary invalidates all native
-blocks/static links and recycles the handles, at most once every30seconds. Retired
-table slots are cleared immediately, releasing old function/instance references
-even if the next scene uses fewer blocks. Active handles and permanent helpers
-remain intact. New blocks stay interpreted until a safe reset is allowed.
+instance cache caps at16384 for GameCube. On pressure, a clock policy gives
+recently executed functions another chance and retires cold functions in bounded
+batches at a CPU slice boundary. Every native block sharing a retired handle is
+unlinked before its function-table slot is cleared or reused. Hot functions and
+permanent helpers keep their slots. New blocks use the interpreter until room is
+available; deferred compilation waits for that room. The CPU records access with
+one native byte store, without per-block JS calls, timestamps or map lookups.
+GameCube's native callback arena is64MiB within the unchanged768MiB heap reserve.
 Only the unused legacy
 CPU notification image is reduced; the native GPU render resolution is unchanged.
 Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
@@ -127,6 +130,7 @@ python3 deploy/webrcade/retro-dolphin/prepare.py
 python3 deploy/webrcade/retro-dolphin/serve.py
 node tests/test_webrcade_gamecube.cjs
 NODE_PATH=<Playwright modules> node tests/browser_webrcade_gamecube.cjs
+GAMECUBE_SOURCE_ARCHIVE=release/gamecube/app/gamecube-source.tar.gz python3 tests/test_native_gamecube_clock.py
 ```
 
 Preparation requires Git, Node22+, npm, Python3.10+, Docker, tar and network access.
