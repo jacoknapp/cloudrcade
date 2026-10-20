@@ -21,15 +21,16 @@
     "0013-snapshot-paired-scalar.patch": "a35c135f28984fc77d2ff44b3823e9872870ec70ac63d0457d14945cb95ce06e",
     "0014-order-texture-transfers.patch": "2d297b1d7bbe5523dda2cfcfe7e722a9b6e29af6cb61dbc97ec56609e88a453c",
     "0015-sampled-slice-timing.patch": "fe28f3aefa415a4e706c01f65d2f580918b3e2e1fef91f85cba3ccf7c1c721d8",
-    "0016-recycle-full-wasm-instance-cache.patch": "efdf63afe0f0f08baeda0d2059fb46d32a840dc0a2e8fa01e7053d1c20958a13"
+    "0016-recycle-full-wasm-instance-cache.patch": "efdf63afe0f0f08baeda0d2059fb46d32a840dc0a2e8fa01e7053d1c20958a13",
+    "0017-release-recycled-wasm-functions.patch": "81afeeaf77098f713896489e6cb6749bf95c1e1e327037a6b516a954f2352193"
   },
   "artifacts": {
     "dolphin-core-upstream.wasm": "137f3d2c385d14ec772c06e6abc5dd26f308ee9ea8303cfe8fd881460aac74ad",
-    "dolphin-core-upstream.js": "0fdc2e13d872bbc6d0a534057c10d3acad29cb9422eb07d919eb4aa43df7dec9"
+    "dolphin-core-upstream.js": "ea790beb5326523d4e80b22b48214253f8538a13880f823e3bf2c1f026dd3381"
   },
   "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
-  "sourceTreeSha256": "780185a4048413d449d79e694c4914dd30296008dbebebc4adb75e48c871ebaa",
+  "sourceTreeSha256": "89312eb95e45a84b27113992b558c4f9eb87483e4f6bffb68f6321528b79c372",
   "stateFormatId": "137f3d2c385d14ec772c06e6abc5dd26f308ee9ea8303cfe8fd881460aac74ad",
-  "baseNativeSourceSha256": "1d682cc14e87d64f65abec0c3a9b730d8a4d11acfc8a16f8f5f4a8a30c385c03",
+  "baseNativeSourceSha256": "41c331af9913fbb133efb6715295856f32d4927b076584404807419ed4417dae",
   "patchSha256": "91c0ad454afe5182a85386850d1ab7f2ebd7ed3039998338afdd4ff00e2bf645"
 }

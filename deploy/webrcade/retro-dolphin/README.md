@@ -81,8 +81,12 @@ the owning render pass publishes. Physical resource destruction follows GPU
 submission. Slow scenes keep guarded JIT acceleration while native frames advance;
 five seconds without progress still trips the JIT fuse. Byte-identical compiled
 functions with identical helper imports reuse their worker-local handles. The
-instance cache caps at32768; new blocks beyond that budget stay interpreted,
-without deleting or overwriting existing compiled handles. Only the unused legacy
+instance cache caps at32768. Once full, a CPU slice boundary invalidates all native
+blocks/static links and recycles the handles, at most once every30seconds. Retired
+table slots are cleared immediately, releasing old function/instance references
+even if the next scene uses fewer blocks. Active handles and permanent helpers
+remain intact. New blocks stay interpreted until a safe reset is allowed.
+Only the unused legacy
 CPU notification image is reduced; the native GPU render resolution is unchanged.
 Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
 session and offer restart or return to the library.

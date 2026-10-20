@@ -1,0 +1,18 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+@@ -13,7 +13,13 @@
+     full: () => entries.size >= capacity,
+     size: () => entries.size,
+     reset() {
+-      for (const handle of entries.values()) free.push(handle);
++      for (const handle of entries.values()) {
++        // ClearCache has invalidated every native block/static link before
++        // this reset. Release the old function (and its instance/module)
++        // now, including handles not immediately reused by the next scene.
++        wasmTable.set(handle, null);
++        free.push(handle);
++      }
+       entries.clear();
+     },
+     insert(identity, bindings, fn) {
