@@ -1,0 +1,51 @@
+diff --git a/Source/Core/Core/WasmTimingProfile.h b/Source/Core/Core/WasmTimingProfile.h
+index e9a4c88..9ca6714 100644
+--- a/Source/Core/Core/WasmTimingProfile.h
++++ b/Source/Core/Core/WasmTimingProfile.h
+@@ -18,6 +18,11 @@ namespace DolphinWeb::WasmTimingProfile
+ {
+ using Clock = std::chrono::steady_clock;
+ 
++// Time one slice in SLICE_SAMPLE_PERIOD; totals are scaled back up. Timing every
++// slice cost ~9% of the CPU thread in clock reads while the readout was on.
++inline constexpr std::uint32_t SLICE_SAMPLE_PERIOD = 8;
++inline thread_local std::uint32_t s_slice_sample_counter = 0;
++
+ enum class EventKind : std::uint32_t
+ {
+   None,
+@@ -201,14 +206,17 @@ inline void RecordSliceTotals(std::uint32_t total_us, std::uint32_t advance_us,
+   execute_us = std::min(execute_us, total_us);
+   s_slice_totals.sequence.fetch_add(1, std::memory_order_acq_rel);
+   std::atomic_thread_fence(std::memory_order_release);
+-  AddSliceTotal(s_slice_totals.slices, 1);
+-  AddSliceTotal(s_slice_totals.total_us, total_us);
+-  AddSliceTotal(s_slice_totals.advance_inclusive_us, std::min(advance_us, total_us));
+-  AddSliceTotal(s_slice_totals.execute_inclusive_us, std::min(execute_us, total_us));
+-  AddSliceTotal(s_slice_totals.compile_subset_us, std::min(slice.compile_us, execute_us));
++  // Sampled slices stand in for the unsampled ones around them.
++  constexpr std::uint64_t scale = SLICE_SAMPLE_PERIOD;
++  AddSliceTotal(s_slice_totals.slices, scale);
++  AddSliceTotal(s_slice_totals.total_us, scale * total_us);
++  AddSliceTotal(s_slice_totals.advance_inclusive_us, scale * std::min(advance_us, total_us));
++  AddSliceTotal(s_slice_totals.execute_inclusive_us, scale * std::min(execute_us, total_us));
++  AddSliceTotal(s_slice_totals.compile_subset_us, scale * std::min(slice.compile_us, execute_us));
+   AddSliceTotal(s_slice_totals.throttle_blocked_subset_us,
+-                std::min(slice.throttle_wait_us, advance_us));
+-  AddSliceTotal(s_slice_totals.dvd_blocked_subset_us, std::min(slice.dvd_wait_us, advance_us));
++                scale * std::min(slice.throttle_wait_us, advance_us));
++  AddSliceTotal(s_slice_totals.dvd_blocked_subset_us,
++                scale * std::min(slice.dvd_wait_us, advance_us));
+   s_slice_totals.sequence.fetch_add(1, std::memory_order_release);
+ }
+ 
+@@ -349,7 +357,8 @@ inline void SetEnabled(bool enabled)
+ 
+ inline bool BeginSlice()
+ {
+-  if (!s_enabled.load(std::memory_order_acquire))
++  if (!s_enabled.load(std::memory_order_acquire) ||
++      (s_slice_sample_counter++ % SLICE_SAMPLE_PERIOD) != 0)
+   {
+     s_current_slice.active = false;
+     return false;

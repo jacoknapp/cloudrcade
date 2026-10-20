@@ -18,7 +18,7 @@ The built-in
 GameCube performance readout is off by default; switch it on or off in the
 library's Core Settings before launching. It samples native frame and
 emulated-time counters once per second. It reports rendered FPS, native game target
-and emulation speed, plus device WebGPU resolution and WASM memory. Sunshine NTSC
+and emulation speed, plus device WebGPU resolution and WASM memory. Native execute/compile timings time one CoreTiming slice in eight and scale the totals, so the readout costs about 2% of the emulation thread instead of about 9%. Sunshine NTSC
 targets30 rendered FPS at100% speed; presentation is capped at60 FPS for games
 that normally render at60. The cap does not alter the emulated game clock.
 It resets after pause/resume or loading states and adds no GPU timing probes.
