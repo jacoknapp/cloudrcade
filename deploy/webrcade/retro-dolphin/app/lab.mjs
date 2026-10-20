@@ -8,6 +8,7 @@ import {GameCubePerf, perfEnabled, createPerfReadout} from './perf.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
 import {createBackgroundPause} from './lifecycle.mjs';
 import {createFrameSkipControl} from './frame-skip.mjs';
+import {runtimeFingerprint} from './runtime-identity.mjs';
 
 const get=id=>document.getElementById(id);
 const recovery=window.WrcadGameCubeRecovery;
@@ -238,7 +239,7 @@ window.WrcadGameCube={get ready(){return !!session?.booted&&!session.closed;},ge
  togglePause,toggleAudio,fitCanvas,showPauseMenu,saveState:slot=>stateAction(false,slot),loadState:slot=>stateAction(true,slot),exit:()=>close({leave:true}),menuOpen(open){controllerMenuVisible=!!open;pressed.clear();fitCanvas();if(open&&!sound)void toggleAudio().catch(error=>status(error.message));if(open)session?.setInput({mask:0,stickX:128,stickY:128,cStickX:128,cStickY:128,triggerLeft:0,triggerRight:0,analogA:0,analogB:0});},
 };
 addEventListener('resize',fitCanvas);visualViewport?.addEventListener('resize',fitCanvas);
-fetch('core-info.json').then(r=>r.json()).then(info=>{coreIdentity=info.artifacts?.['dolphin-core-upstream.wasm'];runtimeIdentity=info.hostPatchSha256;recovery?.identify(null,coreIdentity,runtimeIdentity);get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
+fetch('core-info.json').then(r=>r.json()).then(async info=>{coreIdentity=info.artifacts?.['dolphin-core-upstream.wasm'];runtimeIdentity=await runtimeFingerprint(info);recovery?.identify(null,coreIdentity,runtimeIdentity);get('details').textContent=`Dolphin ${info.dolphinCommit.slice(0,7)}. Device WebGPU required. Local saves and connected Nextcloud sync.`;}).catch(()=>{});
 controls();
 if(document.hidden)backgroundPause.background();
 if(props?.rom){await select(signal=>remoteDisc(props.rom,{signal}));if(selected)await boot();}

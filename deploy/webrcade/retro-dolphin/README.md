@@ -90,6 +90,8 @@ Only the unused legacy
 CPU notification image is reduced; the native GPU render resolution is unchanged.
 Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
 session and offer restart or return to the library.
+Crash runtime identifiers cover native JavaScript, host modules and patch inputs,
+so JavaScript-only changes are distinguishable when the WASM stays unchanged.
 
 The core uses [wasm-dolphin](https://github.com/dougchansan/wasm-dolphin) at the
 exact base commit in `core.json`, with independently verified upstream artifacts. Preparation
