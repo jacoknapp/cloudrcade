@@ -20,13 +20,14 @@
     "0012-webgpu-texture-decode.patch": "af3a4ae167ba0c7c6a8a75825204efc6dc104e561414aad5d9a4f12346b617a8",
     "0013-snapshot-paired-scalar.patch": "a35c135f28984fc77d2ff44b3823e9872870ec70ac63d0457d14945cb95ce06e",
     "0014-order-texture-transfers.patch": "2d297b1d7bbe5523dda2cfcfe7e722a9b6e29af6cb61dbc97ec56609e88a453c",
-    "0015-sampled-slice-timing.patch": "fe28f3aefa415a4e706c01f65d2f580918b3e2e1fef91f85cba3ccf7c1c721d8"
+    "0015-sampled-slice-timing.patch": "fe28f3aefa415a4e706c01f65d2f580918b3e2e1fef91f85cba3ccf7c1c721d8",
+    "0016-recycle-full-wasm-instance-cache.patch": "efdf63afe0f0f08baeda0d2059fb46d32a840dc0a2e8fa01e7053d1c20958a13"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "2e5f03cd5b655c4e6d0d30ac140aeab6a5148fbc90aec0d6d509e9c5777b71db",
-    "dolphin-core-upstream.js": "35e36983c75f8cafcf0bdd0e0ff777add4ba8cb342db3a58ceb69752022ed227"
+    "dolphin-core-upstream.wasm": "4d75e311abce254e5532ede4996941f9018cf0882e2586e72a49cf58b455623d",
+    "dolphin-core-upstream.js": "adfbda73ca86939a2ea86061f17ed9697333a029dfc8f3e2140cd4d67e08de25"
   },
   "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
-  "sourceTreeSha256": "c82949616f1497c2bfa2e8d976f219e8646b58bbdf650c8d9ece11a9f4b3876a",
+  "sourceTreeSha256": "1d682cc14e87d64f65abec0c3a9b730d8a4d11acfc8a16f8f5f4a8a30c385c03",
   "stateFormatId": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0"
 }
