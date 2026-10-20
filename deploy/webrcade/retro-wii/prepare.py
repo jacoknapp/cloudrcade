@@ -115,7 +115,7 @@ const disabledMessage='Enable Wii (experimental) in Settings → Core Settings.'
             text=re.sub(r'(/touch-controls/'+re.escape(name)+r')(?:\?v=[a-f0-9]+)?"',r'\1?v='+sha(HERE.parent/'touch/assets'/name)[:16]+'"',text)
         html.write_text(text)
         shutil.copytree(HERE,app/'adapter-source/wii',ignore=shutil.ignore_patterns('__pycache__'))
-        info.update(experimental=True,system='wii',nativeBuild=lock,artifacts=lock['artifacts'],stateFormatId=lock['artifacts']['dolphin-core-upstream.wasm'],sharedGameCubeNative=baseline['artifacts'],sourceSha256=sha(app/'wii-source.tar.gz'),hostPatchSha256=sha(HERE/'prepare.py'))
+        info.update(experimental=True,system='wii',nativeBuild=lock,artifacts=lock['artifacts'],stateFormatId=lock.get('stateFormatId',lock['artifacts']['dolphin-core-upstream.wasm']),sharedGameCubeNative=baseline['artifacts'],sourceSha256=sha(app/'wii-source.tar.gz'),hostPatchSha256=sha(HERE/'prepare.py'))
         info['adapterFilesSha256']={p.name:sha(p) for p in sorted(app.glob('*.mjs'))}
         (app/'core-info.json').write_text(json.dumps(info,indent=2)+'\n')
         stage.rename(out)

@@ -63,7 +63,12 @@ def build():
     out.mkdir(parents=True)
     for name in baseline['artifacts']:shutil.copy2(artifacts/name,out/name)
     lock['artifacts']={name:sha(out/name) for name in baseline['artifacts']}
-    lock['stateFormatId']=lock['artifacts']['dolphin-core-upstream.wasm']
+    # Wii savestates survive native changes that keep Dolphin's serialization (as
+    # GameCube's do). Set WII_STATE_FORMAT_CHANGED=1 when a change alters it.
+    if os.environ.get('WII_STATE_FORMAT_CHANGED')=='1' or not previous.get('stateFormatId'):
+        lock['stateFormatId']=lock['artifacts']['dolphin-core-upstream.wasm']
+    else:
+        lock['stateFormatId']=previous['stateFormatId']
     (out/'actual-native-build.json').write_text(json.dumps(lock,indent=2)+'\n')
     if not qualify and previous['artifacts']!=lock['artifacts']:
         raise SystemExit('Wii native artifact mismatch: '+json.dumps({

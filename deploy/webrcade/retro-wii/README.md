@@ -66,6 +66,9 @@ Rust compiler/cache. Use a filesystem with enough space for a Dolphin source bui
 verified current GameCube package. `WII_NATIVE_CACHE` reuses only exact locked
 native hashes. An intentional native change requires a fresh `--qualify` build,
 review of the resulting source/artifact lock and native/browser regression checks.
+The Wii savestate namespace (`stateFormatId`) is kept across native rebuilds that leave
+Dolphin's serialization unchanged, so existing Wii states stay loadable. Set
+`WII_STATE_FORMAT_CHANGED=1` for `--qualify` when a change alters the saved state format.
 
 The Wii source archive contains fully patched Dolphin/source, the complete
 GameCube recipe/locks, and the additional `cloudrcade-wii` patch/lock. To rebuild
