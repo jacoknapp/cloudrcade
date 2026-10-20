@@ -7,7 +7,13 @@ acknowledged pause/resume, Web Audio, memory cards and eight save-state slots ar
 included. Menu and Escape open CloudRcade's shared native pause screen and save
 slot editor, with the same keyboard and gamepad navigation as the other cores.
 Return to Browse saves memory cards before leaving. The controller settings
-drawer handles only touch controls, mute and layout editing. GameCube has its
+drawer includes touch controls, mute, layout editing and **Frame skip**. Frame skip
+defaults to **Off**; **2×**, **3×** and **4×** show every second, third or fourth
+display frame. The preference is saved separately for GameCube and Wii on this
+browser and changes apply during play. Audio and emulated time continue; only
+final display passes are omitted. Offscreen graphics/copies remain intact for
+games that reuse their results, so CPU-bound games may gain little speed.
+GameCube has its
 own default button and stick geometry; saved per-system layouts remain usable.
 Desktop audio starts enabled after Play; browser gestures retry audio activation.
 Touch devices use Menu or the drawer to enable audio; master mute still applies.

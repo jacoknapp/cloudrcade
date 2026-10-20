@@ -7,6 +7,7 @@ import {AudioController} from './vendor/src/audio.js';
 import {GameCubePerf, perfEnabled, createPerfReadout} from './perf.mjs';
 import {createPauseMenu} from './pause-ui.mjs';
 import {createBackgroundPause} from './lifecycle.mjs';
+import {createFrameSkipControl} from './frame-skip.mjs';
 
 const get=id=>document.getElementById(id);
 const recovery=window.WrcadGameCubeRecovery;
@@ -15,6 +16,7 @@ let canvas=get('screen'), session=null, selected=null, busy=false, animation=nul
 let selectionAbort=null, saves=null, exiting=false, sound=false, audio=null;
 let perf=null, pauseMenu=null, pausing=null, escapeOpen=false,disposeSaveFeedback=null;
 const pressed=new Set(), input={};
+const frameSkipControl=createFrameSkipControl(window,{onChange:divisor=>session?.setFrameSkip(divisor)});
 let props=null;
 try {
  const encoded=new URLSearchParams(location.search).get('props');
@@ -79,7 +81,7 @@ async function perform(action){
  if(busy||exiting)return;busy=true;
  if(!session){recovery?.begin();const current=generation;session=new GameCubeSession({canvas,nativeTimingEnabled:perfEnabled(),onStatus:text=>{if(current===generation)status(text);},onTelemetry:frame=>{if(current===generation){perf?.sample(frame);recovery?.sample(frame);}},onFatal:error=>{if(current===generation)runtimeFailure(error);}});}
  const owned=session,current=generation;controls();
- try{await action(owned);}
+ try{owned.frameSkip=frameSkipControl.value;await action(owned);}
  catch(error){if(current===generation){if(props?.rom)runtimeFailure(error);else{dispose();status(error.message);}}}
  finally{if(current===generation){busy=false;controls();backgroundPause.update();}}
 }

@@ -381,4 +381,5 @@ def patch_runtime(app, native_core_sha=None):
             '      return { loaded, error: loaded ? null : "The state could not be loaded. Resume to continue your previous game.", rc, beforeState, afterState,')
     import runpy
     text = runpy.run_path(str(Path(__file__).with_name("patch-texture-decode.py")))["patch_texture_decode"](text)
+    text = runpy.run_path(str(Path(__file__).with_name("patch-frame-skip.py")))["patch_frame_skip"](text)
     worker.write_text(text)

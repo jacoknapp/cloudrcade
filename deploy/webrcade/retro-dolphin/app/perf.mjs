@@ -58,6 +58,7 @@ export class GameCubePerf {
       this.targetFps === null ? 'Target: game-native frame rate · 100% normal speed' : `Target: ${this.targetFps} rendered fps · 100% normal speed`,
       `Video callbacks: ${callbacks.toFixed(1)}/s (console video timing)`,
       `Presentation ceiling: ${d.fpsLimit ?? 60}/s`,
+      d.frameSkip ? `Frame skip: ${d.frameSkip.divisor===1?'Off':d.frameSkip.divisor+'×'} · ${d.frameSkip.skipped} display frames skipped (lifetime; audio continues)` : '',
       `Frame gaps: p95 ${number(d.render?.p95Ms)} ms · max ${number(d.render?.maxMs)} ms (last 1s, ${d.render?.samples ?? 0} intervals)`,
       `Last rendered frame: ${number(d.render?.ageMs)} ms ago`,
       'Rendered FPS counts successful GPU submissions; pixel uniqueness and GPU completion time are not sampled.',
