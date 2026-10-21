@@ -17,8 +17,10 @@ from urllib.parse import quote
 spec = importlib.util.spec_from_file_location('core_cache', Path(__file__).with_name('core-cache.py'))
 cache = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cache)
-SOURCE = '2106cfe3e4b0958fbe63307cd48b1ca042e7e67c'
-IMAGE = 'ghcr.io/jacoknapp/cloudrcade@sha256:0d0bcf6d39615657edce98440add4647f591fa0384ac834f7394637cc9ba4a85'
+# Keep a current stable fallback when newer beta runs fill the API window.
+# CI39153861828 and OCI provenance qualify this exact main release.
+SOURCE = 'f4ce1a775f201a6f1540949db28ccb6c20b9787e'
+IMAGE = 'ghcr.io/jacoknapp/cloudrcade@sha256:2b63b674d1f322c5f88f848fa725473348b457ba50083294decc5524c7cb4aeb'
 
 
 def git(root, *args):
