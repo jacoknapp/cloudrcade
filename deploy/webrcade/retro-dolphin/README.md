@@ -219,5 +219,5 @@ allocates its arena; active callbacks are never resized or recycled in place.
 Both budgets use the existing bounded CLOCK retirement and 768 MiB WASM reserve.
 Cache budgets are runtime policy, excluded from Dolphin state serialization.
 A larger cache reduces capacity pressure; it does not skip CPU emulation work or
-guarantee higher FPS. The performance readout's native helper stats include
-`instcap` and `instlive`.
+guarantee higher FPS. Native helper diagnostics expose `instcap` and `instlive`;
+the normal performance readout shows the compiled-block count.
