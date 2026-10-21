@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Restore unchanged core artifacts and corresponding source from qualified CI.
 
-Prefer the branch's last successful published release, pinned by OCI digest and
-verified source provenance. The recorded qualified release is an offline/API
+Find a successful ancestral publication across release channels, pinned by OCI
+digest and verified source provenance. The recorded qualified release is an offline/API
 fallback. Only matching effective inputs can be resealed for current cache keys.
 """
 import importlib.util
@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from urllib.parse import quote
 
 spec = importlib.util.spec_from_file_location('core_cache', Path(__file__).with_name('core-cache.py'))
 cache = importlib.util.module_from_spec(spec)
@@ -59,10 +58,10 @@ def qualified_release():
             re.fullmatch(r'[a-f0-9]{40}', head) and os.environ.get('GH_TOKEN')):
         return SOURCE, IMAGE
     try:
-        # Stable promotions can inherit qualified cores published on beta.
-        # Ancestry/provenance below and exact inputs in restore still apply.
-        branch_filter = '' if branch == 'main' else f'branch={quote(branch, safe="")}&'
-        runs = read_json('gh', 'api', f'repos/{repo}/actions/workflows/docker.yml/runs?{branch_filter}status=success&per_page=10')
+        # GitHub's caches are branch-scoped. Promotions between beta channels
+        # can reuse a verified publication at the same commit or an ancestor.
+        # Ancestry, OCI provenance and exact effective input checks still apply.
+        runs = read_json('gh', 'api', f'repos/{repo}/actions/workflows/docker.yml/runs?status=success&per_page=10')
         for run in runs['workflow_runs']:
             source = run['head_sha']
             if run['event'] not in ('push', 'workflow_dispatch') or not re.fullmatch(r'[a-f0-9]{40}', source):

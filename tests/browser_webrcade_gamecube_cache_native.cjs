@@ -45,13 +45,16 @@ const readState=()=>process.env.GAMECUBE_TEST_STATE?fs.readFileSync(process.env.
     const native=await req('cacheBudgetProbe');assert.equal(native.capacity,selected.capacity);assert.equal(native.lateChange,0);assert.equal(native.heapBytes,768*1024*1024);assert(native.helper.includes('instcap:'+selected.capacity));
     const live=Number(/instlive:(\d+)/.exec(native.helper)?.[1]);assert(live>0&&live<=selected.capacity);
     if(profile==='desktop'&&old)assert(live>16384,'the actual CPU pthread must retain beyond the mobile limit');
+    const chainBlocks=Number(/fastchain:(\d+)/.exec(native.helper)?.[1]);assert(chainBlocks>0,'the actual CPU pthread must run compiled-block chains');
+    const evictions=Number(/instevict:(\d+)/.exec(native.helper)?.[1]);
+    if(profile==='standard'&&old)assert(evictions>0,'standard-profile old-state gameplay must exercise CLOCK retirement with chaining');
     if(profile==='desktop'&&old){
      await page.evaluate(()=>__s.pause());
      desktopState=await page.evaluate(async()=>{const result=await __s.adapter.request('saveStateFile');if(!result.saved||!result.bytes?.byteLength)throw Error('Native state save failed');const bytes=new Uint8Array(result.bytes);let text='';for(let i=0;i<bytes.length;i+=32768)text+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(text);});
      await page.evaluate(()=>WrcadGameCube.togglePause());
     }
     if(outDir)await page.screenshot({path:path.join(outDir,profile+'.png')});
-    assert.deepEqual(errors,[]);const result={profile,capacity:native.capacity,live,lateChange:native.lateChange,heapBytes:native.heapBytes,olderStateLoaded:!!old,desktopStateLoaded:profile==='standard'&&!!desktopState,gpu};results.push(result);console.log('PASS',JSON.stringify(result));
+    assert.deepEqual(errors,[]);const result={profile,capacity:native.capacity,live,chainBlocks,evictions,lateChange:native.lateChange,heapBytes:native.heapBytes,olderStateLoaded:!!old,desktopStateLoaded:profile==='standard'&&!!desktopState,gpu};results.push(result);console.log('PASS',JSON.stringify(result));
    }finally{await context.close();}
   }
  }finally{await browser.close();}

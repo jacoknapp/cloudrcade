@@ -78,5 +78,22 @@ class QualifiedRestoreTest(unittest.TestCase):
             self.assertEqual(qualified.qualified_release(),(source,'ghcr.io/example/arcade@'+digest))
             self.assertNotIn('branch=',reader.call_args_list[0].args[-1])
 
+    def test_beta_promotion_reuses_same_commit_from_candidate_channel(self):
+        head='b'*40;digest='sha256:'+'f'*64
+        env={'GITHUB_REPOSITORY':'example/arcade','GITHUB_REF_NAME':'beta/release','GITHUB_SHA':head,'GH_TOKEN':'fixture-token'}
+        runs={'workflow_runs':[{'event':'workflow_dispatch','head_sha':head,'head_branch':'beta/candidate'}]}
+        provenance={'SLSA':{'args':{'vcs:revision':head,'vcs:source':'https://github.com/example/arcade'}}}
+        with patch.dict(os.environ,env,clear=True),patch.object(qualified,'read_json',side_effect=[runs,{'status':'identical'},{'digest':digest},provenance]) as reader:
+            self.assertEqual(qualified.qualified_release(),(head,'ghcr.io/example/arcade@'+digest))
+            self.assertNotIn('branch=',reader.call_args_list[0].args[-1])
+
+    def test_beta_promotion_rejects_unrelated_candidate(self):
+        source='a'*40;head='b'*40
+        env={'GITHUB_REPOSITORY':'example/arcade','GITHUB_REF_NAME':'beta/release','GITHUB_SHA':head,'GH_TOKEN':'fixture-token'}
+        runs={'workflow_runs':[{'event':'workflow_dispatch','head_sha':source,'head_branch':'beta/candidate'}]}
+        with patch.dict(os.environ,env,clear=True),patch.object(qualified,'read_json',side_effect=[runs,{'status':'diverged'}]) as reader:
+            self.assertEqual(qualified.qualified_release(),(qualified.SOURCE,qualified.IMAGE))
+            self.assertEqual(reader.call_count,2)
+
 
 if __name__=='__main__':unittest.main()
