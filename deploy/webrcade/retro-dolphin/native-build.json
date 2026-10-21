@@ -24,13 +24,14 @@
     "0016-recycle-full-wasm-instance-cache.patch": "efdf63afe0f0f08baeda0d2059fb46d32a840dc0a2e8fa01e7053d1c20958a13",
     "0017-release-recycled-wasm-functions.patch": "81afeeaf77098f713896489e6cb6749bf95c1e1e327037a6b516a954f2352193",
     "0018-clock-evict-wasm-instances.patch": "84802209e9587200a8e5ca8310853b7fc46570dba004eee4b317c2f81ec5e260",
-    "0019-native-graphics-frame-skip.patch": "1574b0ed72c9d827a67063c44396e156f298dba7c3cb965bd4fe8953914f137b"
+    "0019-native-graphics-frame-skip.patch": "1574b0ed72c9d827a67063c44396e156f298dba7c3cb965bd4fe8953914f137b",
+    "0020-device-jit-cache-budget.patch": "f66b7c09e8dac1390643b4a1ac0a7562ae78a5f0e876821967499eeb76b57a32"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "a3499f68e542c17853c3d01ccbd3a6fc4e17342b138db15e203d9ab320559c20",
-    "dolphin-core-upstream.js": "fc3def1869408ba9ff8396e4af1280ba6003afee3624e7d04697c4c7cf0f36c7"
+    "dolphin-core-upstream.wasm": "20e7a731400ec5e76572e7e91c3c875fb497220ac21a6b5327a0d0d915b45cd1",
+    "dolphin-core-upstream.js": "5e41095b613c646743b9532f9d9c4ad13e1a3731fcd869bf266a9af823b59107"
   },
   "recipeSha256": "a942d7d95cadc4abedd6e1450c08541806e24bf57c5bbf256b8d7596c407a6c8",
-  "sourceTreeSha256": "3da480ca6e31c73764676daa042ee1a6a15b890bdc2bb7eded4bde016f409288",
+  "sourceTreeSha256": "ec2549bdb5059a320b789bb8f20edaf954a485e7694f429e1dc15c595681c007",
   "stateFormatId": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0"
 }

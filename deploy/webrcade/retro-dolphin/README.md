@@ -204,3 +204,20 @@ worker; the compiled core, state format, disc cache and other systems stay the
 same. Qualification checks both rendered and native progress and reviews the
 race image. The root image disables automatic Watchtower updates so native browser
 verification can complete before an explicit deployment.
+
+
+### Compiled-code cache budgets
+
+Before boot, positively identified Windows/macOS/x86 Linux desktops select a
+32,768-instance executable cache and 128 MiB callback arena. iOS (including iPad
+Mac-style user agents), Android/mobile, unknown devices and desktops reporting
+less than 8 GiB through the optional browser memory hint retain 16,384 instances and
+64 MiB. Browsers without a memory hint use the desktop classification; that does
+not measure available RAM. Wii retains its existing 32,768/128 MiB native baseline
+under either profile. Profiles are sealed atomically when the cached interpreter
+allocates its arena; active callbacks are never resized or recycled in place.
+Both budgets use the existing bounded CLOCK retirement and 768 MiB WASM reserve.
+Cache budgets are runtime policy, excluded from Dolphin state serialization.
+A larger cache reduces capacity pressure; it does not skip CPU emulation work or
+guarantee higher FPS. The performance readout's native helper stats include
+`instcap` and `instlive`.

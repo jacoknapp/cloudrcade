@@ -691,33 +691,24 @@ index 3233b626..3c912edc 100644
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-@@ -7987,7 +7987,7 @@
- #line 7757
-   RefreshConfig();
- 
--  AllocCodeSpace(CODE_SIZE / 2);
-+  AllocCodeSpace(CODE_SIZE);
-   ResetFreeMemoryRanges();
- 
-   jo.enableBlocklink = false;
-@@ -8371,7 +8371,7 @@
-     ApplyRequestedWasmPolicy(*this);
-     // Cheap slice gate: metrics-off gameplay must not call a JS clock on
-     // every CoreTiming slice. Maintenance never interrupts a compiled block.
--    if ((m_block_cache.wasm_instances.Size() >= 20480 || s_wasm_instance_prune_pending) &&
-+    if ((m_block_cache.wasm_instances.Size() >= 32768 || s_wasm_instance_prune_pending) &&
-         (++s_wasm_instance_prune_slices & 63u) == 0)
-       PruneWasmInstances();
- #endif
+@@ -123,6 +123,6 @@
+ // Selected before boot, then sealed before allocating callback operands. The
+ // shared atomic lets the actual compiling pthread configure its own JS table.
+-constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 16384;
++constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 32768;
+ constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
+ std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
+ extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
-@@ -5,7 +5,7 @@
+@@ -5,8 +5,8 @@
  (() => {
    const entries = new Map();
    const signatures = new Map();
--  const capacity = 16384;
-+  const capacity = 32768;
+-  let capacity = 16384;
++  let capacity = 32768;
+   let configured = false;
    // Handles become reusable only after the CPU unlinks every native user
    // at a safe point. Permanent helper slots never enter this free list.
    const free = [];

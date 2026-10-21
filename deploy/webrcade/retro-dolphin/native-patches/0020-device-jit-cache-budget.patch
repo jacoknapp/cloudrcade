@@ -1,0 +1,101 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -118,6 +118,30 @@
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wmissing-variable-declarations"
+ #endif
++// Selected before boot, then sealed before allocating callback operands. The
++// shared atomic lets the actual compiling pthread configure its own JS table.
++constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 16384;
++constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
++std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
++extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
++{
++  if (desktop != 0 && desktop != 1)
++    return 0;
++  const u32 capacity = desktop ? 32768u : DEFAULT_WASM_INSTANCE_CAPACITY;
++  u32 previous = s_wasm_instance_capacity.load(std::memory_order_relaxed);
++  while (!(previous & WASM_INSTANCE_BUDGET_LOCKED))
++  {
++    if (s_wasm_instance_capacity.compare_exchange_weak(previous, capacity,
++                                                      std::memory_order_relaxed))
++      return 1;
++  }
++  return 0;
++}
++extern "C" EMSCRIPTEN_KEEPALIVE u32 DolphinWeb_GetWasmCacheCapacity()
++{
++  return s_wasm_instance_capacity.load(std::memory_order_relaxed) & ~WASM_INSTANCE_BUDGET_LOCKED;
++}
++
+ // Synchronous WASM JIT block compile, called from the pthread that owns
+ // the cached interpreter. Day-6 attempted to move this off the pthread
+ // onto the discio worker (so a persistent IndexedDB-backed
+@@ -149,6 +173,7 @@
+       fast_os_interrupt_call_index, fast_melee_input_status_call_index,
+       fast_melee_status_call_index, fast_melee_service_poll_call_index];
+   const instances = Module._dolphinWasmInstances;
++  instances.configure(_DolphinWeb_GetWasmCacheCapacity);
+   const previous = instances.get(instanceKey, helperBindings);
+   if (previous !== undefined) {
+     _DolphinWeb_RecordCacheHit();
+@@ -7987,7 +8012,13 @@
+ #line 7757
+   RefreshConfig();
+ 
++#ifdef __EMSCRIPTEN__
++  const u32 capacity = s_wasm_instance_capacity.fetch_or(
++      WASM_INSTANCE_BUDGET_LOCKED, std::memory_order_relaxed) & ~WASM_INSTANCE_BUDGET_LOCKED;
++  AllocCodeSpace(capacity == 32768 ? CODE_SIZE : CODE_SIZE / 2);
++#else
+   AllocCodeSpace(CODE_SIZE / 2);
++#endif
+   ResetFreeMemoryRanges();
+ 
+   jo.enableBlocklink = false;
+@@ -8371,7 +8402,8 @@
+     ApplyRequestedWasmPolicy(*this);
+     // Cheap slice gate: metrics-off gameplay must not call a JS clock on
+     // every CoreTiming slice. Maintenance never interrupts a compiled block.
+-    if ((m_block_cache.wasm_instances.Size() >= 20480 || s_wasm_instance_prune_pending) &&
++    if ((m_block_cache.wasm_instances.Size() >=
++         DolphinWeb_GetWasmCacheCapacity() || s_wasm_instance_prune_pending) &&
+         (++s_wasm_instance_prune_slices & 63u) == 0)
+       PruneWasmInstances();
+ #endif
+@@ -11750,6 +11782,7 @@
+       << " compilefail:" << s_wasm_block_compile_fail_count
+       << " instreset:" << s_wasm_instance_reset_count << "/" << s_wasm_instance_full_refusals
+       << " instevict:" << s_wasm_instance_evictions.load(std::memory_order_relaxed)
++      << " instcap:" << DolphinWeb_GetWasmCacheCapacity()
+       << " instlive:" << s_wasm_instance_live.load(std::memory_order_relaxed)
+       << " pre:" << average_prefix << "/" << s_wasm_prefix_instruction_max
+       << " hist:" << s_wasm_prefix_histogram[0] << "," << s_wasm_prefix_histogram[1] << ","
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+@@ -5,12 +5,22 @@
+ (() => {
+   const entries = new Map();
+   const signatures = new Map();
+-  const capacity = 16384;
++  let capacity = 16384;
++  let configured = false;
+   // Handles become reusable only after the CPU unlinks every native user
+   // at a safe point. Permanent helper slots never enter this free list.
+   const free = [];
+   const key = (identity, bindings) => [identity, ...bindings].join('|');
+   Module._dolphinWasmInstances = {
++    configure(readCapacity) {
++      if (configured) return;
++      if (entries.size) throw new Error('Configure executable cache before compiling');
++      const requested = readCapacity();
++      if (requested !== 16384 && requested !== 32768)
++        throw new RangeError('Invalid executable cache capacity');
++      capacity = requested;
++      configured = true;
++    },
+     get: (identity, bindings) => entries.get(key(identity, bindings)),
+     full: () => entries.size >= capacity,
+     size: () => entries.size,

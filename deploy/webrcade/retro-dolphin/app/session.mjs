@@ -1,3 +1,4 @@
+import {jitCacheProfile} from './jit-cache-profile.mjs';
 const INPUT_FIELDS = ['mask','stickX','stickY','cStickX','cStickY','triggerLeft','triggerRight','analogA','analogB'];
 // CloudRcade GameCube session. The upstream Dolphin runtime is GPL-2.0-or-later.
 export function requireCapabilities(scope = globalThis) {
@@ -124,6 +125,9 @@ export class GameCubeSession {
       // The GPU presents directly; status polling does not need a 4 Hz cadence.
       adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());
+      if (this.closed) throw new Error('GameCube session is closed.');
+      this.jitCache = await this.bounded(adapter.request('jitCacheProfile',
+        {profile:jitCacheProfile(this.scope.navigator)}));
       if (this.closed) throw new Error('GameCube session is closed.');
       if (this.frameSkip !== 1) await this.bounded(adapter.request('frameSkip',{divisor:this.frameSkip}));
       if (this.nativeTimingEnabled) await this.bounded(adapter.request('nativeTiming',{enabled:true}));

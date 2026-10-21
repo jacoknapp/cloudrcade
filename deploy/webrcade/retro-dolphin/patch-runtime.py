@@ -274,6 +274,12 @@ def patch_runtime(app, native_core_sha=None):
     replace('    case "mountFile":\n      return mountFile(payload.file);',
             '    case "mountFile":\n      return mountFile(payload.file);\n'
             '    case "mountUrl":\n      return mountFile({...payload, remote:true});\n'
+            '    case "jitCacheProfile": {\n'
+            '      if (coreBoot.accepted) throw new Error("Choose the JIT cache size before boot");\n'
+            '      if (payload.profile !== "standard" && payload.profile !== "desktop") throw new Error("Invalid JIT cache profile");\n'
+            '      if (moduleInstance._DolphinWeb_SetWasmCacheProfile(payload.profile === "desktop" ? 1 : 0) !== 1) throw new Error("JIT cache size is already locked");\n'
+            '      return {profile:payload.profile,capacity:moduleInstance._DolphinWeb_GetWasmCacheCapacity()};\n'
+            '    }\n'
             '    case "heapStats":\n      return {heap:gamecubeHeapStats()};\n'
             '    case "nativeTiming": {\n'
             '      const available=typeof api?.setSliceTimingEnabled === "function" && typeof api?.getSliceTimingTotals === "function";\n'

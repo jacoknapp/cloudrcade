@@ -26,9 +26,15 @@ const helper=execFileSync('python3',['-c',"import sys,tarfile; t=tarfile.open(sy
     for(let i=0;i<4096;i++)cache.insert('new-block-'+i,[0,1],fn);
     const reused=table.length===length&&table.get(cache.get('new-block-0',[0,1]))()===42;
     cache.reset();let secondRetained=0;for(let i=2;i<length;i++)if(table.get(i)!==null)secondRetained++;
-    return {selective,retained,secondRetained,empty,reused,helperPreserved:table.get(0)()===42&&table.get(1)()===42};
+    const desktopModule={},desktopTable=new WebAssembly.Table({element:'anyfunc',initial:2});
+    desktopTable.set(0,fn);desktopTable.set(1,fn);new Function('Module','wasmTable',helper)(desktopModule,desktopTable);
+    const desktop=desktopModule._dolphinWasmInstances;desktop.configure(()=>32768);
+    for(let i=0;i<32768;i++)desktop.insert('desktop-'+i,[0,1],fn);
+    const desktopBounded=desktop.full()&&desktop.size()===32768&&desktop.insert('over-capacity',[0,1],fn)===0&&desktopTable.length===32770;
+    desktop.retire(desktop.get('desktop-0',[0,1]));const desktopReused=desktop.insert('replacement',[0,1],fn)===2&&desktopTable.get(3)()===42&&desktopTable.get(0)()===42;
+    return {selective,retained,secondRetained,empty,reused,desktopBounded,desktopReused,helperPreserved:table.get(0)()===42&&table.get(1)()===42};
    },helper);
-   assert.deepEqual(result,{selective:true,retained:0,secondRetained:0,empty:true,reused:true,helperPreserved:true});
+   assert.deepEqual(result,{selective:true,retained:0,secondRetained:0,empty:true,reused:true,desktopBounded:true,desktopReused:true,helperPreserved:true});
    console.log('PASS',engine.name(),'shipped native cache releases retired table functions, preserves helpers and reuses handles',JSON.stringify(result));
   }finally{await browser.close();}
  }
