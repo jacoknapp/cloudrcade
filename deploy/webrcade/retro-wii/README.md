@@ -29,8 +29,10 @@ and EXRAM. GameCube native bytes are unchanged.
 
 Wii has its own category, controller profile and independently saved layouts.
 The controller drawer also offers **Frame skip**: **Off** (default), **2×**,
-**3×** or **4×**, showing every second, third or fourth display frame. Audio and
-game timing continue. This browser stores the choice separately from GameCube.
+**3×** or **4×**, rendering every second, third or fourth native GX frame.
+The shared native graphics path omits texture/pipeline/upload/draw work and bulk
+vertex conversion; CPU emulation, GX state and audio continue. GPU-only EFB copies
+retain their last complete image. Graphics readback dependent games may need Off. This browser stores the choice separately from GameCube.
 The Remote/Nunchuk layout follows the shared screen/dock placement and editor behavior, with Wii button geometry:
 A/B, 1/2, C/Z, Plus/Minus and Home. Its left stick controls the Nunchuk.
 Touch the video or move the desktop mouse to point; tap/click is A and right

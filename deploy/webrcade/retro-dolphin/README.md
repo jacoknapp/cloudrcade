@@ -8,11 +8,19 @@ included. Menu and Escape open CloudRcade's shared native pause screen and save
 slot editor, with the same keyboard and gamepad navigation as the other cores.
 Return to Browse saves memory cards before leaving. The controller settings
 drawer includes touch controls, mute, layout editing and **Frame skip**. Frame skip
-defaults to **Off**; **2×**, **3×** and **4×** show every second, third or fourth
-display frame. The preference is saved separately for GameCube and Wii on this
-browser and changes apply during play. Audio and emulated time continue; only
-final display passes are omitted. Offscreen graphics/copies remain intact for
-games that reuse their results, so CPU-bound games may gain little speed.
+defaults to **Off**; **2×**, **3×** and **4×** render every second, third or fourth
+GX frame. The preference is saved separately for GameCube and Wii on this
+browser and changes apply between complete graphics images. Cadence follows
+new VI display images, including games making multiple XFB copies per image;
+a latched decision prevents an in-flight draw from changing midway. Skipped frames omit
+texture loading, pipeline preparation, buffer uploads and draws, plus bulk vertex
+conversion. The final three valid input vertices retain GX normal/matrix/zfreeze
+state; suppressed indexed tails use full conversion. CPU emulation, register
+processing and audio continue every frame. GPU-only EFB copies retain their last
+complete image instead of overwriting it with incomplete skipped-frame content;
+RAM copies and clears continue. Games relying on graphics readbacks can require
+Off. CPU-bound games can gain little speed even when drawing work falls sharply.
+Native frame markers determine presentation, with no second host skip cadence.
 GameCube has its
 own default button and stick geometry; saved per-system layouts remain usable.
 Desktop audio starts enabled after Play; browser gestures retry audio activation.

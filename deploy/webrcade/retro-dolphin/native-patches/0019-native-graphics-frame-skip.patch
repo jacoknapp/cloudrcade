@@ -1,0 +1,550 @@
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.cpp
+@@ -1432,12 +1432,13 @@
+   return committed;
+ }
+ 
+-bool WebGPUCommandStream::PushSubmitPresent()
++bool WebGPUCommandStream::PushSubmitPresent(bool skipped)
+ {
+   if (!m_header)
+     return false;
+   CmdRecord rec{};
+   rec.op = static_cast<u32>(CmdOp::SubmitPresent);
++  rec.arg.u[0] = skipped ? 1 : 0;
+   if (!Push(rec))
+     return false;
+   ++m_submit_serial;
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUCommandStream.h
+@@ -393,7 +393,7 @@
+   bool PushDraw(u32 vtx_count, u32 inst_count, u32 first_vtx);
+   bool PushDrawIndexed(u32 idx_count, u32 inst_count, u32 first_idx, u32 base_vtx);
+   bool PushEndPass();
+-  bool PushSubmitPresent();
++  bool PushSubmitPresent(bool skipped = false);
+   bool PushDestroy(u32 class_tag, u32 id);
+   // GPU texture blit. Coords/dims are clamped to 16 bits (EFB/XFB
+   // never exceed that); layers/levels to 8 bits. No-op if either id
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoBackends/WebGPU/WebGPUGfx.h"
++#include "VideoCommon/WasmFrameSkip.h"
+ 
+ #include "VideoBackends/Software/EfbCopy.h"
+ #include "VideoBackends/Software/Rasterizer.h"
+@@ -120,6 +121,29 @@
+ std::atomic<u64> s_geometry_upload_pack_epoch{0};
+ std::atomic<bool> s_geometry_upload_range_enabled{false};
+ std::atomic<u64> s_geometry_upload_range_epoch{0};
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE void SetGraphicsFrameSkip(int divisor)
++{
++  DolphinWeb::FrameSkip::requested.store(divisor >= 1 && divisor <= 4 ? divisor : 1,
++                                        std::memory_order_relaxed);
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE const char* GetGraphicsFrameSkipStats()
++{
++  using namespace DolphinWeb::FrameSkip;
++  static std::string result;
++  result = "{\"frames\":" + std::to_string(frames.load()) +
++      ",\"skipped\":" + std::to_string(skipped_frames.load()) +
++      ",\"drawnBatches\":" + std::to_string(drawn_batches.load()) +
++      ",\"skippedBatches\":" + std::to_string(skipped_batches.load()) +
++      ",\"cpuEfbAccesses\":" + std::to_string(cpu_efb_accesses.load()) +
++      ",\"decodedVertices\":" + std::to_string(decoded_vertices.load()) +
++      ",\"skippedVertices\":" + std::to_string(skipped_vertices.load()) +
++      ",\"ramEfbCopies\":" + std::to_string(ram_efb_copies.load()) +
++      ",\"skippedEfbCopies\":" + std::to_string(skipped_efb_copies.load()) +
++      ",\"skippedNoPass\":" + std::to_string(skipped_no_pass.load()) + "}";
++  return result.c_str();
+ }
+ 
+ extern "C" EMSCRIPTEN_KEEPALIVE void SetWebGpuStateCacheEnabled(int enabled)
+@@ -1170,6 +1194,19 @@
+   return BeginPassIfNeeded();
+ }
+ 
++void WebGPUGfx::PresentSkippedFrame()
++{
++  const bool had_pass = m_pass_open;
++  const bool committed = EndPassIfOpen();
++  // No open pass is normal on an omitted frame. A failed existing pass must
++  // still prevent publication, while an empty frame needs its ordered marker.
++  if ((!had_pass || committed) && m_cmd_stream.ready())
++  {
++    if (m_cmd_stream.PushSubmitPresent(true) && !had_pass)
++      DolphinWeb::FrameSkip::skipped_no_pass.fetch_add(1, std::memory_order_relaxed);
++  }
++}
++
+ void WebGPUGfx::PresentBackbuffer()
+ {
+   DolphinWeb::WebGpuProducerProfile::ScopedSample producer_profile(
+--- a/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
++++ b/Source/Core/VideoBackends/WebGPU/WebGPUGfx.h
+@@ -83,6 +83,7 @@
+ 
+   bool BindBackbuffer(const ClearColor& clear_color = {}) override;
+   void PresentBackbuffer() override;
++  void PresentSkippedFrame();
+   void ShowImage(const AbstractTexture* source_texture,
+                  const MathUtil::Rectangle<int>& source_rc) override;
+   void ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool colorEnable, bool alphaEnable,
+--- a/Source/Core/VideoCommon/Present.cpp
++++ b/Source/Core/VideoCommon/Present.cpp
+@@ -2,6 +2,10 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/Present.h"
++#include "VideoCommon/WasmFrameSkip.h"
++#ifdef HAS_WEBGPU
++#include "VideoBackends/WebGPU/WebGPUGfx.h"
++#endif
+ 
+ #include "Common/ChunkFile.h"
+ #include "Core/Config/GraphicsSettings.h"
+@@ -15,6 +19,7 @@
+ 
+ #include "Present.h"
+ #include "VideoCommon/AbstractGfx.h"
++#include "VideoCommon/VideoBackendBase.h"
+ #include "VideoCommon/FrameDumper.h"
+ #include "VideoCommon/FramebufferManager.h"
+ #include "VideoCommon/OnScreenUI.h"
+@@ -217,6 +222,8 @@
+ 
+     video_events.after_present_event.Trigger(present_info);
+   }
++  if (!is_duplicate && m_xfb_entry)
++    DolphinWeb::FrameSkip::EndFrame(m_xfb_entry->web_frame_skipped);
+ }
+ 
+ void Presenter::ImmediateSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height)
+@@ -247,6 +254,7 @@
+   ProcessFrameDumping(ticks);
+ 
+   video_events.after_present_event.Trigger(present_info);
++  if (m_xfb_entry) DolphinWeb::FrameSkip::EndFrame(m_xfb_entry->web_frame_skipped);
+ }
+ 
+ void Presenter::SetNextSwapEstimatedTime(u64 ticks, TimePoint host_time)
+@@ -868,6 +876,18 @@
+     return;
+   }
+ 
++#ifdef HAS_WEBGPU
++  if (m_xfb_entry && m_xfb_entry->web_frame_skipped &&
++      g_video_backend->GetConfigName() == "WebGPU")
++  {
++    // Complete a native frame without constructing a canvas pass. Copies,
++    // clears, transfers and GX side effects remain in authoritative ring order.
++    g_vertex_manager->Flush();
++    static_cast<WebGPU::WebGPUGfx*>(g_gfx.get())->PresentSkippedFrame();
++    return;
++  }
++#endif
++
+   // Since we use the common pipelines here and draw vertices if a batch is currently being
+   // built by the vertex loader, we end up trampling over its pointer, as we share the buffer
+   // with the loader, and it has not been unmapped yet. Force a pipeline flush to avoid this.
+@@ -1010,6 +1030,8 @@
+     m_immediate_swap_happened_this_field.store(false, std::memory_order_relaxed);
+ 
+     ImmediateSwap(m_last_xfb_addr, m_last_xfb_width, m_last_xfb_stride, m_last_xfb_height);
++    // Re-displaying a saved image must not consume the first fresh draw.
++    DolphinWeb::FrameSkip::ResetPhase();
+   }
+ }
+ 
+--- a/Source/Core/VideoCommon/TextureCacheBase.cpp
++++ b/Source/Core/VideoCommon/TextureCacheBase.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/TextureCacheBase.h"
++#include "VideoCommon/WasmFrameSkip.h"
+ 
+ #include <algorithm>
+ #include <chrono>
+@@ -783,6 +784,7 @@
+ 
+ void TCacheEntry::DoState(PointerWrap& p)
+ {
++  if (p.IsReadMode()) web_frame_skipped = false;
+   p.Do(addr);
+   p.Do(size_in_bytes);
+   p.Do(base_hash);
+@@ -2002,6 +2004,9 @@
+     return;
+ 
+   std::ranges::sort(candidates, {}, &TCacheEntry::id);
++  // VI can request a larger image than a raw XFB copy. The assembled image
++  // must carry the newest contributing frame's decision too.
++  stitched_entry->web_frame_skipped = candidates.back()->web_frame_skipped;
+ 
+   // We only upscale when necessary to preserve resolution. i.e. when there are upscaled partial
+   // copies to be stitched together.
+@@ -2212,11 +2217,25 @@
+   //
+   // Disadvantage of all methods: Calling this function requires the GPU to perform a pipeline flush
+   // which stalls any further CPU processing.
++  DolphinWeb::FrameSkip::BeginDraw();
+   const bool is_xfb_copy = !is_depth_copy && !isIntensity && dstFormat == EFBCopyFormat::XFB;
+   bool copy_to_vram = g_backend_info.bSupportsCopyToVram && !g_ActiveConfig.bDisableCopyToVRAM;
+   bool copy_to_ram =
+       !(is_xfb_copy ? g_ActiveConfig.bSkipXFBCopyToRam : g_ActiveConfig.bSkipEFBCopyToRam) ||
+       !copy_to_vram;
++
++  if (!is_xfb_copy)
++  {
++    if (copy_to_ram)
++      DolphinWeb::FrameSkip::ram_efb_copies.fetch_add(1, std::memory_order_relaxed);
++    if (DolphinWeb::FrameSkip::Skip() && !copy_to_ram)
++    {
++      // Keep the last completed offscreen image. Copying the cleared/incomplete
++      // skipped EFB would poison effects reused by the next retained frame.
++      DolphinWeb::FrameSkip::skipped_efb_copies.fetch_add(1, std::memory_order_relaxed);
++      return;
++    }
++  }
+ 
+   // tex_w and tex_h are the native size of the texture in the GC memory.
+   // The size scaled_* represents the emulated texture. Those differ
+@@ -2339,6 +2358,7 @@
+       {
+         entry->should_force_safe_hashing = is_xfb_copy;
+         entry->SetXfbCopy(dstStride);
++        entry->web_frame_skipped = DolphinWeb::FrameSkip::Skip();
+       }
+       else
+       {
+--- a/Source/Core/VideoCommon/TextureCacheBase.h
++++ b/Source/Core/VideoCommon/TextureCacheBase.h
+@@ -136,6 +136,8 @@
+   bool has_arbitrary_mips = false;
+   bool should_force_safe_hashing = false;  // for XFB
+   bool is_xfb_copy = false;
++  // Runtime-only presentation metadata; do not change the native state format.
++  bool web_frame_skipped = false;
+   bool is_xfb_container = false;
+   u64 id = 0;
+   u32 content_semaphore = 0;  // Counts up
+--- a/Source/Core/VideoCommon/VertexLoader.cpp
++++ b/Source/Core/VideoCommon/VertexLoader.cpp
+@@ -2,6 +2,14 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/VertexLoader.h"
++#include "VideoCommon/WasmFrameSkip.h"
++#include <bit>
++#include <tuple>
++#include <vector>
++#include <cstring>
++#include <emscripten/emscripten.h>
++#include "Common/Swap.h"
++#include "VideoCommon/VertexManagerBase.h"
+ 
+ #include "Common/Assert.h"
+ #include "Common/CommonTypes.h"
+@@ -255,6 +263,35 @@
+ 
+ int VertexLoader::RunVertices(const u8* src, u8* dst, int count)
+ {
++  // GX's retained position/matrix caches contain the last three input
++  // vertices; normal/tangent caches contain the last supplied values. Decode
++  // that tail on omitted frames instead of converting an entire hidden mesh.
++  // Indexed 0xff/0xffff positions can suppress vertices: retain the full path
++  // when any tail vertex is suppressed, preserving the slope eligibility test.
++  if (DolphinWeb::FrameSkip::Skip() && count > 3)
++  {
++    const u8* tail = src + (count - 3) * m_vertex_size;
++    const unsigned position_offset = std::popcount(m_VtxDesc.low.Hex & 0x1ffu);
++    const auto position = m_VtxDesc.low.Position.Value();
++    bool valid_tail = position == VertexComponentFormat::Direct;
++    if (position == VertexComponentFormat::Index8 || position == VertexComponentFormat::Index16)
++    {
++      valid_tail = true;
++      for (unsigned i = 0; i < 3; ++i)
++      {
++        const u8* index = tail + i * m_vertex_size + position_offset;
++        if (index[0] == 0xff && (position == VertexComponentFormat::Index8 || index[1] == 0xff))
++          valid_tail = false;
++      }
++    }
++    if (valid_tail)
++    {
++      DolphinWeb::FrameSkip::skipped_vertices.fetch_add(count - 3, std::memory_order_relaxed);
++      src = tail;
++      count = 3;
++    }
++  }
++  DolphinWeb::FrameSkip::decoded_vertices.fetch_add(count, std::memory_order_relaxed);
+   g_vertex_manager_write_ptr = dst;
+   g_video_buffer_read_ptr = src;
+ 
+@@ -273,3 +310,102 @@
+ 
+   return count - m_skippedVertices;
+ }
++
++// Compare the real portable loader's retained GX state with full conversion.
++// May only run before a video backend has initialized; never mutates gameplay.
++extern "C" EMSCRIPTEN_KEEPALIVE int RunGraphicsFrameSkipVertexSmoke()
++{
++  using namespace VertexLoaderManager;
++  if (g_vertex_manager) return -1;
++  const auto original_phase = DolphinWeb::FrameSkip::phase;
++  const auto original_current_skip = DolphinWeb::FrameSkip::current_skip;
++  const auto original_needs_latch = DolphinWeb::FrameSkip::needs_latch;
++  const auto original_decoded = DolphinWeb::FrameSkip::decoded_vertices.load();
++  const auto original_skipped = DolphinWeb::FrameSkip::skipped_vertices.load();
++  const auto original_bases = cached_arraybases;
++  const auto original_stride = g_main_cp_state.array_strides[CPArray::Position];
++  const auto original_read = g_video_buffer_read_ptr;
++  const auto original_write = g_vertex_manager_write_ptr;
++  auto snapshot = [] { return std::tuple{position_cache, position_matrix_index_cache,
++                                        normal_cache, tangent_cache, binormal_cache}; };
++  auto restore = [](const auto& v) {
++    std::tie(position_cache, position_matrix_index_cache, normal_cache, tangent_cache,
++             binormal_cache) = v;
++  };
++  const auto original_caches = snapshot();
++  std::vector<u8> positions(65536 * 12, 0);
++  auto append_float = [](std::vector<u8>& bytes, float value) {
++    const u32 swapped = Common::swap32(std::bit_cast<u32>(value));
++    const auto* p = reinterpret_cast<const u8*>(&swapped);
++    bytes.insert(bytes.end(), p, p + 4);
++  };
++  for (unsigned i = 0; i < 12; ++i)
++  {
++    std::vector<u8> v;
++    for (unsigned j = 0; j < 3; ++j) append_float(v, i * 10.f + j + 0.5f);
++    std::copy(v.begin(), v.end(), positions.begin() + i * 12);
++  }
++  cached_arraybases[CPArray::Position] = positions.data();
++  g_main_cp_state.array_strides[CPArray::Position] = 12;
++  int result = 1, case_id = 0;
++  for (const auto format : {VertexComponentFormat::Direct, VertexComponentFormat::Index8,
++                            VertexComponentFormat::Index16})
++  for (const bool normals : {false, true})
++  for (const bool sentinel : {false, true})
++  {
++    ++case_id;
++    TVtxDesc desc{};
++    VAT vat{};
++    desc.low.PosMatIdx = true;
++    desc.low.Tex3MatIdx = true;
++    desc.low.Position = format;
++    desc.low.Normal = normals ? VertexComponentFormat::Direct : VertexComponentFormat::NotPresent;
++    vat.g0.PosFormat = ComponentFormat::Float;
++    vat.g0.PosElements = CoordComponentCount::XYZ;
++    vat.g0.NormalFormat = ComponentFormat::Float;
++    vat.g0.NormalElements = NormalComponentCount::NTB;
++    VertexLoader loader(desc, vat);
++    std::vector<u8> input;
++    for (unsigned i = 0; i < 9; ++i)
++    {
++      input.push_back((i * 3) & 63);
++      input.push_back((i * 7) & 63);
++      if (format == VertexComponentFormat::Direct)
++        for (unsigned j = 0; j < 3; ++j) append_float(input, i * 10.f + j + 0.5f);
++      else
++      {
++        const unsigned index = sentinel && i == 8 ? 65535 : i;
++        if (format == VertexComponentFormat::Index16) input.push_back(index >> 8);
++        input.push_back(index & 255);
++      }
++      if (normals)
++        for (unsigned j = 0; j < 9; ++j) append_float(input, i * 100.f + j + 0.25f);
++    }
++    std::array<u8, 4096> full{}, tail{};
++    restore(original_caches);
++    DolphinWeb::FrameSkip::phase = 0;
++    DolphinWeb::FrameSkip::current_skip = false;
++    const int full_count = loader.RunVertices(input.data(), full.data(), 9);
++    const auto expected = snapshot();
++    restore(original_caches);
++    DolphinWeb::FrameSkip::phase = 1;
++    DolphinWeb::FrameSkip::current_skip = true;
++    const int tail_count = loader.RunVertices(input.data(), tail.data(), 9);
++    const bool fallback = sentinel && format != VertexComponentFormat::Direct;
++    if (snapshot() != expected || tail_count != (fallback ? full_count : 3) ||
++        (!fallback && std::memcmp(tail.data(), full.data() + 6 * loader.m_native_vtx_decl.stride,
++                                  3 * loader.m_native_vtx_decl.stride) != 0))
++      result = -case_id - 1;
++  }
++  restore(original_caches);
++  cached_arraybases = original_bases;
++  g_main_cp_state.array_strides[CPArray::Position] = original_stride;
++  g_video_buffer_read_ptr = original_read;
++  g_vertex_manager_write_ptr = original_write;
++  DolphinWeb::FrameSkip::phase = original_phase;
++  DolphinWeb::FrameSkip::current_skip = original_current_skip;
++  DolphinWeb::FrameSkip::needs_latch = original_needs_latch;
++  DolphinWeb::FrameSkip::decoded_vertices.store(original_decoded);
++  DolphinWeb::FrameSkip::skipped_vertices.store(original_skipped);
++  return result;
++}
+--- a/Source/Core/VideoCommon/VertexLoaderManager.cpp
++++ b/Source/Core/VideoCommon/VertexLoaderManager.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/VertexLoaderManager.h"
++#include "VideoCommon/WasmFrameSkip.h"
+ 
+ #include <algorithm>
+ #include <iterator>
+@@ -401,6 +402,7 @@
+   if (count == 0) [[unlikely]]
+     return 0;
+   ASSERT(count > 0);
++  if constexpr (!IsPreprocess) DolphinWeb::FrameSkip::BeginDraw();
+ 
+   VertexLoaderBase* loader = RefreshLoader<IsPreprocess>(vtx_attr_group);
+ 
+@@ -433,7 +435,7 @@
+ 
+     // CPUCull's performance increase comes from encoding fewer GPU commands, not sending less data
+     // Therefore it's only useful to check if culling could remove a flush
+-    bool can_cpu_cull = g_ActiveConfig.bCPUCull &&
++    bool can_cpu_cull = !DolphinWeb::FrameSkip::Skip() && g_ActiveConfig.bCPUCull &&
+                         primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES &&
+                         !g_vertex_manager->HasSendableVertices();
+ 
+--- a/Source/Core/VideoCommon/VertexManagerBase.cpp
++++ b/Source/Core/VideoCommon/VertexManagerBase.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/VertexManagerBase.h"
++#include "VideoCommon/WasmFrameSkip.h"
+ 
+ #include <array>
+ #include <cmath>
+@@ -121,9 +122,13 @@
+   auto& video_events = GetVideoEvents();
+ 
+   m_frame_end_event =
+-      video_events.after_frame_event.Register([this](Core::System&) { OnEndFrame(); });
++      video_events.after_frame_event.Register([this](Core::System&) {
++        OnEndFrame();
++        DolphinWeb::FrameSkip::XfbCopied();
++      });
+   m_after_present_event = video_events.after_present_event.Register(
+       [this](const PresentInfo& pi) { m_ticks_elapsed = pi.emulated_timestamp; });
++  DolphinWeb::FrameSkip::ResetPhase();
+   m_index_generator.Init();
+   m_custom_shader_cache = std::make_unique<CustomShaderCache>();
+   m_cpu_cull.Init();
+@@ -510,6 +515,9 @@
+            (bpmem.alpha_test.hex >> 16) & 0xff);
+ #endif
+ 
++  const bool skip_graphics = DolphinWeb::FrameSkip::Skip();
++  if (!m_cull_all) DolphinWeb::FrameSkip::Batch(skip_graphics);
++
+   // Track some stats used elsewhere by the anamorphic widescreen heuristic.
+   auto& system = Core::System::GetInstance();
+   if (!system.IsWii())
+@@ -563,7 +571,7 @@
+   std::vector<std::string> texture_names;
+   Common::SmallVector<u32, 8> texture_units;
+   std::array<SamplerState, 8> samplers;
+-  if (!m_cull_all)
++  if (!m_cull_all && !skip_graphics)
+   {
+     if (!g_ActiveConfig.bGraphicMods)
+     {
+@@ -609,7 +617,7 @@
+     m_zslope.dirty = false;
+   }
+ 
+-  if (!m_cull_all)
++  if (!m_cull_all && !skip_graphics)
+   {
+     CustomPixelShaderContents custom_pixel_shader_contents;
+     std::optional<CustomPixelShader> custom_pixel_shader;
+@@ -670,6 +678,12 @@
+     // The EFB cache is now potentially stale.
+     g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
+   }
++  else if (!m_cull_all)
++  {
++    // Draw scheduling and GX register/normal/zfreeze state still advance.
++    // No texture decode/load, pipeline preparation, upload or draw is emitted.
++    OnDraw();
++  }
+ 
+   if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens)
+   {
+@@ -685,6 +699,7 @@
+   {
+     // Flush old vertex data before loading state.
+     Flush();
++    DolphinWeb::FrameSkip::ResetPhase();
+   }
+ 
+   p.Do(m_zslope);
+@@ -967,6 +982,7 @@
+ 
+ void VertexManagerBase::OnCPUEFBAccess()
+ {
++  DolphinWeb::FrameSkip::cpu_efb_accesses.fetch_add(1, std::memory_order_relaxed);
+   // Check this isn't another access without any draws in between.
+   if (!m_cpu_accesses_this_frame.empty() && m_cpu_accesses_this_frame.back() == m_draw_counter)
+     return;
+--- /dev/null
++++ b/Source/Core/VideoCommon/WasmFrameSkip.h
+@@ -0,0 +1,45 @@
++// Copyright 2026 Dolphin Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++#include <atomic>
++#include <cstdint>
++
++namespace DolphinWeb::FrameSkip
++{
++// Only the GPU thread owns cadence. The host publishes a request; it takes
++// effect after a complete XFB frame, never halfway through its draw batches.
++inline std::atomic<unsigned> requested{1};
++inline unsigned divisor = 1, phase = 0;
++inline bool current_skip = false, needs_latch = true;
++inline std::atomic<std::uint32_t> frames{0}, skipped_frames{0};
++inline std::atomic<std::uint32_t> drawn_batches{0}, skipped_batches{0};
++inline std::atomic<std::uint32_t> cpu_efb_accesses{0};
++inline std::atomic<std::uint64_t> decoded_vertices{0}, skipped_vertices{0};
++inline std::atomic<std::uint32_t> ram_efb_copies{0}, skipped_efb_copies{0};
++inline std::atomic<std::uint32_t> skipped_no_pass{0};
++// A VI swap may happen while the guest is already drawing its next image.
++// Keep that image's decision until its XFB copy; new work latches pending phase.
++inline bool Skip() { return current_skip; }
++inline void BeginDraw()
++{
++  if (needs_latch) { current_skip = phase != 0; needs_latch = false; }
++}
++inline void XfbCopied() { needs_latch = true; }
++inline void EndFrame(bool skipped)
++{
++  frames.fetch_add(1, std::memory_order_relaxed);
++  if (skipped) skipped_frames.fetch_add(1, std::memory_order_relaxed);
++  const unsigned next = requested.load(std::memory_order_relaxed);
++  phase = next == divisor ? (phase + 1) % divisor : 0;
++  divisor = next;
++}
++inline void ResetPhase()
++{
++  phase = 0; divisor = requested.load(std::memory_order_relaxed);
++  current_skip = false; needs_latch = true;
++}
++inline void Batch(bool skip)
++{
++  (skip ? skipped_batches : drawn_batches).fetch_add(1, std::memory_order_relaxed);
++}
++}  // namespace DolphinWeb::FrameSkip

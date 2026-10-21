@@ -45,6 +45,9 @@ export class GameCubePerf {
     const callbacks = (frame.frame - previous.frame) / seconds;
     const speed = (frame.coreTicks - previous.coreTicks) / frame.coreTicksPerSecond / seconds * 100;
     const d=frame.gamecubeDiagnostics || {},old=previous.gamecubeDiagnostics || {};
+    const divisor=[1,2,3,4].includes(d.frameSkip?.divisor)?d.frameSkip.divisor:1;
+    const displayTarget=this.targetFps===null?null:Number((this.targetFps/divisor).toFixed(2));
+    const skipTarget=divisor===1?'':` (${divisor}× frame skip)`;
     const fps = Number.isFinite(d.render?.frames) && Number.isFinite(old.render?.frames)
       ? (d.render.frames-old.render.frames)/seconds : null;
     const resources=d.resources || frame.gpuResources;
@@ -55,10 +58,11 @@ export class GameCubePerf {
       Number.isFinite(d.render?.frames)&&Number.isFinite(old.render?.frames)?d.render.frames-old.render.frames:0);
     this.details=[
       `Rendered: ${number(fps)} fps · ${Math.round(speed)}% normal speed`,
-      this.targetFps === null ? 'Target: game-native frame rate · 100% normal speed' : `Target: ${this.targetFps} rendered fps · 100% normal speed`,
+      displayTarget === null ? 'Target: game-native frame rate · 100% normal speed' : `Target: ${displayTarget} rendered fps${skipTarget} · 100% normal speed`,
       `Video callbacks: ${callbacks.toFixed(1)}/s (console video timing)`,
       `Presentation ceiling: ${d.fpsLimit ?? 60}/s`,
-      d.frameSkip ? `Frame skip: ${d.frameSkip.divisor===1?'Off':d.frameSkip.divisor+'×'} · ${d.frameSkip.skipped} display frames skipped (lifetime; audio continues)` : '',
+      d.frameSkip ? `Frame skip: ${d.frameSkip.divisor===1?'Off':d.frameSkip.divisor+'×'} · ${d.frameSkip.skipped} graphics frames skipped (lifetime; audio continues)` : '',
+      d.frameSkip?.native ? `Native omitted: ${d.frameSkip.native.skippedBatches} draw batches · ${d.frameSkip.native.skippedVertices} vertices (lifetime)` : '',
       `Frame gaps: p95 ${number(d.render?.p95Ms)} ms · max ${number(d.render?.maxMs)} ms (last 1s, ${d.render?.samples ?? 0} intervals)`,
       `Last rendered frame: ${number(d.render?.ageMs)} ms ago`,
       'Rendered FPS counts successful GPU submissions; pixel uniqueness and GPU completion time are not sampled.',
@@ -84,7 +88,7 @@ export class GameCubePerf {
     ].filter(Boolean).join('\n');
     // Ticks measure emulated time, so 30 fps games need no guessed 60 fps target.
     this.element.textContent = `GameCube ${number(fps)} rendered fps  ${Math.round(speed)}% speed\n` +
-      (this.targetFps === null ? '' : `Target ${this.targetFps} fps · 100% speed\n`) +
+      (displayTarget === null ? '' : `Target ${displayTarget} fps${skipTarget} · 100% speed\n`) +
       `WebGPU · ${frame.renderWidth || frame.width}×${frame.renderHeight || frame.height} · ${Math.round(frame.heapBytes / 1048576)} MiB` +
       (native.line ? `\n${native.line}` : '');
   }
