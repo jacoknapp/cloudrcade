@@ -7,13 +7,14 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
  const b=await chromium.launch({args:['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--use-angle=vulkan','--ignore-gpu-blocklist','--disable-vulkan-surface']});
  try{
   const c=await b.newContext({ignoreHTTPSErrors:true,serviceWorkers:'block',hasTouch:true,isMobile:true,viewport:{width:390,height:844}}),p=await c.newPage(),errors=[];
-  p.on('pageerror',e=>errors.push(e.message));
+  p.on('pageerror',e=>{errors.push(e.message);console.log('PAGE ERROR',e.message);});
+  p.on('console',message=>{if(message.type()==='error')console.log('BROWSER ERROR',message.text());});
   await c.route('**/cloud-saves/config.php*',r=>r.fulfill({contentType:'text/javascript',body:'window.WrcadCloudConfig={enabled:false,storagePrefix:"frame-skip-native"};'}));
   await c.addInitScript(system=>{
    localStorage.setItem('frame-skip-native.'+system+'.enabled.v1','1');
    const gpu=navigator.gpu;if(gpu){const request=gpu.requestAdapter.bind(gpu);gpu.requestAdapter=async o=>(await request(o))||request(o);}
   },system);
-  await p.route('**/session.mjs',async r=>{const response=await r.fetch();await r.fulfill({response,body:(await response.text()).replace('this.scope = scope;','this.scope = scope; globalThis.__s=this;')});});
+  await p.route('**/session.mjs',async r=>{const response=await r.fetch();await r.fulfill({response,body:(await response.text()).replace('this.scope = scope;','this.scope = scope; globalThis.__s=this;const originalFail=this.fail.bind(this);this.fail=error=>{console.error("SESSION ROOT FAILURE",String(error?.stack||error));return originalFail(error)};')});});
   const props=Buffer.from(encodeURIComponent(JSON.stringify({title:'Frame skip qualification',rom:new URL(rom,origin).href}))).toString('base64');
   await p.goto(origin+'/experimental/'+system+'/?props='+encodeURIComponent(props));
   await p.waitForFunction(()=>globalThis.__s?.booted,null,{timeout:180000});
@@ -22,7 +23,9 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
   await p.waitForTimeout(Number(process.env.WARM||30)*1000);
   const sample=()=>p.evaluate(()=>__s.adapter.request('runFrame'));
   const drainedSample=async()=>{
-   await p.evaluate(()=>__s.adapter.request('pause'));
+   // Keep the application's transition queue, polling and watchdog state in
+   // sync with native pause, just as the menu/save flow does.
+   await p.evaluate(()=>__s.pause());
    let previous=null,stable=0,last;
    const deadline=Date.now()+10000;
    while(Date.now()<deadline){
@@ -47,9 +50,9 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
    if(!await select.isVisible()) await p.locator('.kt-tab').click();
    await select.selectOption(String(divisor));await p.waitForFunction(()=>!document.querySelector('.gc-frame-skip select').disabled);
    await p.waitForTimeout(1000);
-   const a=await drainedSample();await p.evaluate(()=>__s.adapter.request('start'));
+   const a=await drainedSample();await p.evaluate(()=>__s.resume());
    await p.waitForTimeout(Number(process.env.SAMPLE||12)*1000);
-   const z=await drainedSample();await p.evaluate(()=>__s.adapter.request('start'));
+   const z=await drainedSample();await p.evaluate(()=>__s.resume());
    const old=a.gamecubeDiagnostics.frameSkip,now=z.gamecubeDiagnostics.frameSkip;
    const frames=now.frames-old.frames,skipped=now.skipped-old.skipped,shown=z.gamecubeDiagnostics.render.frames-a.gamecubeDiagnostics.render.frames;
    console.log('CADENCE',JSON.stringify({system,divisor,frames,skipped,shown,before:old.native,after:now.native,backlogBefore:a.gamecubeDiagnostics.backlog,backlogAfter:z.gamecubeDiagnostics.backlog}));
