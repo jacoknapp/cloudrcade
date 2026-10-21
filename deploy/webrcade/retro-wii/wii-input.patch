@@ -162,10 +162,19 @@ index 7fc81f6..b9045df 100644
 +
  }  // namespace WiimoteEmu
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-index 3233b626..3c912edc 100644
+index cbf60a3..0d97924 100644
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-@@ -1962,6 +1962,31 @@ void WriteRamU16BE(u8* ram, u32 offset, u16 value)
+@@ -120,7 +120,7 @@ StaticExitLinks::Stats s_static_link_stats;
+ #endif
+ // Selected before boot, then sealed before allocating callback operands. The
+ // shared atomic lets the actual compiling pthread configure its own JS table.
+-constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 16384;
++constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 32768;
+ constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
+ std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
+ extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
+@@ -2010,6 +2010,31 @@ void WriteRamU16BE(u8* ram, u32 offset, u16 value)
    ram[offset + 1] = static_cast<u8>(value);
  }
  
@@ -197,7 +206,7 @@ index 3233b626..3c912edc 100644
  void WriteRamU32BE(u8* ram, u32 offset, u32 value)
  {
    ram[offset] = static_cast<u8>(value >> 24);
-@@ -2044,13 +2069,13 @@ bool TryFastPairedQuantizedMemory(Core::System& system, PowerPC::PowerPCState& p
+@@ -2092,13 +2117,13 @@ bool TryFastPairedQuantizedMemory(Core::System& system, PowerPC::PowerPCState& p
  
    const u32 element_bytes = PairedQuantizedElementBytes(type);
    const u32 bytes = inst.W ? element_bytes : element_bytes * 2;
@@ -215,7 +224,7 @@ index 3233b626..3c912edc 100644
    if (load)
    {
      double ps0 = 0.0;
-@@ -2530,6 +2555,10 @@ struct WasmStateLayout
+@@ -2578,6 +2603,10 @@ struct WasmStateLayout
    u32 ram_size_real;
    u32 l1_base;
    u32 l1_size;
@@ -226,7 +235,7 @@ index 3233b626..3c912edc 100644
  };
  
  constexpr u32 WASM_IMPORT_FASTCHECK_GPFIFO_INDEX = 14;
-@@ -3644,6 +3673,30 @@ void EmitIsMem1Address(std::vector<u8>& body, const WasmStateLayout& layout)
+@@ -3697,6 +3726,30 @@ void EmitIsMem1Address(std::vector<u8>& body, const WasmStateLayout& layout)
    body.push_back(0x4d);
  }
  
@@ -257,7 +266,7 @@ index 3233b626..3c912edc 100644
  void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
  {
    EmitLocalGet(body, 1);
-@@ -3651,6 +3704,15 @@ void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layo
+@@ -3704,6 +3757,15 @@ void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layo
    body.push_back(0x71);
    EmitI32Const(body, layout.ram_size_real - bytes);
    body.push_back(0x4d);
@@ -273,7 +282,7 @@ index 3233b626..3c912edc 100644
  }
  
  void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
-@@ -3666,11 +3728,7 @@ void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& l
+@@ -3719,11 +3781,7 @@ void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& l
  
  void EmitIsMem1LineAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
@@ -286,10 +295,10 @@ index 3233b626..3c912edc 100644
  }
  
  void EmitIsOutsideLowDcbzHackRange(std::vector<u8>& body)
-@@ -3693,8 +3751,20 @@ void EmitRamOffset(std::vector<u8>& body)
- 
+@@ -3747,8 +3805,20 @@ void EmitRamOffset(std::vector<u8>& body)
  void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
+   if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
 -  EmitI32Const(body, layout.ram_base);
 +  if (layout.exram_size_real < 32)
 +  {
@@ -308,10 +317,10 @@ index 3233b626..3c912edc 100644
    body.push_back(0x6a);
  }
  
-@@ -3902,6 +3972,25 @@ void EmitStoreZeroU32ToRamAddress(std::vector<u8>& body, const WasmStateLayout&
- 
- void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -3966,6 +4036,25 @@ void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
@@ -334,10 +343,10 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -3929,6 +4018,23 @@ void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
- 
- void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -3999,6 +4088,23 @@ void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+     EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u8));
@@ -358,10 +367,10 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -3954,6 +4060,25 @@ void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- 
- void EmitReadU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -4031,6 +4137,25 @@ void EmitReadU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
@@ -384,10 +393,10 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -3995,6 +4120,27 @@ void EmitReadS16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
- 
- void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -4078,6 +4203,27 @@ void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
+     body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
@@ -412,10 +421,10 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4024,6 +4170,25 @@ void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
- 
- void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -4113,6 +4259,25 @@ void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u8));
@@ -438,10 +447,10 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4051,6 +4216,27 @@ void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
- 
- void EmitWriteU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
- {
+@@ -4146,6 +4311,27 @@ void EmitWriteU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
+     body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
@@ -466,7 +475,7 @@ index 3233b626..3c912edc 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -7875,6 +8061,36 @@ int CompileWasmCachedInterpreterBlockForTest(const std::vector<u8>& bytes)
+@@ -8131,6 +8317,36 @@ int CompileWasmCachedInterpreterBlockForTest(const std::vector<u8>& bytes)
        fast_melee_status_call_index, fast_melee_service_poll_call_index);
  }
  
@@ -503,7 +512,7 @@ index 3233b626..3c912edc 100644
  WasmStateLayout MakeWasmBlockTestLayout(PowerPC::PowerPCState& state, u8* ram, u32 ram_size)
  {
    const auto state_base = reinterpret_cast<std::uintptr_t>(&state);
-@@ -9280,8 +9496,9 @@ static bool TryFastRamWordLoadStore(Core::System& system, PowerPC::PowerPCState&
+@@ -9651,8 +9867,9 @@ static bool TryFastRamWordLoadStore(Core::System& system, PowerPC::PowerPCState&
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -515,7 +524,7 @@ index 3233b626..3c912edc 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= sizeof(u32);
  
-@@ -9357,9 +9574,10 @@ static bool TryFastRamByteHalfLoadStore(Core::System& system, PowerPC::PowerPCSt
+@@ -9728,9 +9945,10 @@ static bool TryFastRamByteHalfLoadStore(Core::System& system, PowerPC::PowerPCSt
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -528,7 +537,7 @@ index 3233b626..3c912edc 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -9429,8 +9647,9 @@ static bool TryFastRamMultiwordLoadStore(Core::System& system, PowerPC::PowerPCS
+@@ -9800,8 +10018,9 @@ static bool TryFastRamMultiwordLoadStore(Core::System& system, PowerPC::PowerPCS
    const u32 register_count = 32 - inst.RD;
    const u32 bytes = register_count * sizeof(u32);
    u8* ram = system.GetMemory().GetRAM();
@@ -540,7 +549,7 @@ index 3233b626..3c912edc 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -9791,9 +10010,10 @@ static bool TryFastRamFloatLoadStore(Core::System& system, PowerPC::PowerPCState
+@@ -10162,9 +10381,10 @@ static bool TryFastRamFloatLoadStore(Core::System& system, PowerPC::PowerPCState
    }
  
    u8* ram = system.GetMemory().GetRAM();
@@ -553,7 +562,7 @@ index 3233b626..3c912edc 100644
    const bool in_ram =
        !ppc_state.msr.LE && ram != nullptr && offset < ram_size && ram_size - offset >= bytes;
  
-@@ -11234,6 +11454,8 @@ bool CachedInterpreter::TryWriteWasmBlock(u32 nextPC)
+@@ -11606,6 +11826,8 @@ bool CachedInterpreter::TryWriteWasmBlock(u32 nextPC)
        m_system.GetMemory().GetRamSizeReal(),
        static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetL1Cache())),
        m_system.GetMemory().GetL1CacheSize(),
@@ -562,7 +571,7 @@ index 3233b626..3c912edc 100644
    };
    const bool write_npc =
        did_merge ? merge_write_npc : (compiled_entire_block && !compiled_block_ends_with_branch);
-@@ -11676,6 +11898,8 @@ extern "C" const char* GetPpcWasmHelperStats()
+@@ -12058,6 +12280,8 @@ extern "C" const char* GetPpcWasmHelperStats()
  
    std::ostringstream out;
    out << (applied_policy < 2 ? "tier:guarded " : "tier:mixed ");
@@ -571,13 +580,74 @@ index 3233b626..3c912edc 100644
    out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
    const u32 average_prefix =
        s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
-@@ -12530,6 +12754,116 @@ extern "C" int RunPpcWasmPairedQuantizedMemorySmoke()
+@@ -13170,6 +13394,179 @@ extern "C" int RunPpcWasmPairedQuantizedMemorySmoke()
    return state.npc == 0x80003414 ? 1 : 60;
  }
  
 +// Wii MEM2 direct-path smoke: fake MEM1/EXRAM buffers, MSR.FP|DR. Every
 +// emitter family must address EXRAM for the cached 0x9 window and still
 +// address MEM1 for 0x8. Must run before a disc boots (clobbers PPC state).
++// Grouped transfers must preserve the original MEM2 fallback exactly.
++static int RunWasmMem2GroupSmoke(const WasmStateLayout& layout,
++                                std::array<u8, 256>& ram, std::array<u8, 256>& exram)
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  const u32 previous_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore { u32 mask; ~Restore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } restore{previous_mask};
++  for (u32 cache = 0; cache < 2; ++cache)
++  for (u32 space : {0x80000000u, 0x90000000u})
++  {
++    std::vector<PPCAnalyst::CodeOp> ops;
++    constexpr std::array<u32, 6> codes{36,32,52,48,54,50};
++    constexpr std::array<u32, 6> regs{4,3,1,2,3,4};
++    constexpr std::array<u32, 6> offsets{0x10,0x10,0x20,0x20,0x28,0x28};
++    for (u32 j = 0; j < codes.size(); ++j)
++    {
++      auto op = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(codes[j],regs[j],2,offsets[j]),0x80003f00+j*4);
++      op.regsIn[2] = true;
++      if (j == 0) op.regsIn[4] = true;
++      if (j == 1) op.regsOut[3] = true;
++      ops.push_back(op);
++    }
++    int handles[2]{};
++    for (u32 grouped=0;grouped<2;++grouped)
++    {
++      s_dolphin_web_disable_mask.store((cache?DOLPHIN_WEB_DISABLE_REGALLOC:0)|
++          (grouped?0:DOLPHIN_WEB_DISABLE_MEMORY_GROUPS),std::memory_order_relaxed);
++      const auto bytes=BuildWasmCachedInterpreterBlock(ops,layout,0x80003f18,true,false,false,true);
++      handles[grouped]=bytes.empty()?-1:CompileWasmCachedInterpreterBlockForTest(bytes);
++      if(handles[grouped]<=0)return 1;
++    }
++    std::array<u32,32> expected_gpr{};std::array<u64,64> expected_fp{};
++    std::array<u8,256> expected_ram{},expected_exram{};
++    for(u32 grouped=0;grouped<2;++grouped)
++    {
++      ram.fill(0xa5);exram.fill(0xa5);
++      for(u32 j=0;j<32;++j) {state.gpr[j]=j*0x11111111u;state.ps[j].SetBoth(0.25+j,-0.5-j);}
++      state.gpr[2]=space;state.gpr[4]=0x12345678;state.ps[1].SetBoth(1.25,-2.5);
++      state.ps[3].SetPS0(u64{0x7ff0000000001234});
++      state.pc=state.npc=0x80003f00;state.downcount=1234;state.Exceptions=0;
++      state.msr.Hex=(1u<<13)|(1u<<4);state.fpscr.Hex=0;state.cr.Set(0x12345678);
++      if(DolphinWeb_CachedInterpreterRunWasmBlockForTest(handles[grouped],static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)))!=0)return 2;
++      if(state.pc!=0x80003f00||state.npc!=0x80003f18||state.downcount!=1234||state.Exceptions||state.fpscr.Hex||state.cr.Get()!=0x12345678)return 3;
++      const auto& other=space==0x90000000u?ram:exram;
++      if(!std::all_of(other.begin(),other.end(),[](u8 value){return value==0xa5;}))return 4;
++      if(!grouped)
++      {
++        for(u32 j=0;j<32;++j){expected_gpr[j]=state.gpr[j];expected_fp[j*2]=state.ps[j].PS0AsU64();expected_fp[j*2+1]=state.ps[j].PS1AsU64();}
++        expected_ram=ram;expected_exram=exram;
++      }
++      else
++      {
++        for(u32 j=0;j<32;++j)if(expected_gpr[j]!=state.gpr[j]||expected_fp[j*2]!=state.ps[j].PS0AsU64()||expected_fp[j*2+1]!=state.ps[j].PS1AsU64())return 5;
++        if(expected_ram!=ram||expected_exram!=exram)return 6;
++      }
++    }
++  }
++  ram.fill(0);exram.fill(0);
++  return 0;
++}
++
 +extern "C" EMSCRIPTEN_KEEPALIVE int RunPpcWasmMem2Smoke()
 +{
 +  auto& state = Core::System::GetInstance().GetPPCState();
@@ -594,6 +664,8 @@ index 3233b626..3c912edc 100644
 +      MakeWasmBlockTestLayout(state, ram.data(), static_cast<u32>(ram.size()));
 +  layout.exram_base = static_cast<u32>(reinterpret_cast<std::uintptr_t>(exram.data()));
 +  layout.exram_size_real = static_cast<u32>(exram.size());
++  const int group_result = RunWasmMem2GroupSmoke(layout, ram, exram);
++  if (group_result) return 1000 + group_result;
 +  auto run_op = [&](UGeckoInstruction inst) {
 +    const std::array<PPCAnalyst::CodeOp, 1> ops = {MakeWasmBlockTestOp(inst, 0x80003500)};
 +    const std::vector<u8> bytes = BuildWasmCachedInterpreterBlock(ops, layout, 0x80003504, true);
@@ -688,17 +760,6 @@ index 3233b626..3c912edc 100644
  extern "C" int RunPpcWasmFloatCompareSmoke()
  {
    auto& state = Core::System::GetInstance().GetPPCState();
-diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
---- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-+++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-@@ -123,6 +123,6 @@
- // Selected before boot, then sealed before allocating callback operands. The
- // shared atomic lets the actual compiling pthread configure its own JS table.
--constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 16384;
-+constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 32768;
- constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
- std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
- extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js

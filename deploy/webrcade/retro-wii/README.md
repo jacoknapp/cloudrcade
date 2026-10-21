@@ -27,6 +27,11 @@ real mode and unmapped pages keep the helper. The helper stats report the window
 `mem2win`. `RunPpcWasmMem2Smoke` checks every load/store family against fake MEM1
 and EXRAM. GameCube native bytes are unchanged.
 
+Wii also shares the grouped MEM1 transfers described in the GameCube README.
+MEM2 misses that shared proof and retains its existing checked direct/helper
+path. Its native smoke compares grouped and individual integer/float transfers
+in both banks, including raw float lanes, register caching and the untouched bank.
+
 Wii has its own category, controller profile and independently saved layouts.
 The controller drawer also offers **Frame skip**: **Off** (default), **2×**,
 **3×** or **4×**, rendering every second, third or fourth native GX frame.
@@ -85,3 +90,16 @@ mount it at `/work`, empty compiler/cache scratch at `/toolchain`, and
 `cloudrcade-native` at `/recipe`, then run `bash /recipe/build-linux.sh`.
 The Wii input report probe is opt-in and accepts only stopped/paused sessions.
 It calls Dolphin's actual Wii Remote report builder without per-frame overhead.
+
+### Compiled-block chaining
+
+Full compiled blocks run consecutively in a direct dispatch loop, including
+reentry after an interpreted or partial block. Each block still commits its PC,
+cycle budget, performance counters and CLOCK reference. Epoch and CPU-feature
+guards precede every reuse of callback metadata; cache misses return through the
+existing code-generation boundary. Partial blocks, helper halts, stepping,
+debugging and profiling retain their existing handling. No cache allocation or
+save format changes. This path is enabled by default; debug disable-mask bit29
+selects the legacy loop. The actual-WASM fast-path regression checks cycle
+budgets, register commits, stop/feature/epoch changes, helper halts and fallback
+entries in Chromium and WebKit.
