@@ -14,9 +14,17 @@ COPY release/psp/app/ /extra/retro-ppsspp/
 RUN WEBRCADE_SOURCE_ROOT=/source WEBRCADE_PLAYER_OUTPUT=/out-player.js python3 patch-player.py \
  && WEBRCADE_SOURCE_ROOT=/source WEBRCADE_EXTRA_APPS=/extra WEBRCADE_TOUCH_ROOT=/out-pages python3 prepare-touch.py
 
-FROM php:8.3-fpm-bookworm AS php-fpm
+FROM php:8.3.35-fpm-bookworm AS php-fpm
 
-FROM php:8.3-apache-bookworm AS web
+FROM php:8.3.35-apache-bookworm AS web
+# Official 8.3.36 images are not yet published; build the verified PHP release
+# with the official base configuration, including CLI, Apache module and FPM.
+ENV PHP_VERSION=8.3.36 \
+    PHP_URL=https://www.php.net/distributions/php-8.3.36.tar.xz \
+    PHP_ASC_URL=https://www.php.net/distributions/php-8.3.36.tar.xz.asc \
+    PHP_SHA256=dd54693aa334c5c4d72e9aee96b082c2473750a18a6c1d105789c93a3b1692fd
+COPY docker/build-php-runtime.sh /usr/local/bin/build-php-runtime
+RUN sh /usr/local/bin/build-php-runtime && rm /usr/local/bin/build-php-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-tools nodejs npm openssl \
  && npm install -g miniflare@2.12.1 \
  && a2dismod php mpm_prefork \
@@ -24,7 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-to
  && mkdir -p /usr/local/apache2/conf/ssl \
  && printf '\nEnableMMAP off\nEnableSendfile off\n' >> /etc/apache2/apache2.conf \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=php-fpm /usr/local/sbin/php-fpm /usr/local/sbin/php-fpm
 COPY --from=php-fpm /usr/local/etc/php-fpm.conf /usr/local/etc/php-fpm.conf
 COPY --from=php-fpm /usr/local/etc/php-fpm.d/ /usr/local/etc/php-fpm.d/
 COPY deploy/webrcade/php-fpm.conf /usr/local/etc/php-fpm.d/zz-cloudrcade.conf
