@@ -98,6 +98,10 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert image_info['Os'] + '/' + image_info['Architecture'] == platform, 'Wrong target image platform'
             machine = {'linux/amd64': 'x86_64', 'linux/arm64': 'aarch64'}[platform]
             assert docker('exec', name, 'uname', '-m').strip() == machine, 'Wrong runtime architecture'
+        assert docker('exec', name, 'php', '-r', 'echo PHP_VERSION;') == '8.3.36'
+        assert docker('exec', name, 'php-fpm', '--version').splitlines()[0].startswith('PHP 8.3.36 ')
+        assert 'mpm_event_module' in docker('exec', name, 'apache2ctl', '-M')
+        assert 'php_module' not in docker('exec', name, 'apache2ctl', '-M')
         port = info['NetworkSettings']['Ports']['443/tcp'][0]['HostPort']
         origin = 'https://127.0.0.1:' + port
 
@@ -120,6 +124,16 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
         until(lambda: bool(list((state / 'derived').glob('*.chd'))))
         response = until(lambda: get('/cloud-saves/api.php?action=status'))
         config = json.load(response)['config']
+        # Probe the real HTTP worker as well as CLI; this file exists only in
+        # this synthetic smoke container and is removed immediately afterward.
+        probe = '/var/www/touch/cloud/runtime-smoke.php'
+        docker('exec', name, 'python3', '-c', 'import pathlib,sys;pathlib.Path(sys.argv[1]).write_text(sys.argv[2])', probe, '<?php echo json_encode([PHP_VERSION, PHP_SAPI, phpversion("sodium"), phpversion("Zend OPcache")]);')
+        try:
+            with get('/cloud-saves/runtime-smoke.php') as response:
+                assert json.load(response) == ['8.3.36', 'fpm-fcgi', '8.3.36', '8.3.36']
+        finally:
+            docker('exec', name, 'rm', '-f', probe)
+
         # Check requests over negotiated HTTP/2, not merely an advertised ALPN.
         subprocess.run(['node', 'tests/check_webrcade_http2.cjs', origin], check=True)
         assert config['appName'] == 'Release Test Arcade' and config['storagePrefix'] == 'release_test'
