@@ -21,6 +21,25 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
   assert.equal(adapter.fallback,false);
   await p.waitForTimeout(Number(process.env.WARM||30)*1000);
   const sample=()=>p.evaluate(()=>__s.adapter.request('runFrame'));
+  const drainedSample=async()=>{
+   await p.evaluate(()=>__s.adapter.request('pause'));
+   let previous=null,stable=0,last;
+   const deadline=Date.now()+10000;
+   while(Date.now()<deadline){
+    last=await sample();const d=last.gamecubeDiagnostics;
+    // Native VI counters precede replay: a restored scene can queue several
+    // complete images. Compare the two stages only after the producer stops
+    // and both the command ring and GPU completion queue have drained.
+    if(d.backlog===0 && d.gpuQueue.pending===0 && previous &&
+       d.frameSkip.frames===previous.frameSkip.frames &&
+       d.frameSkip.native.frames===previous.frameSkip.native.frames)stable++;
+    else stable=0;
+    if(stable>=2)return last;
+    previous=d;await p.waitForTimeout(100);
+   }
+   assert.fail('paused native/replay queues did not drain: '+JSON.stringify({
+    backlog:last?.gamecubeDiagnostics.backlog,queue:last?.gamecubeDiagnostics.gpuQueue}));
+  };
   await p.locator('.kt-tab').click();
   const select=p.getByRole('combobox',{name:'Frame skip'});assert.equal(await select.inputValue(),'1');
   const results=[];
@@ -28,10 +47,12 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
    if(!await select.isVisible()) await p.locator('.kt-tab').click();
    await select.selectOption(String(divisor));await p.waitForFunction(()=>!document.querySelector('.gc-frame-skip select').disabled);
    await p.waitForTimeout(1000);
-   const a=await sample();await p.waitForTimeout(Number(process.env.SAMPLE||12)*1000);const z=await sample();
+   const a=await drainedSample();await p.evaluate(()=>__s.adapter.request('start'));
+   await p.waitForTimeout(Number(process.env.SAMPLE||12)*1000);
+   const z=await drainedSample();await p.evaluate(()=>__s.adapter.request('start'));
    const old=a.gamecubeDiagnostics.frameSkip,now=z.gamecubeDiagnostics.frameSkip;
    const frames=now.frames-old.frames,skipped=now.skipped-old.skipped,shown=z.gamecubeDiagnostics.render.frames-a.gamecubeDiagnostics.render.frames;
-   console.log('CADENCE',JSON.stringify({system,divisor,frames,skipped,shown,before:old.native,after:now.native}));
+   console.log('CADENCE',JSON.stringify({system,divisor,frames,skipped,shown,before:old.native,after:now.native,backlogBefore:a.gamecubeDiagnostics.backlog,backlogAfter:z.gamecubeDiagnostics.backlog}));
    if(process.env.OUT_DIR)await p.screenshot({path:path.join(process.env.OUT_DIR,system+'-'+divisor+'-cadence.png')});
    assert.equal(now.divisor,divisor);assert(frames>5,'native work progresses');
    assert(Math.abs(skipped-frames*(divisor-1)/divisor)<=2,'expected complete-frame skip cadence');
