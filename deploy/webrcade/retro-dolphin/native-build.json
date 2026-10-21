@@ -27,13 +27,13 @@
     "0019-native-graphics-frame-skip.patch": "1574b0ed72c9d827a67063c44396e156f298dba7c3cb965bd4fe8953914f137b",
     "0020-device-jit-cache-budget.patch": "f66b7c09e8dac1390643b4a1ac0a7562ae78a5f0e876821967499eeb76b57a32",
     "0021-group-ram-accesses.patch": "93b6e1b47554d493219474e97cae4b4514abd7edb7929990f51775ddc82be745",
-    "0022-chain-compiled-blocks.patch": "c56934406f2dec2af66d49804102bd277bbc26a8a0b0a996c875acef7d1d901c"
+    "0022-chain-compiled-blocks.patch": "ed4d291857e31c07ee437c791f5730f96e41d3f74be2857ecf357cefcbc9a75e"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "39920c3b9c7f58901b0ceb10c18ee325035d344fab296b52fb7fe1046ca8c5ec",
+    "dolphin-core-upstream.wasm": "1fc245f5c117339b7bcf3442dfb48c077b56e9b2fb7abbe0383d5783892c6173",
     "dolphin-core-upstream.js": "92dfea996425e1fcd7a1c9cc798faa88d720de03651f19514caf44987d21a0dd"
   },
   "recipeSha256": "94288947ace541053f2b227147cfa038d7b1f60f230e5f9ebf6dad9ba1b547e8",
-  "sourceTreeSha256": "e290634946cf4d1814c87682727b8973eb06afe38a6225e14d6741fb67b36c8f",
+  "sourceTreeSha256": "604822c543c7812ebb05d6fd74515c7b7831e8b81c23dc64708e2c2665230c20",
   "stateFormatId": "e098d386643d8a92517f173f73b38aa9a4827c6dfde045a559131d77aad52fc0"
 }

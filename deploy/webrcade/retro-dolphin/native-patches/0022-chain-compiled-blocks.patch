@@ -1,5 +1,5 @@
 diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-index 646f703..cbf60a3 100644
+index 646f703..f928a91 100644
 --- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 @@ -339,6 +339,8 @@ constexpr u32 DOLPHIN_WEB_DISABLE_COMPILE_THROTTLE = 1u << 22; // §28ce cap JIT
@@ -15,7 +15,7 @@ index 646f703..cbf60a3 100644
  u32 s_wasm_block_merge_count = 0; // §28bx adjacent-block merges performed
  u32 s_wasm_regalloc_dead_store_skip_count = 0; // §28by GPR dead-store skips (per emit, sum across blocks)
  u32 s_wasm_block_run_count = 0;
-+u32 s_wasm_fast_chain_blocks = 0;
++std::atomic<u32> s_wasm_fast_chain_blocks{0};
  u32 s_wasm_block_reject_log_count = 0;
  u32 s_wasm_block_attempt_count = 0;
  u32 s_wasm_block_compile_fail_count = 0;
@@ -39,7 +39,7 @@ index 646f703..cbf60a3 100644
 +  struct Counts
 +  {
 +    u32 blocks = 0;
-+    ~Counts() { s_wasm_fast_chain_blocks += blocks; }
++    ~Counts() { s_wasm_fast_chain_blocks.fetch_add(blocks, std::memory_order_relaxed); }
 +  } counts;
 +  // Shield any enclosing/nested legacy callback scope. We resolve the actual
 +  // completed full block's descriptor directly and never dereference TLS data.
@@ -123,7 +123,7 @@ index 646f703..cbf60a3 100644
    out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
    const u32 average_prefix =
        s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
-+  out << "fastchain:" << s_wasm_fast_chain_blocks << " ";
++  out << "fastchain:" << s_wasm_fast_chain_blocks.load(std::memory_order_relaxed) << " ";
    out << "jit attempts:" << s_wasm_block_attempt_count
        << " compiled:" << s_wasm_block_compile_count
        << " full:" << s_wasm_block_full_compile_count
@@ -207,12 +207,12 @@ index 646f703..cbf60a3 100644
 +      // Must exit before inspecting a stale/invalid destination.
 +      entries[0].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
 +    }
-+    const u32 before = s_wasm_block_run_count, before_fast = s_wasm_fast_chain_blocks;
++    const u32 before = s_wasm_block_run_count, before_fast = s_wasm_fast_chain_blocks.load(std::memory_order_relaxed);
 +    const bool handled = jit.ExecuteWasmFastChain(ptr(entries), false);
 +    const u32 blocks = test == 0 ? 4 : test == 3 ? 0 : 1;
 +    if (handled != (test != 3)) return 2100 + test;
 +    if (s_wasm_block_run_count - before != blocks ||
-+        s_wasm_fast_chain_blocks - before_fast != blocks) return 2200 + test;
++        s_wasm_fast_chain_blocks.load(std::memory_order_relaxed) - before_fast != blocks) return 2200 + test;
 +    if (touched[0] != (blocks != 0) || touched[1] != (blocks > 1)) return 2300 + test;
 +    if (test == 0 && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
 +                      state.downcount != -1)) return 2400;

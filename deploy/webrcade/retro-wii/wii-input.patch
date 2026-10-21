@@ -162,7 +162,7 @@ index 7fc81f6..b9045df 100644
 +
  }  // namespace WiimoteEmu
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-index cbf60a3..0d97924 100644
+index f928a91..161853a 100644
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 @@ -120,7 +120,7 @@ StaticExitLinks::Stats s_static_link_stats;
