@@ -162,7 +162,7 @@ jobs:
         run: |
           image="ghcr.io/${REPOSITORY,,}"
           echo "web=$image:sha-$COMMIT" >> "$GITHUB_OUTPUT"
-          if [ "$REF_NAME" = main ]; then tag=latest; elif [[ "$REF_NAME" == beta/* ]]; then tag="${REF_NAME//\//-}"; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
+          if [ "$REF_NAME" = main ]; then tag=latest; elif [ "$REF_NAME" = beta/wii-core ]; then tag=beta; elif [[ "$REF_NAME" == beta/* ]]; then tag="${REF_NAME//\//-}"; elif [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag="pr-test"; fi
           echo "web_alias=$image:$tag" >> "$GITHUB_OUTPUT"
           if [[ "$REF_NAME" == beta/* ]]; then platforms=linux/amd64; else platforms=linux/amd64,linux/arm64; fi
           echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
