@@ -173,11 +173,13 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
  std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
  extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
-@@ -366,6 +366,12 @@
+@@ -366,6 +366,14 @@
  u32 s_wasm_regalloc_dead_store_skip_count = 0; // §28by GPR dead-store skips (per emit, sum across blocks)
  u32 s_wasm_block_run_count = 0;
  std::atomic<u32> s_wasm_fast_chain_blocks{0};
 +constexpr u32 DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE = 1u << 27;
++u32 s_wasm_gpr_prologue_loads_removed = 0;
++
 +std::atomic<u32> s_wasm_dynamic_link_hits{0};
 +extern "C" EMSCRIPTEN_KEEPALIVE u32 GetWasmDynamicLinkHits()
 +{
@@ -186,7 +188,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  u32 s_wasm_block_reject_log_count = 0;
  u32 s_wasm_block_attempt_count = 0;
  u32 s_wasm_block_compile_fail_count = 0;
-@@ -2010,6 +2016,31 @@
+@@ -2010,6 +2018,31 @@
    ram[offset + 1] = static_cast<u8>(value);
  }
  
@@ -218,7 +220,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  void WriteRamU32BE(u8* ram, u32 offset, u32 value)
  {
    ram[offset] = static_cast<u8>(value >> 24);
-@@ -2092,12 +2123,12 @@
+@@ -2092,12 +2125,12 @@
  
    const u32 element_bytes = PairedQuantizedElementBytes(type);
    const u32 bytes = inst.W ? element_bytes : element_bytes * 2;
@@ -235,7 +237,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  
    if (load)
    {
-@@ -2578,6 +2609,10 @@
+@@ -2578,6 +2611,10 @@
    u32 ram_size_real;
    u32 l1_base;
    u32 l1_size;
@@ -246,7 +248,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  };
  
  constexpr u32 WASM_IMPORT_FASTCHECK_GPFIFO_INDEX = 14;
-@@ -3697,6 +3732,30 @@
+@@ -3697,6 +3734,30 @@
    body.push_back(0x4d);
  }
  
@@ -277,7 +279,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
  {
    EmitLocalGet(body, 1);
-@@ -3704,6 +3763,15 @@
+@@ -3704,6 +3765,15 @@
    body.push_back(0x71);
    EmitI32Const(body, layout.ram_size_real - bytes);
    body.push_back(0x4d);
@@ -293,7 +295,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  }
  
  void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
-@@ -3719,11 +3787,7 @@
+@@ -3719,11 +3789,7 @@
  
  void EmitIsMem1LineAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
@@ -306,7 +308,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  }
  
  void EmitIsOutsideLowDcbzHackRange(std::vector<u8>& body)
-@@ -3747,8 +3811,20 @@
+@@ -3747,8 +3813,20 @@
  void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
    if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
@@ -328,7 +330,39 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    body.push_back(0x6a);
  }
  
-@@ -3964,6 +4040,25 @@
+@@ -3766,26 +3844,11 @@
+ // Byte-order conversion is shared by checked and proven memory accesses.
+ void EmitBswap32FromLocal(std::vector<u8>& body, u32 local_index)
+ {
+-  EmitLocalGet(body, local_index);
+-  EmitI32Const(body, 0xff);
+-  body.push_back(0x71);
+-  EmitI32Const(body, 24);
+-  body.push_back(0x74);
+-  EmitLocalGet(body, local_index);
+-  EmitI32Const(body, 0xff00);
+-  body.push_back(0x71);
+-  EmitI32Const(body, 8);
+-  body.push_back(0x74);
+-  body.push_back(0x72);
+-  EmitLocalGet(body, local_index);
+-  EmitI32Const(body, 8);
+-  body.push_back(0x76);
+-  EmitI32Const(body, 0xff00);
+-  body.push_back(0x71);
+-  body.push_back(0x72);
+-  EmitLocalGet(body, local_index);
+-  EmitI32Const(body, 24);
+-  body.push_back(0x76);
++  // Same integer byte permutation, using two rotations instead of four shifts.
++  EmitLocalGet(body, local_index); EmitI32Const(body, 8); body.push_back(0x77);
++  EmitI32Const(body, 0x00ff00ff); body.push_back(0x71);
++  EmitLocalGet(body, local_index); EmitI32Const(body, 8); body.push_back(0x78);
++  EmitI32Const(body, 0xff00ff00); body.push_back(0x71);
+   body.push_back(0x72);
+ }
+ 
+@@ -3964,6 +4027,25 @@
      EmitLocalGet(body, 40); body.insert(body.end(), {0x28, 0x00});
      EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
@@ -354,7 +388,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -3999,6 +4094,23 @@
+@@ -3999,6 +4081,23 @@
      EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -378,7 +412,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4029,6 +4141,25 @@
+@@ -4029,6 +4128,25 @@
      EmitLocalGet(body, 40); body.insert(body.end(), {0x2f, 0x00});
      EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
@@ -404,7 +438,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -4076,6 +4207,27 @@
+@@ -4076,6 +4194,27 @@
    {
      EmitLocalGet(body, 40); EmitBswap32FromLocal(body, 2);
      body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
@@ -432,7 +466,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -4113,6 +4265,25 @@
+@@ -4113,6 +4252,25 @@
      body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -458,7 +492,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4144,6 +4315,27 @@
+@@ -4144,6 +4302,27 @@
    {
      EmitLocalGet(body, 40); EmitBswap16FromLocal(body, 2);
      body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
@@ -486,7 +520,210 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -8131,6 +8323,36 @@
+@@ -5368,7 +5547,7 @@
+ }
+ 
+ void EmitPsqFloatFastPathCondition(std::vector<u8>& body, const WasmStateLayout& layout,
+-                                   UGeckoInstruction inst, bool store)
++                                   UGeckoInstruction inst, bool store, bool l1_cache = false)
+ {
+   EmitStateLoadU32(body, layout.msr_offset);
+   EmitI32Const(body, 1u << 13);
+@@ -5400,7 +5579,10 @@
+   body.push_back(0x45);
+   body.push_back(0x71);
+ 
+-  EmitIsMem1AddressForSize(body, layout, inst.W ? sizeof(u32) : sizeof(u64));
++  if (l1_cache)
++    EmitIsL1CacheAddressForSize(body, layout, inst.W ? sizeof(u32) : sizeof(u64));
++  else
++    EmitIsMem1AddressForSize(body, layout, inst.W ? sizeof(u32) : sizeof(u64));
+   body.push_back(0x71);
+ }
+ 
+@@ -5576,6 +5758,65 @@
+     EmitStorePsqU8Scale61Lane(body, layout, inst.RS, 1, sizeof(u8));
+ }
+ 
++void EmitI64ConstBits(std::vector<u8>& body, u64 bits)
++{
++  body.push_back(0x42);
++  s64 value = std::bit_cast<s64>(bits);
++  for (;;)
++  {
++    const u8 byte = static_cast<u8>(value) & 0x7f;
++    value >>= 7;
++    const bool done = (value == 0 && !(byte & 0x40)) || (value == -1 && (byte & 0x40));
++    body.push_back(byte | (done ? 0 : 0x80));
++    if (done) break;
++  }
++}
++
++// Locked-L1 PSQ loads retain the interpreter's exact NaN payload/signaling bits.
++// Finite f32->f64 promotion is exact, including subnormals and signed zero.
++void EmitLoadPsqL1FloatLane(std::vector<u8>& body, const WasmStateLayout& layout,
++                            u32 fd, u32 lane, u32 offset)
++{
++  EmitLoadU32BigEndianFromL1AddressOffset(body, layout, offset);
++  EmitLocalSet(body, 2);
++  EmitStateStoreU32Prefix(body);
++  EmitLocalGet(body, 2); EmitI32Const(body, 0x7f800000); body.push_back(0x71);
++  EmitI32Const(body, 0x7f800000); body.push_back(0x46);
++  body.insert(body.end(), {0x04, 0x7e});
++  EmitLocalGet(body, 2); EmitI32Const(body, 0xc0000000); body.push_back(0x71);
++  body.push_back(0xad); EmitI64ConstBits(body, 32); body.push_back(0x86);
++  EmitLocalGet(body, 2); EmitI32Const(body, 0x3fffffff); body.push_back(0x71);
++  body.push_back(0xad); EmitI64ConstBits(body, 29); body.push_back(0x86);
++  body.push_back(0x84); EmitI64ConstBits(body, UINT64_C(0x3800000000000000)); body.push_back(0x84);
++  body.push_back(0x05);
++  EmitLocalGet(body, 2); body.insert(body.end(), {0xbe, 0xbb, 0xbd});
++  body.push_back(0x0b);
++  EmitStateStoreI64Suffix(body, PsOffset(layout, fd, lane));
++}
++
++// PSQ stores truncate mantissa bits and flush small exponents. An ordinary
++// f64->f32 demotion rounds and can quiet NaNs, so reproduce ConvertToSingleFTZ.
++void EmitStorePsqL1FloatLane(std::vector<u8>& body, const WasmStateLayout& layout,
++                             u32 fs, u32 lane, u32 offset)
++{
++  EmitStateLoadI64(body, PsOffset(layout, fs, lane)); EmitLocalSet(body, 4);
++  EmitLocalGet(body, 4); EmitI64ConstBits(body, 52); body.push_back(0x88);
++  EmitI64ConstBits(body, 0x7ff); body.push_back(0x83);
++  EmitI64ConstBits(body, 896); body.push_back(0x56);
++  EmitLocalGet(body, 4); EmitI64ConstBits(body, UINT64_C(0x7fffffffffffffff));
++  body.push_back(0x83); body.push_back(0x50); body.push_back(0x72);
++  body.insert(body.end(), {0x04, 0x7f});
++  EmitLocalGet(body, 4); EmitI64ConstBits(body, 32); body.push_back(0x88); body.push_back(0xa7);
++  EmitI32Const(body, 0xc0000000); body.push_back(0x71);
++  EmitLocalGet(body, 4); EmitI64ConstBits(body, 29); body.push_back(0x88); body.push_back(0xa7);
++  EmitI32Const(body, 0x3fffffff); body.push_back(0x71); body.push_back(0x72);
++  body.push_back(0x05);
++  EmitLocalGet(body, 4); EmitI64ConstBits(body, 32); body.push_back(0x88); body.push_back(0xa7);
++  EmitI32Const(body, 0x80000000); body.push_back(0x71);
++  body.push_back(0x0b); EmitLocalSet(body, 2);
++  EmitStoreU32BigEndianToL1AddressOffset(body, layout, offset);
++}
++
+ void EmitPairedQuantizedFloatMemory(std::vector<u8>& body, const WasmStateLayout& layout,
+                                     const PPCAnalyst::CodeOp& op, u32 downcount)
+ {
+@@ -5619,6 +5860,34 @@
+   }
+ 
+   body.push_back(0x05);
++  const bool l1_inline = layout.l1_base != 0 && layout.l1_size >= 8;
++  if (l1_inline)
++  {
++    EmitPsqFloatFastPathCondition(body, layout, inst, !load, true);
++    body.insert(body.end(), {0x04, 0x40});
++    if (load)
++    {
++      EmitLoadPsqL1FloatLane(body, layout, inst.RD, 0, 0);
++      if (inst.W)
++      {
++        EmitStateStoreU32Prefix(body);
++        EmitI64ConstBits(body, UINT64_C(0x3ff0000000000000));
++        EmitStateStoreI64Suffix(body, PsOffset(layout, inst.RD, 1));
++      }
++      else EmitLoadPsqL1FloatLane(body, layout, inst.RD, 1, sizeof(u32));
++    }
++    else
++    {
++      EmitStorePsqL1FloatLane(body, layout, inst.RS, 0, 0);
++      if (!inst.W) EmitStorePsqL1FloatLane(body, layout, inst.RS, 1, sizeof(u32));
++    }
++    if (update)
++    {
++      EmitStateStoreU32Prefix(body); EmitLocalGet(body, 1);
++      EmitStateStoreU32Suffix(body, GprOffset(layout, inst.RA));
++    }
++    body.push_back(0x05);
++  }
+   if (!load)
+   {
+     EmitPsqGatherPipeFloatStoreCondition(body, layout, inst);
+@@ -5670,6 +5939,7 @@
+   body.push_back(0x0b);
+   if (!load)
+     body.push_back(0x0b);
++  if (l1_inline) body.push_back(0x0b);
+   body.push_back(0x0b);
+ }
+ 
+@@ -7827,12 +8097,53 @@
+   }
+ }
+ 
++// Only the leading straight-line, helper-free integer prefix can define a GPR
++// before its incoming value is used. Read operands are decoded independently of
++// analyst liveness. Stop before memory, helpers, FP, branches or unknown ops.
++// Every surviving path executes the prefix before any conditional helper flush.
++BitSet32 GprPrefixDefinitions(std::span<const PPCAnalyst::CodeOp> ops)
++{
++  BitSet32 reads_before_write, defined;
++  for (const auto& op : ops)
++  {
++    if (op.skip) break;
++    const auto inst = op.inst;
++    BitSet32 reads, writes;
++    if (inst.OPCD == 14 || inst.OPCD == 15)
++    {
++      if (inst.RA) reads[inst.RA] = true;
++      writes[inst.RD] = true;
++    }
++    else if (inst.OPCD >= 24 && inst.OPCD <= 29)
++    {
++      reads[inst.RS] = true;
++      writes[inst.RA] = true;
++    }
++    else if (inst.OPCD == 20 || inst.OPCD == 21 || inst.OPCD == 23)
++    {
++      reads[inst.RS] = true;
++      if (inst.OPCD == 20) reads[inst.RA] = true;
++      if (inst.OPCD == 23) reads[inst.RB] = true;
++      writes[inst.RA] = true;
++    }
++    else if (inst.OPCD == 10 || inst.OPCD == 11)
++    {
++      reads[inst.RA] = true;
++    }
++    else break;
++    reads_before_write |= reads & ~defined;
++    defined |= writes;
++  }
++  return defined & ~reads_before_write;
++}
++
+ std::vector<u8> BuildWasmCachedInterpreterBlock(std::span<const PPCAnalyst::CodeOp> ops,
+                                                 const WasmStateLayout& layout, u32 next_pc,
+                                                 bool write_npc,
+                                                 bool allow_interpret_fallback = false,
+                                                 bool record_emit_failure = false,
+-                                                bool force_memory_groups_for_test = false)
++                                                bool force_memory_groups_for_test = false,
++                                                bool original_gpr_init_for_test = false)
+ {
+   AnalyzeFastmemHoistability(ops);
+   AnalyzeFastmemHoistPlan(ops);
+@@ -7952,11 +8263,17 @@
+     BitSet32 used_gprs;
+     for (const PPCAnalyst::CodeOp& op : ops)
+       used_gprs |= op.regsIn | op.regsOut;
++    const BitSet32 prefix_definitions = original_gpr_init_for_test ? BitSet32{} : GprPrefixDefinitions(ops);
+     for (int bit : used_gprs)
+     {
+       if (bit < 0 || bit >= 32)
+         continue;
+       s_gpr_rc.present[bit] = true;
++      if (prefix_definitions[bit])
++      {
++        ++s_wasm_gpr_prologue_loads_removed;
++        continue;
++      }
+       EmitLocalGet(body, 0);
+       body.push_back(0x28);  // i32.load
+       body.push_back(0x02);  // align=2
+@@ -8131,6 +8448,36 @@
        fast_melee_status_call_index, fast_melee_service_poll_call_index);
  }
  
@@ -523,7 +760,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  WasmStateLayout MakeWasmBlockTestLayout(PowerPC::PowerPCState& state, u8* ram, u32 ram_size)
  {
    const auto state_base = reinterpret_cast<std::uintptr_t>(&state);
-@@ -8276,7 +8498,12 @@
+@@ -8276,7 +8623,12 @@
    struct Counts
    {
      u32 blocks = 0;
@@ -537,7 +774,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    } counts;
    // Shield any enclosing/nested legacy callback scope. We resolve the actual
    // completed full block's descriptor directly and never dereference TLS data.
-@@ -8284,6 +8511,8 @@
+@@ -8284,6 +8636,8 @@
    auto& state = m_ppc_state;
    const CPU::State* const cpu_state = m_system.GetCPU().GetStatePtr();
    const bool links_enabled = StaticExitLinksEnabled();
@@ -546,7 +783,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    using WasmFunction = int (*)(int);
    do
    {
-@@ -8313,13 +8542,31 @@
+@@ -8313,13 +8667,31 @@
          if (links->cells[i].pc == state.pc) { next = links->cells[i].entry; break; }
      if (!next)
      {
@@ -584,7 +821,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
        }
      }
      entry = next;
-@@ -9651,8 +9898,9 @@
+@@ -9651,8 +10023,9 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -596,7 +833,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= sizeof(u32);
  
-@@ -9728,9 +9976,10 @@
+@@ -9728,9 +10101,10 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -609,7 +846,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -9800,8 +10049,9 @@
+@@ -9800,8 +10174,9 @@
    const u32 register_count = 32 - inst.RD;
    const u32 bytes = register_count * sizeof(u32);
    u8* ram = system.GetMemory().GetRAM();
@@ -621,7 +858,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -10162,9 +10412,10 @@
+@@ -10162,9 +10537,10 @@
    }
  
    u8* ram = system.GetMemory().GetRAM();
@@ -634,7 +871,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram =
        !ppc_state.msr.LE && ram != nullptr && offset < ram_size && ram_size - offset >= bytes;
  
-@@ -11606,6 +11857,8 @@
+@@ -11606,6 +11982,8 @@
        m_system.GetMemory().GetRamSizeReal(),
        static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetL1Cache())),
        m_system.GetMemory().GetL1CacheSize(),
@@ -643,16 +880,29 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    };
    const bool write_npc =
        did_merge ? merge_write_npc : (compiled_entire_block && !compiled_block_ends_with_branch);
-@@ -12058,6 +12311,8 @@
+@@ -12058,6 +12436,9 @@
  
    std::ostringstream out;
    out << (applied_policy < 2 ? "tier:guarded " : "tier:mixed ");
 +  out << "mem2win:" << s_wasm_mem2_window_bytes << "/stop:" << std::hex << s_wasm_mem2_stop_entry
 +      << std::dec << " ";
++  out << "gprinit-saved:" << s_wasm_gpr_prologue_loads_removed << " ";
    out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
    const u32 average_prefix =
        s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
-@@ -12800,12 +13055,18 @@
+@@ -12608,9 +12989,8 @@
+   std::array<u8, 256> ram{};
+   const auto layout = MakeWasmBlockTestLayout(state, ram.data(), ram.size());
+   for (u32 cache = 0; cache < 2; ++cache)
+-  for (u32 old = 0; old < 2; ++old)
+-  {
+-    s_dolphin_web_disable_mask.store((cache ? DOLPHIN_WEB_DISABLE_REGALLOC : 0) | (old ? 1u << 30 : 0), std::memory_order_relaxed);
++  {
++    s_dolphin_web_disable_mask.store(cache ? DOLPHIN_WEB_DISABLE_REGALLOC : 0, std::memory_order_relaxed);
+     auto store = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(36, 3, 1, 1), 0x80003100);
+     auto load = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(32, 4, 1, 1), 0x80003104);
+     store.regsIn[1] = store.regsIn[3] = load.regsIn[1] = true; load.regsOut[4] = true;
+@@ -12800,12 +13180,18 @@
      if (action == 3) *fixture_cpu = CPU::State::Stepping;
      return action == 4 ? 1 : 0;
    };
@@ -674,7 +924,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      u8 touched[2]{};
      Entry entries[2]{{callback, {handles[0], &touched[0], pc1, 3, 0, 0, 1}},
                       {callback, {handles[1], &touched[1], pc0, 3, 0, 0, 1}}};
-@@ -12815,21 +13076,39 @@
+@@ -12815,21 +13201,39 @@
      if (test == 3) entries[0].operands.end_block = 0;
      if (test == 4) entries[1].operands.end_block = 0;
      if (test == 5) entries[0].operands.links.count = 0;
@@ -717,7 +967,166 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
                        state.downcount != -1)) return 2400;
      if (test == 9)
      {
-@@ -13168,6 +13447,179 @@
+@@ -12843,8 +13247,158 @@
+ }
+ 
+ #endif
++
++static int RunWasmL1PsqSmoke()
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  const u32 saved = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore { u32 value; ~Restore(){s_dolphin_web_disable_mask.store(value,std::memory_order_relaxed);} } restore{saved};
++  std::array<u8,256> ram{}, l1{};
++  auto layout=MakeWasmBlockTestLayout(state,ram.data(),ram.size());
++  layout.l1_base=static_cast<u32>(reinterpret_cast<std::uintptr_t>(l1.data()));
++  layout.l1_size=l1.size();
++  // Test the actual emitted eligibility condition without invoking an MMU on
++  // rejected synthetic addresses. Both lane widths, all native mode guards.
++  for (u32 w=0;w<2;++w)
++  {
++    auto module=BuildWasmCachedInterpreterBlock({},layout,0,false);
++    const auto leb=[&](std::size_t& pos){u32 v=0,shift=0;for(;;){const u8 b=module[pos++];v|=u32(b&127)<<shift;if(!(b&128))return v;shift+=7;}};
++    std::size_t pos=8,start=0;
++    while(pos<module.size()){start=pos;const u8 id=module[pos++];const u32 n=leb(pos);if(id==10)break;pos+=n;}
++    module.resize(start);
++    std::vector<u8> body{1,40,0x7f};
++    EmitStateLoadU32(body,GprOffset(layout,1));EmitLocalSet(body,1);
++    const auto inst=EncodeDFormForWasmBlockTest(56,3,1,w<<15);
++    EmitPsqFloatFastPathCondition(body,layout,inst,false,true);body.push_back(0x0b);
++    std::vector<u8> code{1};EmitU32Leb(code,body.size());code.insert(code.end(),body.begin(),body.end());EmitSection(module,10,code);
++    const int handle=CompileWasmCachedInterpreterBlockForTest(module);if(handle<=0)return 6100;
++    for(u32 mode=0;mode<5;++mode)
++    for(u32 address : {0u,0xdfffffffu,0xe0000000u,0xe0000001u,0xe00000f8u,0xe00000f9u,0xe00000fcu,0xe00000fdu,0xe0000100u,0xefffffffu})
++    {
++      state.gpr[1]=address;state.msr.Hex=mode==1?0:mode==2?0x2001u:0x2000u;
++      state.spr[SPR_HID2]=mode==3?0:1u<<31;state.spr[SPR_GQR0]=mode==4?4u<<16:0;
++      const bool expected=mode==0 && address>=0xe0000000u && address-0xe0000000u<=l1.size()-(w?4:8);
++      const int result=DolphinWeb_CachedInterpreterRunWasmBlockForTest(handle,static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++      if(result!=expected)return 6101;
++    }
++  }
++  constexpr std::array<u32,16> f32bits{0,0x80000000u,1,0x80000001u,0x007fffffu,0x00800000u,0x3f800000u,0x7f7fffffu,0x7f800000u,0xff800000u,0x7fc00000u,0x7f800001u,0xff800123u,0x7fffffffu,0xffffffffu,0x3f800001u};
++  constexpr std::array<u64,18> f64bits{0,UINT64_C(0x8000000000000000),1,UINT64_C(0x8000000000000001),UINT64_C(0x000fffffffffffff),UINT64_C(0x380fffffffffffff),UINT64_C(0x3810000000000000),UINT64_C(0x3ff0000000000000),UINT64_C(0x3ff000003fffffff),UINT64_C(0x7fefffffffffffff),UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),UINT64_C(0x7ff0000000000001),UINT64_C(0xfff0000000123456),UINT64_C(0x7ff8000000000000),UINT64_C(0xffffffffffffffff),UINT64_C(0x381000001fffffff),UINT64_C(0xb80fffffffffffff)};
++  for(u32 cache=0;cache<2;++cache)
++  for(u32 opcode : {56u,57u,60u,61u})
++  for(u32 w=0;w<2;++w)
++  {
++    s_dolphin_web_disable_mask.store(cache?DOLPHIN_WEB_DISABLE_REGALLOC:0,std::memory_order_relaxed);
++    const bool load=opcode<60, update=opcode&1;
++    const s32 displacement=-3;
++    auto op=MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(opcode,3,1,(w<<15)|(u32(displacement)&0xfff)),0x80003100);
++    op.regsIn[1]=true;if(update)op.regsOut[1]=true;
++    const std::array<PPCAnalyst::CodeOp,1> ops{op};
++    const auto bytes=BuildWasmCachedInterpreterBlock(ops,layout,0x80003104,true);
++    const int handle=bytes.empty()?-1:CompileWasmCachedInterpreterBlockForTest(bytes);if(handle<=0)return 6110;
++    u64 random=UINT64_C(0xd49bf821076e135a);
++    for(u32 trial=0;trial<2066;++trial)
++    {
++      random=random*UINT64_C(6364136223846793005)+1;
++      const u32 a=trial<f32bits.size()?f32bits[trial]:static_cast<u32>(random);
++      const u32 b=trial<f32bits.size()?f32bits[(trial+5)%f32bits.size()]:static_cast<u32>(random>>32);
++      const u64 x=trial<f64bits.size()?f64bits[trial]:random;
++      const u64 y=trial<f64bits.size()?f64bits[(trial+7)%f64bits.size()]:~random;
++      const u32 offset=trial%3==0?0:trial%3==1?1:l1.size()-(w?4:8);
++      l1.fill(0xa5);ram.fill(0x6d);
++      for(u32 i=0;i<32;++i){state.gpr[i]=0x9851abcd+i*0x1234567u;state.ps[i].SetPS0(UINT64_C(0x7ff8000000000000)+i);state.ps[i].SetPS1(UINT64_C(0x8000000000000000)+i);}
++      state.gpr[1]=0xe0000000u+offset-static_cast<u32>(displacement);
++      const u32 original_ra=state.gpr[1];state.pc=0x80003100;state.npc=0x81561234;state.downcount=123456;
++      state.msr.Hex=0x2000u;state.Exceptions=0;state.fpscr.Hex=0x12345678;state.cr.Set(0x87654321);
++      state.spr[SPR_HID2]=1u<<31;state.spr[SPR_GQR0]=0;
++      state.ps[3].SetPS0(x);state.ps[3].SetPS1(y);
++      if(load){WriteRamU32BE(l1.data(),offset,a);if(!w)WriteRamU32BE(l1.data(),offset+4,b);}
++      auto expected=l1;
++      if(!load){WriteRamU32BE(expected.data(),offset,ConvertToSingleFTZ(x));if(!w)WriteRamU32BE(expected.data(),offset+4,ConvertToSingleFTZ(y));}
++      const int result=DolphinWeb_CachedInterpreterRunWasmBlockForTest(handle,static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++      if(result!=0||state.Exceptions||state.pc!=0x80003100||state.npc!=0x80003104||state.downcount!=123456)return 6111;
++      if(l1!=expected)return 6112;
++      if(load && (state.ps[3].PS0AsU64()!=ConvertToDouble(a)||state.ps[3].PS1AsU64()!=(w?UINT64_C(0x3ff0000000000000):ConvertToDouble(b))))return 6113;
++      if(!load && (state.ps[3].PS0AsU64()!=x||state.ps[3].PS1AsU64()!=y))return 6114;
++      for(u32 i=0;i<32;++i)
++      {
++        const u32 expected_gpr=i==1?(update?0xe0000000u+offset:original_ra):0x9851abcd+i*0x1234567u;
++        if(state.gpr[i]!=expected_gpr)return 6115;
++        if(i!=3 && (state.ps[i].PS0AsU64()!=UINT64_C(0x7ff8000000000000)+i||state.ps[i].PS1AsU64()!=UINT64_C(0x8000000000000000)+i))return 6116;
++      }
++      for(u8 value:ram)if(value!=0x6d)return 6117;
++      if(state.msr.Hex!=0x2000u||state.fpscr.Hex!=0x12345678||state.cr.Get()!=0x87654321||state.spr[SPR_HID2]!=(1u<<31)||state.spr[SPR_GQR0])return 6118;
++    }
++  }
++  return 1;
++}
++
++static int RunWasmGprPrefixSmoke()
++{
++  auto& state=Core::System::GetInstance().GetPPCState();
++  const u32 saved=s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore {u32 mask;~Restore(){s_dolphin_web_disable_mask.store(mask,std::memory_order_relaxed);}} restore{saved};
++  std::array<u8,256> ram{};const auto layout=MakeWasmBlockTestLayout(state,ram.data(),ram.size());
++  for(u32 cache=0;cache<2;++cache)
++  for(u32 kind=0;kind<22;++kind)
++  {
++    std::vector<PPCAnalyst::CodeOp> ops;
++    const auto add=[&](u32 opcode,u32 rd,u32 ra,u16 imm){auto op=MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(opcode,rd,ra,imm),0x80003100+ops.size()*4);if(opcode==14||opcode==15){if(ra)op.regsIn[ra]=true;op.regsOut[rd]=true;}else if(opcode>=24&&opcode<=29){op.regsIn[rd]=true;op.regsOut[ra]=true;}else if(opcode==10||opcode==11)op.regsIn[ra]=true;else if(opcode==36)op.regsIn[ra]=op.regsIn[rd]=true;else if(opcode==48)op.regsIn[ra]=true;ops.push_back(op);};
++    if(kind==0){add(14,3,0,0xabcd);add(14,4,3,7);}
++    if(kind==1){add(14,3,3,0xabcd);add(14,4,3,7);}
++    if(kind==2){add(14,0,0,42);add(24,0,5,7);}
++    if(kind==3){add(24,3,4,42);add(26,4,4,7);}
++    if(kind==4){add(11,0,3,42);add(14,3,0,7);}
++    if(kind==5){add(36,3,1,0);add(14,3,0,7);}
++    if(kind==6){add(14,3,0,7);add(48,1,1,0);}
++    if(kind==7){add(48,1,1,0);add(14,3,0,7);}
++    if(kind>=8&&kind<14){add(14,3,0,7);add(24+kind-8,3,4,0x8123);add(14,6,4,0x4321);}
++    const auto rotate=[&](u32 opcode,u32 rs,u32 ra,u32 sh_or_rb,u32 mb,u32 me,bool rc){
++      auto op=MakeWasmBlockTestOp(UGeckoInstruction{(opcode<<26)|(rs<<21)|(ra<<16)|(sh_or_rb<<11)|(mb<<6)|(me<<1)|u32(rc)},0x80003100+ops.size()*4);
++      op.regsIn[rs]=true;if(opcode==20)op.regsIn[ra]=true;if(opcode==23)op.regsIn[sh_or_rb]=true;
++      op.regsOut[ra]=true;ops.push_back(op);
++    };
++    if(kind==14){add(14,3,0,0xabcd);rotate(21,3,4,7,3,28,true);}
++    if(kind==15){rotate(20,3,4,13,28,3,true);add(14,3,0,9);}
++    if(kind==16){add(15,4,0,0xabcd);rotate(20,3,4,31,1,30,false);}
++    if(kind==17){add(14,5,0,3);rotate(23,3,4,5,0,31,true);}
++    if(kind==18){rotate(23,3,4,5,28,3,false);add(14,5,0,9);}
++    if(kind==19){add(14,3,0,5);rotate(21,3,3,17,0,31,true);}
++    if(kind==20){add(14,3,0,5);add(14,4,0,9);ops.back().skip=true;add(24,4,6,7);}
++    if(kind==21){add(15,3,0,0x8765);add(10,0,3,0x8123);add(14,4,3,5);}
++    if(kind!=6&&kind!=7)add(36,4,1,8);
++    std::array<int,2> handles{};std::array<std::vector<u8>,2> modules;
++    for(u32 old=0;old<2;++old)
++    {
++      s_dolphin_web_disable_mask.store(cache?DOLPHIN_WEB_DISABLE_REGALLOC:0,std::memory_order_relaxed);
++      modules[old]=BuildWasmCachedInterpreterBlock(ops,layout,0x80003200,true,false,false,false,old!=0);
++      handles[old]=modules[old].empty()?-1:CompileWasmCachedInterpreterBlockForTest(modules[old]);if(handles[old]<=0)return 6200+kind;
++    }
++    if(cache&&modules[0]!=modules[1])return 6220;
++    if(!cache&&(kind==0||kind==2||kind==3||kind==6)&&modules[0].size()>=modules[1].size())return 6221;
++    for(u32 trial=0;trial<128;++trial)
++    {
++      std::array<u32,32> reference_gpr{};std::array<u64,64> reference_fp{};std::array<u8,256> reference_ram{};
++      std::array<u64,8> reference_cr{};u32 npc=0,pc=0,exceptions=0; s32 downcount=0; int result=0;
++      for(u32 old=0;old<2;++old)
++      {
++        for(u32 i=0;i<32;++i){state.gpr[i]=(trial*1664525u+1013904223u)^(i*0x76123459u);state.ps[i].SetPS0(UINT64_C(0x7ff0000000000000)+i);state.ps[i].SetPS1(UINT64_C(0x8000000000000000)+i);}
++        state.gpr[1]=0x80000020;state.msr.Hex=0;state.pc=0x80003100;state.npc=0x81112222;state.downcount=123456;state.Exceptions=0;state.fpscr.Hex=0x12345678;state.cr.Set(0x87654321);ram.fill(0x5a);
++        const int rc=DolphinWeb_CachedInterpreterRunWasmBlockForTest(handles[old],static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++        if(!old){std::copy(std::begin(state.gpr),std::end(state.gpr),reference_gpr.begin());for(u32 i=0;i<32;++i){reference_fp[2*i]=state.ps[i].PS0AsU64();reference_fp[2*i+1]=state.ps[i].PS1AsU64();}std::copy(std::begin(state.cr.fields),std::end(state.cr.fields),reference_cr.begin());reference_ram=ram;npc=state.npc;pc=state.pc;downcount=state.downcount;exceptions=state.Exceptions;result=rc;}
++        else {if(!std::equal(reference_gpr.begin(),reference_gpr.end(),std::begin(state.gpr))||reference_ram!=ram||npc!=state.npc||pc!=state.pc||downcount!=state.downcount||exceptions!=state.Exceptions||result!=rc||!std::equal(reference_cr.begin(),reference_cr.end(),std::begin(state.cr.fields)))return 6230+kind;for(u32 i=0;i<32;++i)if(reference_fp[i*2]!=state.ps[i].PS0AsU64()||reference_fp[i*2+1]!=state.ps[i].PS1AsU64())return 6250+kind;}
++        if(state.fpscr.Hex!=0x12345678)return 6270;
++      }
++    }
++  }
++  return 1;
++}
++
+ extern "C" int RunPpcWasmMultipleWordMemorySmoke()
+ {
++  const int l1_result=RunWasmL1PsqSmoke();if(l1_result!=1)return l1_result;
++  const int prefix_result=RunWasmGprPrefixSmoke();if(prefix_result!=1)return prefix_result;
++
+ #if DOLPHIN_WEB_STATIC_EXIT_LINKS
+   const int chain_result = RunWasmFastChainSmoke();
+   if (chain_result != 1) return chain_result;
+@@ -13168,6 +13722,179 @@
      return 51;
  
    return state.npc == 0x80003414 ? 1 : 60;
