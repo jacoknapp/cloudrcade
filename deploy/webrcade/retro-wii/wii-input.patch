@@ -162,10 +162,9 @@ index 7fc81f6..b9045df 100644
 +
  }  // namespace WiimoteEmu
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-index f928a91..161853a 100644
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-@@ -120,7 +120,7 @@ StaticExitLinks::Stats s_static_link_stats;
+@@ -120,7 +120,7 @@
  #endif
  // Selected before boot, then sealed before allocating callback operands. The
  // shared atomic lets the actual compiling pthread configure its own JS table.
@@ -174,7 +173,20 @@ index f928a91..161853a 100644
  constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
  std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
  extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
-@@ -2010,6 +2010,31 @@ void WriteRamU16BE(u8* ram, u32 offset, u16 value)
+@@ -366,6 +366,12 @@
+ u32 s_wasm_regalloc_dead_store_skip_count = 0; // §28by GPR dead-store skips (per emit, sum across blocks)
+ u32 s_wasm_block_run_count = 0;
+ std::atomic<u32> s_wasm_fast_chain_blocks{0};
++constexpr u32 DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE = 1u << 27;
++std::atomic<u32> s_wasm_dynamic_link_hits{0};
++extern "C" EMSCRIPTEN_KEEPALIVE u32 GetWasmDynamicLinkHits()
++{
++  return s_wasm_dynamic_link_hits.load(std::memory_order_relaxed);
++}
+ u32 s_wasm_block_reject_log_count = 0;
+ u32 s_wasm_block_attempt_count = 0;
+ u32 s_wasm_block_compile_fail_count = 0;
+@@ -2010,6 +2016,31 @@
    ram[offset + 1] = static_cast<u8>(value);
  }
  
@@ -206,7 +218,7 @@ index f928a91..161853a 100644
  void WriteRamU32BE(u8* ram, u32 offset, u32 value)
  {
    ram[offset] = static_cast<u8>(value >> 24);
-@@ -2092,13 +2117,13 @@ bool TryFastPairedQuantizedMemory(Core::System& system, PowerPC::PowerPCState& p
+@@ -2092,12 +2123,12 @@
  
    const u32 element_bytes = PairedQuantizedElementBytes(type);
    const u32 bytes = inst.W ? element_bytes : element_bytes * 2;
@@ -218,13 +230,12 @@ index f928a91..161853a 100644
 +  SelectWiiMem2Window(system, ppc_state, address, bytes, ram, offset, ram_size);
    if (offset > ram_size - bytes)
      return false;
- 
--  u8* ram = system.GetMemory().GetRAM();
 -
+-  u8* ram = system.GetMemory().GetRAM();
+ 
    if (load)
    {
-     double ps0 = 0.0;
-@@ -2578,6 +2603,10 @@ struct WasmStateLayout
+@@ -2578,6 +2609,10 @@
    u32 ram_size_real;
    u32 l1_base;
    u32 l1_size;
@@ -235,7 +246,7 @@ index f928a91..161853a 100644
  };
  
  constexpr u32 WASM_IMPORT_FASTCHECK_GPFIFO_INDEX = 14;
-@@ -3697,6 +3726,30 @@ void EmitIsMem1Address(std::vector<u8>& body, const WasmStateLayout& layout)
+@@ -3697,6 +3732,30 @@
    body.push_back(0x4d);
  }
  
@@ -266,7 +277,7 @@ index f928a91..161853a 100644
  void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
  {
    EmitLocalGet(body, 1);
-@@ -3704,6 +3757,15 @@ void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layo
+@@ -3704,6 +3763,15 @@
    body.push_back(0x71);
    EmitI32Const(body, layout.ram_size_real - bytes);
    body.push_back(0x4d);
@@ -282,7 +293,7 @@ index f928a91..161853a 100644
  }
  
  void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
-@@ -3719,11 +3781,7 @@ void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& l
+@@ -3719,11 +3787,7 @@
  
  void EmitIsMem1LineAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
@@ -295,11 +306,10 @@ index f928a91..161853a 100644
  }
  
  void EmitIsOutsideLowDcbzHackRange(std::vector<u8>& body)
-@@ -3747,8 +3805,20 @@ void EmitRamOffset(std::vector<u8>& body)
+@@ -3747,8 +3811,20 @@
  void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
    if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
--  EmitI32Const(body, layout.ram_base);
 +  if (layout.exram_size_real < 32)
 +  {
 +    EmitI32Const(body, layout.ram_base);
@@ -307,9 +317,10 @@ index f928a91..161853a 100644
 +    body.push_back(0x6a);
 +    return;
 +  }
-   EmitRamOffset(body);
++  EmitRamOffset(body);
 +  EmitI32Const(body, layout.exram_base - 0x10000000);
-+  EmitI32Const(body, layout.ram_base);
+   EmitI32Const(body, layout.ram_base);
+-  EmitRamOffset(body);
 +  EmitLocalGet(body, 1);
 +  EmitI32Const(body, 0x10000000);
 +  body.push_back(0x71);
@@ -317,10 +328,12 @@ index f928a91..161853a 100644
    body.push_back(0x6a);
  }
  
-@@ -3966,6 +4036,25 @@ void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+@@ -3964,6 +4040,25 @@
+     EmitLocalGet(body, 40); body.insert(body.end(), {0x28, 0x00});
+     EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
-     return;
-   }
++    return;
++  }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
@@ -338,12 +351,10 @@ index f928a91..161853a 100644
 +    body.push_back(0x10);
 +    EmitU32Leb(body, 0);
 +    body.push_back(0x0b);
-+    return;
-+  }
+     return;
+   }
    EmitLocalGet(body, 1);
-   EmitI32Const(body, 0x3fffffff);
-   body.push_back(0x71);
-@@ -3999,6 +4088,23 @@ void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+@@ -3999,6 +4094,23 @@
      EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -367,10 +378,12 @@ index f928a91..161853a 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4031,6 +4137,25 @@ void EmitReadU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+@@ -4029,6 +4141,25 @@
+     EmitLocalGet(body, 40); body.insert(body.end(), {0x2f, 0x00});
+     EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
-     return;
-   }
++    return;
++  }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
@@ -388,15 +401,15 @@ index f928a91..161853a 100644
 +    body.push_back(0x10);
 +    EmitU32Leb(body, 4);
 +    body.push_back(0x0b);
-+    return;
-+  }
-   EmitLocalGet(body, 1);
-   EmitI32Const(body, 0x3fffffff);
-   body.push_back(0x71);
-@@ -4078,6 +4203,27 @@ void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
-     body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
      return;
    }
+   EmitLocalGet(body, 1);
+@@ -4076,6 +4207,27 @@
+   {
+     EmitLocalGet(body, 40); EmitBswap32FromLocal(body, 2);
+     body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
++    return;
++  }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
@@ -416,12 +429,10 @@ index f928a91..161853a 100644
 +    body.push_back(0x10);
 +    EmitU32Leb(body, 1);
 +    body.push_back(0x0b);
-+    return;
-+  }
+     return;
+   }
    EmitLocalGet(body, 1);
-   EmitI32Const(body, 0x3fffffff);
-   body.push_back(0x71);
-@@ -4113,6 +4259,25 @@ void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+@@ -4113,6 +4265,25 @@
      body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -447,10 +458,12 @@ index f928a91..161853a 100644
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4146,6 +4311,27 @@ void EmitWriteU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
+@@ -4144,6 +4315,27 @@
+   {
+     EmitLocalGet(body, 40); EmitBswap16FromLocal(body, 2);
      body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
-     return;
-   }
++    return;
++  }
 +  if (layout.exram_size_real >= 32)
 +  {
 +    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
@@ -470,12 +483,10 @@ index f928a91..161853a 100644
 +    body.push_back(0x10);
 +    EmitU32Leb(body, 5);
 +    body.push_back(0x0b);
-+    return;
-+  }
+     return;
+   }
    EmitLocalGet(body, 1);
-   EmitI32Const(body, 0x3fffffff);
-   body.push_back(0x71);
-@@ -8131,6 +8317,36 @@ int CompileWasmCachedInterpreterBlockForTest(const std::vector<u8>& bytes)
+@@ -8131,6 +8323,36 @@
        fast_melee_status_call_index, fast_melee_service_poll_call_index);
  }
  
@@ -512,7 +523,68 @@ index f928a91..161853a 100644
  WasmStateLayout MakeWasmBlockTestLayout(PowerPC::PowerPCState& state, u8* ram, u32 ram_size)
  {
    const auto state_base = reinterpret_cast<std::uintptr_t>(&state);
-@@ -9651,8 +9867,9 @@ static bool TryFastRamWordLoadStore(Core::System& system, PowerPC::PowerPCState&
+@@ -8276,7 +8498,12 @@
+   struct Counts
+   {
+     u32 blocks = 0;
+-    ~Counts() { s_wasm_fast_chain_blocks.fetch_add(blocks, std::memory_order_relaxed); }
++    u32 hits = 0;
++    ~Counts()
++    {
++      s_wasm_fast_chain_blocks.fetch_add(blocks, std::memory_order_relaxed);
++      if (hits) s_wasm_dynamic_link_hits.fetch_add(hits, std::memory_order_relaxed);
++    }
+   } counts;
+   // Shield any enclosing/nested legacy callback scope. We resolve the actual
+   // completed full block's descriptor directly and never dereference TLS data.
+@@ -8284,6 +8511,8 @@
+   auto& state = m_ppc_state;
+   const CPU::State* const cpu_state = m_system.GetCPU().GetStatePtr();
+   const bool links_enabled = StaticExitLinksEnabled();
++  const bool dynamic_cache = links_enabled &&
++      !DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE);
+   using WasmFunction = int (*)(int);
+   do
+   {
+@@ -8313,13 +8542,31 @@
+         if (links->cells[i].pc == state.pc) { next = links->cells[i].entry; break; }
+     if (!next)
+     {
+-      if (!allow_dispatch) return true;  // standalone fixture; product always true
+-      next = m_block_cache.Dispatch();
+-      if (!next)
++      // The source descriptor is safe only after the epoch/features guards
++      // above. A target retirement changes the global epoch, so a cached
++      // pointer must additionally carry both halves of that lifetime key.
++      auto& cached = links->dynamic;
++      if (dynamic_cache && cached.entry && cached.pc == state.pc &&
++          cached.features == source_features &&
++          cached.epoch[0] == static_cast<u32>(source_epoch) &&
++          cached.epoch[1] == static_cast<u32>(source_epoch >> 32))
+       {
+-        boundary.Close();  // no cached callback active at this code-generation safe point
+-        Jit(state.pc);
+-        return true;
++        next = cached.entry;
++        ++counts.hits;
++      }
++      else
++      {
++        if (!allow_dispatch) return true;  // standalone fixture; product always true
++        next = m_block_cache.Dispatch();
++        if (!next)
++        {
++          boundary.Close();  // no cached callback active at this code-generation safe point
++          Jit(state.pc);
++          return true;
++        }
++        if (dynamic_cache)
++          cached = {state.pc, source_features,
++                    {static_cast<u32>(source_epoch), static_cast<u32>(source_epoch >> 32)}, next};
+       }
+     }
+     entry = next;
+@@ -9651,8 +9898,9 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -524,7 +596,7 @@ index f928a91..161853a 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= sizeof(u32);
  
-@@ -9728,9 +9945,10 @@ static bool TryFastRamByteHalfLoadStore(Core::System& system, PowerPC::PowerPCSt
+@@ -9728,9 +9976,10 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -537,7 +609,7 @@ index f928a91..161853a 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -9800,8 +10018,9 @@ static bool TryFastRamMultiwordLoadStore(Core::System& system, PowerPC::PowerPCS
+@@ -9800,8 +10049,9 @@
    const u32 register_count = 32 - inst.RD;
    const u32 bytes = register_count * sizeof(u32);
    u8* ram = system.GetMemory().GetRAM();
@@ -549,7 +621,7 @@ index f928a91..161853a 100644
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -10162,9 +10381,10 @@ static bool TryFastRamFloatLoadStore(Core::System& system, PowerPC::PowerPCState
+@@ -10162,9 +10412,10 @@
    }
  
    u8* ram = system.GetMemory().GetRAM();
@@ -562,7 +634,7 @@ index f928a91..161853a 100644
    const bool in_ram =
        !ppc_state.msr.LE && ram != nullptr && offset < ram_size && ram_size - offset >= bytes;
  
-@@ -11606,6 +11826,8 @@ bool CachedInterpreter::TryWriteWasmBlock(u32 nextPC)
+@@ -11606,6 +11857,8 @@
        m_system.GetMemory().GetRamSizeReal(),
        static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetL1Cache())),
        m_system.GetMemory().GetL1CacheSize(),
@@ -571,7 +643,7 @@ index f928a91..161853a 100644
    };
    const bool write_npc =
        did_merge ? merge_write_npc : (compiled_entire_block && !compiled_block_ends_with_branch);
-@@ -12058,6 +12280,8 @@ extern "C" const char* GetPpcWasmHelperStats()
+@@ -12058,6 +12311,8 @@
  
    std::ostringstream out;
    out << (applied_policy < 2 ? "tier:guarded " : "tier:mixed ");
@@ -580,10 +652,77 @@ index f928a91..161853a 100644
    out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
    const u32 average_prefix =
        s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
-@@ -13170,6 +13394,179 @@ extern "C" int RunPpcWasmPairedQuantizedMemorySmoke()
-   return state.npc == 0x80003414 ? 1 : 60;
- }
+@@ -12800,12 +13055,18 @@
+     if (action == 3) *fixture_cpu = CPU::State::Stepping;
+     return action == 4 ? 1 : 0;
+   };
+-  for (u32 test = 0; test < 10; ++test)
+-  {
++  const u32 saved_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct MaskRestore { u32 mask; ~MaskRestore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } mask_restore{saved_mask};
++  for (u32 enabled = 0; enabled < 2; ++enabled)
++  for (u32 test = 0; test < 15; ++test)
++  {
++    if (test >= 10 && !enabled) continue;
++    s_dolphin_web_disable_mask.store((saved_mask & ~DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE) |
++        (enabled ? 0 : DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE), std::memory_order_relaxed);
+     *cpu_state = CPU::State::Running;
+     state.feature_flags = static_cast<decltype(state.feature_flags)>(0);
+     state.pc = state.npc = pc0; state.msr.Hex = 0; state.gpr[3] = 7;
+-    state.downcount = test == 1 ? 0 : test == 2 ? -1 : test == 0 ? 11 : 100;
++    state.downcount = test == 1 ? 0 : test == 2 ? -1 : (test == 0 || test == 10) ? 11 : 100;
+     u8 touched[2]{};
+     Entry entries[2]{{callback, {handles[0], &touched[0], pc1, 3, 0, 0, 1}},
+                      {callback, {handles[1], &touched[1], pc0, 3, 0, 0, 1}}};
+@@ -12815,21 +13076,39 @@
+     if (test == 3) entries[0].operands.end_block = 0;
+     if (test == 4) entries[1].operands.end_block = 0;
+     if (test == 5) entries[0].operands.links.count = 0;
+-    action = test >= 6 ? test - 5 : 0;
++    if (test >= 10)
++    {
++      const u64 epoch = jit.m_block_cache.StaticLinkEpoch();
++      for (u32 i = 0; i < 2; ++i)
++      {
++        entries[i].operands.links.count = 0;
++        entries[i].operands.links.dynamic = {i ? pc0 : pc1, 0,
++            {static_cast<u32>(epoch), static_cast<u32>(epoch >> 32)}, ptr(&entries[1 - i])};
++      }
++      auto& cache = entries[0].operands.links.dynamic;
++      if (test == 11) cache.pc ^= 4;
++      if (test == 12) cache.features = 1;
++      if (test == 13) cache.epoch[0] ^= 1;
++      if (test == 14) cache.epoch[1] ^= 1;
++      if (test >= 11) cache.entry = reinterpret_cast<const u8*>(1);
++    }
++    action = test >= 6 && test < 10 ? test - 5 : 0;
+     if (action)
+     {
+       entries[0].operands.handle = static_cast<s32>(reinterpret_cast<std::uintptr_t>(control));
+       // Must exit before inspecting a stale/invalid destination.
+       entries[0].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
+     }
++    const u32 before_hits = s_wasm_dynamic_link_hits.load(std::memory_order_relaxed);
+     const u32 before = s_wasm_block_run_count, before_fast = s_wasm_fast_chain_blocks.load(std::memory_order_relaxed);
+     const bool handled = jit.ExecuteWasmFastChain(ptr(entries), false);
+-    const u32 blocks = test == 0 ? 4 : test == 3 ? 0 : 1;
++    const u32 blocks = (test == 0 || test == 10) ? 4 : test == 3 ? 0 : 1;
+     if (handled != (test != 3)) return 2100 + test;
++    if (s_wasm_dynamic_link_hits.load(std::memory_order_relaxed) - before_hits != (test == 10 ? 3u : 0u)) return 2700 + test;
+     if (s_wasm_block_run_count - before != blocks ||
+         s_wasm_fast_chain_blocks.load(std::memory_order_relaxed) - before_fast != blocks) return 2200 + test;
+     if (touched[0] != (blocks != 0) || touched[1] != (blocks > 1)) return 2300 + test;
+-    if (test == 0 && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
++    if ((test == 0 || test == 10) && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
+                       state.downcount != -1)) return 2400;
+     if (test == 9)
+     {
+@@ -13168,6 +13447,179 @@
+     return 51;
  
+   return state.npc == 0x80003414 ? 1 : 60;
++}
++
 +// Wii MEM2 direct-path smoke: fake MEM1/EXRAM buffers, MSR.FP|DR. Every
 +// emitter family must address EXRAM for the cached 0x9 window and still
 +// address MEM1 for 0x8. Must run before a disc boots (clobbers PPC state).
@@ -755,11 +894,9 @@ index f928a91..161853a 100644
 +  if (exram[0x9f] != 0 || exram[0xc0] != 0)
 +    return 52;
 +  return state.npc == 0x80003504 ? 1 : 60;
-+}
-+
+ }
+ 
  extern "C" int RunPpcWasmFloatCompareSmoke()
- {
-   auto& state = Core::System::GetInstance().GetPPCState();
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
@@ -773,3 +910,25 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInsta
    // Handles become reusable only after the CPU unlinks every native user
    // at a safe point. Permanent helper slots never enter this free list.
    const free = [];
+
+diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterLink.h b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterLink.h
+--- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterLink.h
++++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterLink.h
+@@ -31,10 +31,17 @@
+   U32 call = 0;
+   Entry entry = nullptr;
+ };
++struct CachedTarget
++{
++  U32 pc = 0, features = 0;
++  std::array<U32, 2> epoch{};
++  Entry entry = nullptr;
++};
+ struct Descriptor
+ {
+   U32 count = 0;
+   std::array<Cell, 2> cells{};
++  mutable CachedTarget dynamic{};
+ };
+ static_assert(std::is_trivially_copyable_v<Descriptor> &&
+               std::is_trivially_destructible_v<Descriptor>);

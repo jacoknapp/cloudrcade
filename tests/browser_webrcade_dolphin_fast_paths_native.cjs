@@ -35,7 +35,9 @@ assert(origin, 'Supply the isolated GameCube or Wii origin');
             '_RunPpcWasmPairedQuantizedMemorySmoke','_RunPpcWasmFloatCompareSmoke'];
           if (typeof moduleInstance._RunPpcWasmMem2Smoke === 'function')
             names.push('_RunPpcWasmMem2Smoke');
-          return {capacity:moduleInstance._DolphinWeb_GetWasmCacheCapacity(),results:names.map(name=>({name,result:moduleInstance[name]()}))};
+          const results=names.map(name=>({name,result:moduleInstance[name]()}));
+          return {capacity:moduleInstance._DolphinWeb_GetWasmCacheCapacity(),results,
+            dynamicLinkHits:moduleInstance._GetWasmDynamicLinkHits?.()>>>0};
         }\n`;
         await route.fulfill({ response, body: source.replace(anchor, hook + anchor) });
       });
@@ -55,6 +57,8 @@ assert(origin, 'Supply the isolated GameCube or Wii origin');
       assert.equal(result.capacity, profile === 'standard' ? 16384 : 32768);
       assert.equal(result.results.length, system === 'wii' ? 6 : 5);
       for (const item of result.results) assert.equal(item.result, 1, item.name);
+      if (system === 'wii') assert(result.dynamicLinkHits >= 3,
+        'Wii exercises valid dynamic links and rejects poisoned PC/features/epoch targets');
       assert.deepEqual(errors, []);
       results.push({ system, profile, engine: engine.name(), ...result });
       console.log('PASS', system, profile, engine.name(), 'compiled-block chain budget/stop/epoch/helper contracts and generated RAM/FP differentials');

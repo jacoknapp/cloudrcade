@@ -22,6 +22,9 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
   assert.equal(adapter.fallback,false);
   await p.waitForTimeout(Number(process.env.WARM||30)*1000);
   const sample=()=>p.evaluate(()=>__s.adapter.request('runFrame'));
+  // Session pause ends the app's animation loop. Its public resume also restarts
+  // input polling; resuming only the session would leave a moving core with no input.
+  const resume=()=>p.evaluate(system=>window[system==='wii'?'WrcadWii':'WrcadGameCube'].togglePause(),system);
   const drainedSample=async()=>{
    // Keep the application's transition queue, polling and watchdog state in
    // sync with native pause, just as the menu/save flow does.
@@ -50,9 +53,9 @@ if(!origin||!rom)throw Error('Supply WEBRCADE_GAMECUBE_ORIGIN and GAMECUBE_TEST_
    if(!await select.isVisible()) await p.locator('.kt-tab').click();
    await select.selectOption(String(divisor));await p.waitForFunction(()=>!document.querySelector('.gc-frame-skip select').disabled);
    await p.waitForTimeout(1000);
-   const a=await drainedSample();await p.evaluate(()=>__s.resume());
+   const a=await drainedSample();await resume();
    await p.waitForTimeout(Number(process.env.SAMPLE||12)*1000);
-   const z=await drainedSample();await p.evaluate(()=>__s.resume());
+   const z=await drainedSample();await resume();
    const old=a.gamecubeDiagnostics.frameSkip,now=z.gamecubeDiagnostics.frameSkip;
    const frames=now.frames-old.frames,skipped=now.skipped-old.skipped,shown=z.gamecubeDiagnostics.render.frames-a.gamecubeDiagnostics.render.frames;
    console.log('CADENCE',JSON.stringify({system,divisor,frames,skipped,shown,before:old.native,after:now.native,backlogBefore:a.gamecubeDiagnostics.backlog,backlogAfter:z.gamecubeDiagnostics.backlog}));
