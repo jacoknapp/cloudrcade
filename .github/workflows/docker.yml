@@ -174,8 +174,12 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: cloudrcade:test
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          # Keep platform test caches separate; web is a read-only migration fallback.
+          cache-from: |
+            type=gha,scope=web-amd64
+            type=gha,scope=web-release
+            type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web-amd64
       - name: Verify AMD64 app and scheduled feed builder
         run: python3 scripts/smoke-image.py cloudrcade:test linux/amd64 --gamecube
       - name: Build ARM64 app image
@@ -187,8 +191,12 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: cloudrcade:test-arm64
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          # Keep platform test caches separate; web is a read-only migration fallback.
+          cache-from: |
+            type=gha,scope=web-arm64
+            type=gha,scope=web-release
+            type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web-arm64
       - name: Verify ARM64 app and scheduled feed builder under QEMU
         if: "!startsWith(github.ref, 'refs/heads/beta/')"
         run: python3 scripts/smoke-image.py cloudrcade:test-arm64 linux/arm64 --gamecube
@@ -203,8 +211,13 @@ jobs:
           tags: |
             ${{ steps.tags.outputs.web }}
             ${{ steps.tags.outputs.web_alias }}
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          # Keep platform test caches separate; web is a read-only migration fallback.
+          cache-from: |
+            type=gha,scope=web-amd64
+            type=gha,scope=web-arm64
+            type=gha,scope=web-release
+            type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web-release
           provenance: true
           sbom: true
       - name: Cache verified gamecube build
