@@ -2,7 +2,7 @@
 
 [![Docker release](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml/badge.svg)](https://github.com/jacoknapp/cloudrcade/actions/workflows/docker.yml)
 
-**cloudЯcade** (cloudRcade, with a backwards R) lets you play a supplied game library in a web browser. It is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade), with Nextcloud and Dropbox saves, editable touch controls, Recently Played, offline caching, clock support, PlayStation disc streaming, Nintendo 3DS, PSP and GameCube support. It preserves upstream history and credits; it is not an official webRcade release.
+**cloudЯcade** (cloudRcade, with a backwards R) lets you play a supplied game library in a web browser. It is an independent, self-hosted fork of [webRcade](https://github.com/webrcade/webrcade), with Nextcloud and Dropbox saves, editable touch controls, Recently Played, offline caching, clock support, PlayStation disc streaming, Nintendo 3DS, PSP, GameCube, PlayStation 2 and Wii support. It preserves upstream history and credits; it is not an official webRcade release.
 
 <a id="mobile-and-installed-web-app"></a>
 
@@ -31,13 +31,20 @@ are scanned in place. No external PS2 BIOS is needed. Large discs stream with a
 16 MiB cache; compatibility and speed vary. See the
 [PlayStation 2 guide](deploy/webrcade/retro-play/README.md).
 
+Nintendo Wii is available by default, with its own Wii Remote/Nunchuk controller
+and save namespace. No player or Docker enable switch is needed, including for
+browsers that previously disabled the beta. It requires HTTPS and device WebGPU.
+Put ISO, single-file WBFS or Wii CISO discs under `roms/Wii/`. Touch/mouse motion,
+controller layouts and optional phone motion are described in the [Wii guide](deploy/webrcade/retro-wii/README.md).
+Its optional performance readout is in **Settings → Core Settings** and starts off.
+
 <a id="nextcloud-and-sso"></a>
 
 Nextcloud and Dropbox can sync supported game saves, state slots, controller preferences and Recently Played. Operators enable providers; players choose a save destination in **Settings → Cloud Storage → Choose storage** and link their own account. Dropbox requires the operator's scoped App Folder app and public app key; its sign-in uses PKCE without an app secret. Browser-local saves work without a cloud connection for supported games. [Cloud choices and setup](docs/wiki/saves-and-storage.md#choose-a-storage-option) explains provider setup, switching, shared-file hosting and Google Drive source files. Google Drive save synchronization is not implemented.
 
 <a id="internet-connection-for-streamed-games"></a>
 
-**Keep a connection while playing streamed discs or large 3DS ROMs.** This includes streamed PlayStation, PSP, GameCube and PlayStation 2 discs. Loading the first screen does not download the whole game. **3DS shaders cache as they are created:** new shaders can cause hitches, and many new shaders together can cause longer pauses. Performance varies by game, browser and device.
+**Keep a connection while playing streamed discs or large 3DS ROMs.** This includes streamed PlayStation, PSP, GameCube, Wii and PlayStation 2 discs. Loading the first screen does not download the whole game. **3DS shaders cache as they are created:** new shaders can cause hitches, and many new shaders together can cause longer pauses. Performance varies by game, browser and device.
 
 <a id="run-with-docker"></a>
 
@@ -60,7 +67,7 @@ The default listener is `127.0.0.1:8443`. Compose mounts `config/` read-write at
 
 The release image is `ghcr.io/jacoknapp/cloudrcade:latest`. Every merge to `main` builds and publishes it; pull requests validate without publishing. Commit-specific `sha-<full-commit>` and `v*` release tags are also published.
 
-Main and release-tag images support **Linux AMD64 and ARM64**, including 64-bit ARM servers and Raspberry Pi systems running a 64-bit OS. Docker selects the matching image automatically. Both architectures pass the app and scanner smoke checks before publication. Beta branch images, including `beta-ps2-core`, are AMD64-only.
+Main and release-tag images support **Linux AMD64 and ARM64**, including 64-bit ARM servers and Raspberry Pi systems running a 64-bit OS. Docker selects the matching image automatically. Both architectures pass the app and scanner smoke checks before publication. Beta branch images are AMD64-only; the selected beta branch publishes `:beta`.
 
 <a id="user-and-operator-wiki"></a>
 <a id="development-and-licensing"></a>

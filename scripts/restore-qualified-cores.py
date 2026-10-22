@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Restore unchanged core artifacts and corresponding source from qualified CI.
 
-Prefer the branch's last successful published release, pinned by OCI digest and
-verified source provenance. The recorded qualified release is an offline/API
+Find a successful ancestral publication across release channels, pinned by OCI
+digest and verified source provenance. The recorded qualified release is an offline/API
 fallback. Only matching effective inputs can be resealed for current cache keys.
 """
 import importlib.util
@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from urllib.parse import quote
 
 spec = importlib.util.spec_from_file_location('core_cache', Path(__file__).with_name('core-cache.py'))
 cache = importlib.util.module_from_spec(spec)
@@ -61,10 +60,10 @@ def qualified_release():
             re.fullmatch(r'[a-f0-9]{40}', head) and os.environ.get('GH_TOKEN')):
         return SOURCE, IMAGE
     try:
-        # Stable promotions can inherit qualified cores published on beta.
-        # Ancestry/provenance below and exact inputs in restore still apply.
-        branch_filter = '' if branch == 'main' else f'branch={quote(branch, safe="")}&'
-        runs = read_json('gh', 'api', f'repos/{repo}/actions/workflows/docker.yml/runs?{branch_filter}status=success&per_page=10')
+        # GitHub's caches are branch-scoped. Promotions between beta channels
+        # can reuse a verified publication at the same commit or an ancestor.
+        # Ancestry, OCI provenance and exact effective input checks still apply.
+        runs = read_json('gh', 'api', f'repos/{repo}/actions/workflows/docker.yml/runs?status=success&per_page=10')
         for run in runs['workflow_runs']:
             source = run['head_sha']
             if run['event'] not in ('push', 'workflow_dispatch') or not re.fullmatch(r'[a-f0-9]{40}', source):
@@ -103,7 +102,7 @@ def restore(root=cache.ROOT):
     except subprocess.CalledProcessError:
         subprocess.run(['git', 'fetch', '--depth', '1', 'origin', source], cwd=root, check=True, timeout=120)
     selected = [core for core in pending if unchanged(core, root, source)]
-    natives = [core for core in ('gamecube', 'ps2') if core in pending and
+    natives = [core for core in ('gamecube', 'ps2', 'wii') if core in pending and
                not cache.native_valid(root / 'release' / (core + '-native'), root, core) and
                unchanged(core + '-native', root, source)]
     if not selected and not natives:
@@ -112,7 +111,8 @@ def restore(root=cache.ROOT):
     subprocess.run(['docker', 'pull', '--platform', 'linux/amd64', image], check=True)
     container = subprocess.check_output(['docker', 'create', '--platform', 'linux/amd64', image], text=True).strip()
     apps = {'3ds': '/var/www/touch/apps/retro-azahar', 'psp': '/var/www/touch/apps/retro-ppsspp',
-            'gamecube': '/var/www/html/experimental/gamecube', 'ps2': '/var/www/html/experimental/ps2'}
+            'gamecube': '/var/www/html/experimental/gamecube', 'ps2': '/var/www/html/experimental/ps2',
+            'wii': '/var/www/html/experimental/wii'}
     def copy(path, output):
         output.mkdir(parents=True, exist_ok=True)
         subprocess.run(['docker', 'cp', container + ':' + path, str(output)], check=True)
@@ -121,7 +121,7 @@ def restore(root=cache.ROOT):
             output = root / 'release' / core
             if output.exists(): shutil.rmtree(output)
             copy(apps[core] + '/.', output / 'app')
-            if core != 'gamecube':
+            if core not in ('gamecube', 'wii'):
                 copy('/var/www/html/licenses/sources/' + core + '-source.tar.gz', output / 'sources')
             cache.seal(core, output, cache.identity(core, root), root)
             print('Restored verified unchanged ' + core + ' runtime and corresponding source', flush=True)

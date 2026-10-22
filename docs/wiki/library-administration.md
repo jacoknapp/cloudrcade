@@ -39,6 +39,7 @@ cloudrcade/
 │   │   ├── Games/Example.3ds    3DS games may be directly here or nested
 │   │   └── bios/                Your external aes_keys.txt, if needed
 │   ├── GameCube/Example.iso     GameCube disc
+│   ├── Wii/Example.wbfs       Wii ISO, single-file WBFS or Wii CISO
 │   ├── PS2/Example.iso          PlayStation 2 core
 │   └── managed/                Optional externally managed game files
 └── config/                      Writable application configuration
@@ -51,7 +52,7 @@ cloudrcade/
 
 **Do not add `roms/3DS/roms/` merely to match the other systems.** The 3DS scanner searches beneath `3DS/` directly, including subfolders. Startup aliases `3DS/bios/` from the read-only ROM mount to the private runtime-key path. Use the exact system spelling: `segaMD` and `3DS` are case-sensitive examples.
 
-The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at `/roms` and `WEBRCADE_HOST_PATH` (default `./config`) writable at `/config`. Startup aliases `/var/www/html/content` to `/roms` and `/data` to `/config/data`; the scanner keeps using those internal paths. Most systems scan recursively below `<folder>/roms`; 3DS, GameCube and PS2 scan directly beneath their system folders. Folder spelling and case matter on case-sensitive filesystems.
+The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at `/roms` and `WEBRCADE_HOST_PATH` (default `./config`) writable at `/config`. Startup aliases `/var/www/html/content` to `/roms` and `/data` to `/config/data`; the scanner keeps using those internal paths. Most systems scan recursively below `<folder>/roms`; 3DS, GameCube, Wii and PS2 scan directly beneath their system folders. Folder spelling and case matter on case-sensitive filesystems.
 
 | Folder | System | Scanner extensions |
 | --- | --- | --- |
@@ -68,10 +69,11 @@ The root Compose file mounts `WEBRCADE_ROM_PATH` (default `./roms`) read-only at
 | `PS2` or `ps2` | PlayStation 2 | `.iso`, `.chd` v5, homebrew `.elf` |
 | `3DS` | Nintendo 3DS | `.cia`, `.3ds`, `.cci` |
 | `GameCube` | Nintendo GameCube | `.iso`, `.gcm` |
+| `Wii` (case insensitive) | Nintendo Wii | `.iso`, single-file `.wbfs`, Wii `.ciso` |
 
 These are the integrated scanner's supported formats, not an exhaustive list of formats/apps possible in a hand-written webRcade feed. A matching extension does not guarantee a valid or compatible game. The scanner validates 3DS headers and application titles, excludes updates/DLC/system titles and known unsupported seed-protected titles, and applies operator exclusions. It also routes `.smc` files directly under `nes/roms` to SNES for compatibility with a misfiled library.
 
-GameCube and PS2 entries are generated only when the image includes their respective core. Neither GameCube nor PlayStation 2 has an enable flag; their games are visible by default when the core is packaged. ISO validation requires a PS2 `BOOT2` disc; `.elf` must be a supported PS2 executable. A v5 CHD in a PS2 folder is treated as PS2 input, so keep PlayStation CHDs under `psx/roms`. GameCube inputs must have a valid GameCube disc header; Wii discs are excluded.
+GameCube, Wii and PS2 entries are generated when their respective core is packaged. They have no enable flag; their games are visible by default. ISO validation requires a PS2 `BOOT2` disc; `.elf` must be a supported PS2 executable. A v5 CHD in a PS2 folder is treated as PS2 input, so keep PlayStation CHDs under `psx/roms`. GameCube inputs must have a valid GameCube disc header; Wii discs belong under `Wii/`. Wii accepts ISO, complete single-game WBFS and Wii CISO directly without conversion or a second copy. Split/multi-game WBFS, RVZ and WAD are unsupported.
 
 ## Add your first game or another game
 

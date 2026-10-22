@@ -140,3 +140,15 @@ https://arcade.example.com/outpost.goauthentik.io/start?rd=https%3A%2F%2Farcade.
 ```
 
 Use your own URL-encoded public library URL as `rd`. A fresh navigation replaces the failed attempt; it does not require deleting local saves. If it still fails, inspect the identity provider/gateway logs and policy without weakening library/feed/ROM/key protection.
+
+
+## Wii and promoted releases
+
+The standard `ghcr.io/jacoknapp/cloudrcade:latest` image includes Wii and the
+GameCube/Wii cache, native frame-skip and compiled-block chaining improvements.
+Main/latest images support AMD64 and ARM64; beta images are AMD64 only. Use the
+normal Compose image setting to select your channel, then pull and recreate the
+service. Wii needs no enable variable or player opt-in; an old disabled beta
+preference cannot hide it. The optional readout and native graphics frame skip
+remain off by default. Keep games and existing config/save storage mounted when
+upgrading. The historical `/experimental/wii/` launcher URL remains supported.

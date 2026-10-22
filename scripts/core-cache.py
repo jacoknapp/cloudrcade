@@ -32,6 +32,11 @@ INPUTS = {
     'ps2-native': [BASE + 'retro-play/' + name for name in
         ('core.json', 'native-build.json', 'patch-*.py', 'build-linux.sh', 'Dockerfile.build', 'native', 'gpu')],
 }
+# Wii ships the current GameCube adapter/SDK plus its own input and save layer.
+# Its compiler inputs remain separate from those browser/package dependencies.
+INPUTS['wii'] = INPUTS['gamecube'] + [BASE + 'retro-wii', 'scripts/prepare-wii.py']
+INPUTS['wii-native'] = INPUTS['gamecube-native'] + [BASE + 'retro-wii/' + name for name in
+    ('wii-input.patch', 'native-build.json', 'build-native.py')]
 # These two operator guides are neither read by their builders nor shipped in
 # their corresponding-source archives. Other documentation (e.g. GC adapter
 # source/SDK files) remains an input when its package actually contains it.
@@ -42,6 +47,7 @@ COMMANDS = {
     'psp': ['bash', BASE + 'retro-ppsspp/build.sh'],
     'ps2': ['python3', BASE + 'retro-play/prepare.py'],
     'gamecube': ['python3', BASE + 'retro-dolphin/prepare.py'],
+    'wii': ['python3', 'scripts/prepare-wii.py'],
 }
 
 
@@ -79,7 +85,7 @@ def workflow_inputs(text, core):
     steps = re.split(r'(?m)^      - ', job)[1:]
     node, invocation = [], []
     for step in steps:
-        if 'uses: actions/setup-node@' in step and parent in ('gamecube', 'ps2') and not core.endswith('-native'):
+        if 'uses: actions/setup-node@' in step and parent in ('gamecube', 'ps2', 'wii') and not core.endswith('-native'):
             node.extend(re.findall(r'(?m)^\s*(node-version|node-version-file|architecture|check-latest):\s*(.+)$', step))
         if re.search(r'core-cache\.py prepare ' + re.escape(parent) + r'\b', step):
             invocation.append(re.sub(r'(?m)^\s*(?:name|id|if):[^\n]*\n?', '', step).strip())
@@ -168,25 +174,37 @@ def ps2_native_key(root=ROOT):
 
 
 def native_valid(output, root=ROOT, core='gamecube'):
-    folder = 'retro-play' if core == 'ps2' else 'retro-dolphin'
+    folder = {'ps2': 'retro-play', 'wii': 'retro-wii'}.get(core, 'retro-dolphin')
     lock = json.loads((root / BASE / folder / 'native-build.json').read_text())
     if core == 'ps2' and ps2_native_key(root) != lock['nativeInputSha256']:
         return False
+    if core == 'wii':
+        gc = root / BASE / 'retro-dolphin'
+        baseline = json.loads((gc / 'native-build.json').read_text())
+        if (lock['baseNativeSourceSha256'] != baseline['sourceTreeSha256'] or
+                lock['patchSha256'] != sha(root / BASE / 'retro-wii/wii-input.patch') or
+                lock['recipeSha256'] != sha(gc / 'build-linux.sh') or
+                lock['patches'] != {p.name: sha(p) for p in sorted((gc / 'native-patches').glob('*.patch'))} or
+                any(lock[k] != baseline[k] for k in
+                    ('image', 'platform', 'rustToolchain', 'sourceDateEpoch', 'memoryPages', 'patches', 'recipeSha256'))):
+            return False
     return all((output / name).is_file() and not (output / name).is_symlink()
                and sha(output / name) == digest for name, digest in lock['artifacts'].items())
 
 
 def validate(core, output, root=ROOT):
     required = ['app/index.html']
-    if core == 'gamecube':
-        required += ['app/gamecube-source.tar.gz', 'app/core-info.json',
-                     'app/adapter-source/native-build.json']
-        if not native_valid(output / 'app/cores/dolphin', root):
-            raise ValueError('GameCube artifact lock mismatch')
+    if core in ('gamecube', 'wii'):
+        archive = 'app/' + core + '-source.tar.gz'
+        recipe = 'retro-wii' if core == 'wii' else 'retro-dolphin'
+        required += [archive, 'app/core-info.json',
+                     'app/adapter-source/' + ('wii/' if core == 'wii' else '') + 'native-build.json']
+        if not native_valid(output / 'app/cores/dolphin', root, core):
+            raise ValueError(core + ' artifact lock mismatch')
         info = json.loads((output / 'app/core-info.json').read_text())
-        lock = json.loads((root / BASE / 'retro-dolphin/native-build.json').read_text())
-        if info['nativeBuild'] != lock or info['sourceSha256'] != sha(output / 'app/gamecube-source.tar.gz'):
-            raise ValueError('GameCube source/lock mismatch')
+        lock = json.loads((root / BASE / recipe / 'native-build.json').read_text())
+        if info['nativeBuild'] != lock or info['sourceSha256'] != sha(output / archive):
+            raise ValueError(core + ' source/lock mismatch')
     elif core == 'ps2':
         required += ['sources/ps2-source.tar.gz', 'app/core-info.json']
         info = json.loads((output / 'app/core-info.json').read_text())
@@ -239,6 +257,7 @@ def prepare(core, root=ROOT):
         # Do not allow ambient native reuse to bypass the explicit fresh-build mode.
         env.pop('GAMECUBE_NATIVE_CACHE', None)
         env.pop('PS2_NATIVE_CACHE', None)
+        env.pop('WII_NATIVE_CACHE', None)
         native = root / 'release/gamecube-native'
         if core == 'gamecube' and not force and native_valid(native, root):
             env['GAMECUBE_NATIVE_CACHE'] = str(native)
@@ -246,6 +265,15 @@ def prepare(core, root=ROOT):
         if core == 'ps2' and not force and native_valid(root / 'release/ps2-native', root, 'ps2'):
             env['PS2_NATIVE_CACHE'] = str(root / 'release/ps2-native')
             print('Reusing PS2 native artifacts; rebuilding adapter/source package', flush=True)
+        if core == 'wii' and not force:
+            # The second path migrates the first qualified Wii release's exact
+            # cache. Both paths must pass the current source/artifact locks.
+            for candidate in ('wii-native', 'wii-native-cache'):
+                native = root / 'release' / candidate
+                if native_valid(native, root, 'wii'):
+                    env['WII_NATIVE_CACHE'] = str(native)
+                    print('Reusing Wii native artifacts; rebuilding adapter/source package', flush=True)
+                    break
         subprocess.run(COMMANDS[core], cwd=root, env=env, check=True)
         if identity(core, root) != key:
             raise ValueError('Inputs changed during build')
@@ -256,7 +284,7 @@ def prepare(core, root=ROOT):
                 shutil.rmtree(output / name, ignore_errors=True)
         seal(core, output, key, root)
         result = 'built'
-    if core in ('gamecube', 'ps2'):
+    if core in ('gamecube', 'ps2', 'wii'):
         native = root / 'release' / (core + '-native')
         if native.exists():
             shutil.rmtree(native)

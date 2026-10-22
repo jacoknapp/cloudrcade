@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.1.0",
+    "date": "October 21, 2026",
+    "title": "Wii and Dolphin improvements available by default",
+    "changes": [
+      "Nintendo Wii is included in the standard release without an enable switch or experimental labels, including browsers that disabled the beta. Existing saves and controller layouts are retained.",
+      "Wii supports ISO, single-file WBFS and Wii CISO discs, with Remote/Nunchuk layouts and optional phone motion. Its optional performance readout is in Core Settings.",
+      "GameCube and Wii gain compiled-block chaining, bounded cold-code retirement and native graphics frame skip. Desktop GameCube can use a larger cache; standard/mobile limits and save compatibility are retained.",
+      "Frame skip Off/2×/3×/4× omits native graphics work while game state and audio continue. Compatibility and speed depend on the game, browser and device."
+    ]
+  },
+  {
     "version": "3.0.1",
     "date": "October 18, 2026",
     "title": "PlayStation 2 available by default",

@@ -7,7 +7,21 @@ acknowledged pause/resume, Web Audio, memory cards and eight save-state slots ar
 included. Menu and Escape open CloudRcade's shared native pause screen and save
 slot editor, with the same keyboard and gamepad navigation as the other cores.
 Return to Browse saves memory cards before leaving. The controller settings
-drawer handles only touch controls, mute and layout editing. GameCube has its
+drawer includes touch controls, mute, layout editing and **Frame skip**. Frame skip
+defaults to **Off**; **2×**, **3×** and **4×** render every second, third or fourth
+GX frame. The preference is saved separately for GameCube and Wii on this
+browser and changes apply between complete graphics images. Cadence follows
+new VI display images, including games making multiple XFB copies per image;
+a latched decision prevents an in-flight draw from changing midway. Skipped frames omit
+texture loading, pipeline preparation, buffer uploads and draws, plus bulk vertex
+conversion. The final three valid input vertices retain GX normal/matrix/zfreeze
+state; suppressed indexed tails use full conversion. CPU emulation, register
+processing and audio continue every frame. GPU-only EFB copies retain their last
+complete image instead of overwriting it with incomplete skipped-frame content;
+RAM copies and clears continue. Games relying on graphics readbacks can require
+Off. CPU-bound games can gain little speed even when drawing work falls sharply.
+Native frame markers determine presentation, with no second host skip cadence.
+GameCube has its
 own default button and stick geometry; saved per-system layouts remain usable.
 Desktop audio starts enabled after Play; browser gestures retry audio activation.
 Touch devices use Menu or the drawer to enable audio; master mute still applies.
@@ -18,7 +32,7 @@ The built-in
 GameCube performance readout is off by default; switch it on or off in the
 library's Core Settings before launching. It samples native frame and
 emulated-time counters once per second. It reports rendered FPS, native game target
-and emulation speed, plus device WebGPU resolution and WASM memory. Sunshine NTSC
+and emulation speed, plus device WebGPU resolution and WASM memory. Native execute/compile timings time one CoreTiming slice in eight and scale the totals, so the readout costs about 2% of the emulation thread instead of about 9%. Sunshine NTSC
 targets30 rendered FPS at100% speed; presentation is capped at60 FPS for games
 that normally render at60. The cap does not alter the emulated game clock.
 It resets after pause/resume or loading states and adds no GPU timing probes.
@@ -75,11 +89,20 @@ the owning render pass publishes. Physical resource destruction follows GPU
 submission. Slow scenes keep guarded JIT acceleration while native frames advance;
 five seconds without progress still trips the JIT fuse. Byte-identical compiled
 functions with identical helper imports reuse their worker-local handles. The
-instance cache caps at32768; new blocks beyond that budget stay interpreted,
-without deleting or overwriting existing compiled handles. Only the unused legacy
+instance cache caps at16384 for GameCube. On pressure, a clock policy gives
+recently executed functions another chance and retires cold functions in bounded
+batches at a CPU slice boundary. Every native block sharing a retired handle is
+unlinked before its function-table slot is cleared or reused. Hot functions and
+permanent helpers keep their slots. New blocks use the interpreter until room is
+available; deferred compilation waits for that room. The CPU records access with
+one native byte store, without per-block JS calls, timestamps or map lookups.
+GameCube's native callback arena is64MiB within the unchanged768MiB heap reserve.
+Only the unused legacy
 CPU notification image is reduced; the native GPU render resolution is unchanged.
 Fatal worker/WASM/GPU errors and sixty seconds without frame progress stop the
 session and offer restart or return to the library.
+Crash runtime identifiers cover native JavaScript, host modules and patch inputs,
+so JavaScript-only changes are distinguishable when the WASM stays unchanged.
 
 The core uses [wasm-dolphin](https://github.com/dougchansan/wasm-dolphin) at the
 exact base commit in `core.json`, with independently verified upstream artifacts. Preparation
@@ -115,6 +138,7 @@ python3 deploy/webrcade/retro-dolphin/prepare.py
 python3 deploy/webrcade/retro-dolphin/serve.py
 node tests/test_webrcade_gamecube.cjs
 NODE_PATH=<Playwright modules> node tests/browser_webrcade_gamecube.cjs
+GAMECUBE_SOURCE_ARCHIVE=release/gamecube/app/gamecube-source.tar.gz python3 tests/test_native_gamecube_clock.py
 ```
 
 Preparation requires Git, Node22+, npm, Python3.10+, Docker, tar and network access.
@@ -178,5 +202,56 @@ wasm host, Double Dash could stop submitting draws at the track preview while
 its native VI counter continued. This setting applies within the GameCube
 worker; the compiled core, state format, disc cache and other systems stay the
 same. Qualification checks both rendered and native progress and reviews the
-race image. The root image disables automatic Watchtower updates so native browser
-verification can complete before an explicit deployment.
+race image. The root image defaults to Watchtower disabled. The selected production channel
+uses its existing Compose override to enable updates after channel publication.
+
+
+### Compiled-code cache budgets
+
+Before boot, positively identified Windows/macOS/x86 Linux desktops select a
+32,768-instance executable cache and 128 MiB callback arena. iOS (including iPad
+Mac-style user agents), Android/mobile, unknown devices and desktops reporting
+less than 8 GiB through the optional browser memory hint retain 16,384 instances and
+64 MiB. Browsers without a memory hint use the desktop classification; that does
+not measure available RAM. Wii retains its existing 32,768/128 MiB native baseline
+under either profile. Profiles are sealed atomically when the cached interpreter
+allocates its arena; active callbacks are never resized or recycled in place.
+Both budgets use the existing bounded CLOCK retirement and 768 MiB WASM reserve.
+Cache budgets are runtime policy, excluded from Dolphin state serialization.
+A larger cache reduces capacity pressure; it does not skip CPU emulation work or
+guarantee higher FPS. Native helper diagnostics expose `instcap` and `instlive`;
+the normal performance readout shows the compiled-block count.
+
+### Grouped RAM transfers
+
+The PPC-to-WASM compiler groups three to eight consecutive integer/float memory
+instructions sharing a nonzero base register. One range proof covers every byte,
+rejects address wrap and supplies a shared MEM1 pointer with static offsets.
+Float groups also check FPU availability, byte order, alignment and the existing
+double-transfer address restriction. Access widths and instruction order stay
+unchanged. A failed proof runs the original checked instructions in order.
+Base writes, updates, other instructions and incompatible float alignment end a
+group. Timing, helper exits, cache budgets and save serialization stay unchanged.
+
+GameCube enables groups under its desktop 32K cache profile. Its 16K standard
+profile, including iOS, emits the original individual accesses; native tests
+compare their generated bytes exactly. Wii retains its existing 32K policy.
+Selection happens during compilation, without a runtime policy read. Debug
+disable-mask bit30 restores individual accesses on subsequent compiles. The
+existing opt-in bit23 experiment retains precedence and its original behavior.
+`tests/browser_webrcade_dolphin_fast_paths_native.cjs` runs actual generated
+range, register, memory and float checks in Chromium and WebKit; set
+`SYSTEM=gamecube` or `SYSTEM=wii` and the corresponding isolated core origin.
+
+### Compiled-block chaining
+
+Full compiled blocks run consecutively in a direct dispatch loop, including
+reentry after an interpreted or partial block. Each block still commits its PC,
+cycle budget, performance counters and CLOCK reference. Epoch and CPU-feature
+guards precede every reuse of callback metadata; cache misses return through the
+existing code-generation boundary. Partial blocks, helper halts, stepping,
+debugging and profiling retain their existing handling. No cache allocation or
+save format changes. This path is enabled by default; debug disable-mask bit29
+selects the legacy loop. The actual-WASM fast-path regression checks cycle
+budgets, register commits, stop/feature/epoch changes, helper halts and fallback
+entries in Chromium and WebKit.

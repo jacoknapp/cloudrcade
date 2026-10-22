@@ -1,0 +1,105 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+index 3233b62..fdfd25c 100644
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -230,6 +230,18 @@ EM_JS(int, DolphinWeb_CachedInterpreterCompileWasmBlock,
+   return instances.insert(instanceKey, helperBindings, fn) | 0;
+ });
+ 
++EM_JS(int, DolphinWeb_WasmInstancesFull, (), {
++  return Module._dolphinWasmInstances.full() ? 1 : 0;
++});
++EM_JS(void, DolphinWeb_WasmInstancesReset, (), {
++  Module._dolphinWasmInstances.reset();
++});
++u32 s_wasm_instance_reset_count = 0;
++u32 s_wasm_instance_full_refusals = 0;
++bool s_wasm_instance_reset_pending = false;
++std::chrono::steady_clock::time_point s_wasm_instance_last_reset{};
++constexpr auto WASM_INSTANCE_RESET_MIN_INTERVAL = std::chrono::milliseconds(30000);
++
+ static std::array<char, 86> DolphinWeb_MakeWasmBlockCacheKey(std::span<const u8> bytes)
+ {
+   static constexpr std::string_view prefix = "wasm-block-sha256-v1:";
+@@ -8326,6 +8338,20 @@ void CachedInterpreter::Run()
+   {
+ #ifdef __EMSCRIPTEN__
+     ApplyRequestedWasmPolicy(*this);
++    // Slice boundary: no block is executing. Recycle a full instance cache.
++    if (s_wasm_instance_reset_pending)
++    {
++      s_wasm_instance_reset_pending = false;
++      const auto now = std::chrono::steady_clock::now();
++      if (s_wasm_instance_reset_count == 0 ||
++          now - s_wasm_instance_last_reset >= WASM_INSTANCE_RESET_MIN_INTERVAL)
++      {
++        s_wasm_instance_last_reset = now;
++        ++s_wasm_instance_reset_count;
++        ClearCache();
++        DolphinWeb_WasmInstancesReset();
++      }
++    }
+ #endif
+     // §28cn metrics-gated per-slice wall-time profiling. The timestamp below
+     // spans Advance + ExecuteOneBlock; >16000us means the CPU pthread crossed
+@@ -11298,6 +11324,11 @@ bool CachedInterpreter::TryWriteWasmBlock(u32 nextPC)
+   if (handle <= 0)
+   {
+     ++s_wasm_block_compile_fail_count;
++    if (DolphinWeb_WasmInstancesFull())
++    {
++      ++s_wasm_instance_full_refusals;
++      s_wasm_instance_reset_pending = true;
++    }
+     LogWasmBlockReject("compile", nullptr, 0, js.blockStart, code_block.m_num_instructions);
+     return false;
+   }
+@@ -11689,6 +11720,7 @@ extern "C" const char* GetPpcWasmHelperStats()
+       << " regalloc:" << s_wasm_regalloc_dead_store_skip_count
+       << " emitfail:" << s_wasm_block_emit_fail_count
+       << " compilefail:" << s_wasm_block_compile_fail_count
++      << " instreset:" << s_wasm_instance_reset_count << "/" << s_wasm_instance_full_refusals
+       << " pre:" << average_prefix << "/" << s_wasm_prefix_instruction_max
+       << " hist:" << s_wasm_prefix_histogram[0] << "," << s_wasm_prefix_histogram[1] << ","
+       << s_wasm_prefix_histogram[2] << "," << s_wasm_prefix_histogram[3] << ","
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+index 747e01b..9d683af 100644
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+@@ -5,20 +5,31 @@
+ (() => {
+   const entries = new Map();
+   const capacity = 32768;
++  // Handles returned by reset(); only reused after the JIT block cache was
++  // cleared, so no native callback or static link can still reference them.
++  const free = [];
+   const key = (identity, bindings) => [identity, ...bindings].join('|');
+   Module._dolphinWasmInstances = {
+     get: (identity, bindings) => entries.get(key(identity, bindings)),
+     full: () => entries.size >= capacity,
++    size: () => entries.size,
++    reset() {
++      for (const handle of entries.values()) free.push(handle);
++      entries.clear();
++    },
+     insert(identity, bindings, fn) {
+       const signature = key(identity, bindings);
+       const existing = entries.get(signature);
+       if (existing !== undefined) return existing;
+       if (entries.size >= capacity) return 0;
+-      const handle = wasmTable.length;
+-      try { wasmTable.grow(1); }
+-      catch (error) {
+-        if (error?.name === 'RangeError') return 0;
+-        throw error;
++      let handle = free.pop();
++      if (handle === undefined) {
++        handle = wasmTable.length;
++        try { wasmTable.grow(1); }
++        catch (error) {
++          if (error?.name === 'RangeError') return 0;
++          throw error;
++        }
+       }
+       wasmTable.set(handle, fn);
+       entries.set(signature, handle);

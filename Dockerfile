@@ -53,6 +53,8 @@ COPY release/psp/app/ /var/www/touch/apps/retro-ppsspp/
 COPY release/psp/sources/ /var/www/html/licenses/sources/
 COPY release/gamecube/app/ /var/www/html/experimental/gamecube/
 COPY deploy/webrcade/retro-dolphin/apache.conf /etc/apache2/conf-enabled/gamecube.conf
+COPY release/wii/app/ /var/www/html/experimental/wii/
+COPY deploy/webrcade/retro-wii/apache.conf /etc/apache2/conf-enabled/wii.conf
 COPY release/ps2/app/ /var/www/html/experimental/ps2/
 COPY release/ps2/sources/ /var/www/html/licenses/sources/
 COPY deploy/webrcade/retro-play/apache.conf /etc/apache2/conf-enabled/ps2.conf

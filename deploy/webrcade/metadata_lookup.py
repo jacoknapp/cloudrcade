@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode, urlsplit
 
-PLATFORMS={'nes':18,'snes':19,'gb':33,'gbc':22,'gba':24,'n64':4,'retro-melonds':20,'genesis':29,'psx':7,'psp':38,'ps2':8,'3ds':37,'gamecube':21}
+PLATFORMS={'nes':18,'snes':19,'gb':33,'gbc':22,'gba':24,'n64':4,'retro-melonds':20,'genesis':29,'psx':7,'psp':38,'ps2':8,'3ds':37,'gamecube':21,'wii':5}
 
 def normalized_identity(value):
  if isinstance(value,list):return [normalized_identity(v) for v in value]

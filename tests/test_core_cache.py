@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import runpy
@@ -46,13 +47,13 @@ class CoreCacheTest(unittest.TestCase):
         return {key for key, value in self.keys().items() if value != before[key]}
 
     def test_input_isolation_and_shared_dependencies(self):
-        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/app/host.mjs'), {'gamecube'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/app/host.mjs'), {'gamecube', 'wii'})
         self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/native-patches/new.patch'),
-                         {'gamecube', 'gamecube-native'})
-        self.assertEqual(self.changed(cache.READER), {'3ds', 'psp', 'gamecube'})
+                         {'gamecube', 'gamecube-native', 'wii', 'wii-native'})
+        self.assertEqual(self.changed(cache.READER), {'3ds', 'psp', 'gamecube', 'wii'})
         self.assertEqual(self.changed('deploy/webrcade/retro-ppsspp/build.sh'), {'psp'})
         self.assertEqual(self.changed('deploy/webrcade/retro-azahar/patches/new.patch'), {'3ds'})
-        self.assertEqual(self.changed('deploy/webrcade/touch/assets/controller.css'), {'gamecube', 'ps2'})
+        self.assertEqual(self.changed('deploy/webrcade/touch/assets/controller.css'), {'gamecube', 'ps2', 'wii'})
         self.assertEqual(self.changed('deploy/webrcade/retro-play/native/CloudRcade.cpp'), {'ps2', 'ps2-native'})
         # Newly added native patch helpers must invalidate both the compiler
         # receipt and the adapter package; otherwise old binaries can be reused.
@@ -61,7 +62,10 @@ class CoreCacheTest(unittest.TestCase):
         self.assertNotEqual(before, cache.ps2_native_key(self.root))
         prepare = runpy.run_path(str(self.root / cache.BASE / 'retro-play/prepare.py'))
         self.assertEqual(prepare['native_key'](), cache.ps2_native_key(self.root))
-        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/sdk/pause.jsx'), {'gamecube', 'ps2'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/sdk/pause.jsx'), {'gamecube', 'ps2', 'wii'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-wii/input.mjs'), {'wii'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-wii/wii-input.patch'), {'wii', 'wii-native'})
+        self.assertEqual(self.changed('scripts/prepare-wii.py'), {'wii'})
         self.assertEqual(self.changed('deploy/webrcade/touch/cloud/bridge.js'), set())
         self.assertEqual(self.changed('README.md'), set())
         self.assertEqual(self.changed('.github/workflows/docker.yml'), set())
@@ -69,7 +73,7 @@ class CoreCacheTest(unittest.TestCase):
         self.assertEqual(self.changed('scripts/restore-qualified-cores.py'), set())
         self.assertEqual(self.changed('deploy/webrcade/retro-azahar/README.md'), set())
         self.assertEqual(self.changed('deploy/webrcade/retro-ppsspp/README.md'), set())
-        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/README.md'), {'gamecube'})
+        self.assertEqual(self.changed('deploy/webrcade/retro-dolphin/README.md'), {'gamecube', 'wii'})
 
     def test_effective_toolchain_and_per_core_command_changes(self):
         workflow = self.root / '.github/workflows/docker.yml'
@@ -78,7 +82,7 @@ class CoreCacheTest(unittest.TestCase):
         def changed(text):
             workflow.write_text(text)
             return {core for core, key in self.keys().items() if key != before[core]}
-        self.assertEqual(changed(original.replace("node-version: '22'", "node-version: '24'")), {'gamecube', 'ps2'})
+        self.assertEqual(changed(original.replace("node-version: '22'", "node-version: '24'")), {'gamecube', 'ps2', 'wii'})
         self.assertEqual(changed(original.replace('runs-on: ubuntu-24.04', 'runs-on: ubuntu-26.04')), set(cache.COMMANDS))
         self.assertEqual(changed(original.replace('permissions:', '# release scheduling\npermissions:', 1)), set())
         self.assertEqual(changed(original.replace('actions/cache/restore@v4', 'actions/cache/restore@v5')), set())
@@ -229,6 +233,82 @@ class CoreCacheTest(unittest.TestCase):
         # Matching artifact bytes alone cannot authorize reuse after source edits.
         self.changed('deploy/webrcade/retro-play/native/CloudRcade.cpp')
         self.assertFalse(cache.native_valid(native, self.root, 'ps2'))
+
+    def test_wii_package_reuse_adapter_changes_and_invalid_native(self):
+        # A first-release cache seeds the new package cache without a compiler.
+        legacy = self.root / 'release/wii-native-cache'
+        legacy.mkdir(parents=True)
+        lockpath = self.root / cache.BASE / 'retro-wii/native-build.json'
+        lock = json.loads(lockpath.read_text())
+        for name in lock['artifacts']:
+            (legacy / name).write_bytes(b'Wii fixture ' + name.encode())
+            lock['artifacts'][name] = cache.sha(legacy / name)
+        lockpath.write_text(json.dumps(lock))
+        builds = []
+        run = subprocess.run
+        def fake_build(command, **kwargs):
+            if command != cache.COMMANDS['wii']:
+                return run(command, **kwargs)
+            builds.append(kwargs['env'].get('WII_NATIVE_CACHE'))
+            app = self.root / 'release/wii/app'
+            (app / 'cores/dolphin').mkdir(parents=True)
+            (app / 'adapter-source/wii').mkdir(parents=True)
+            (app / 'index.html').write_text('Wii fixture')
+            (app / 'wii-source.tar.gz').write_bytes(b'Wii source fixture')
+            (app / 'adapter-source/wii/native-build.json').write_text(json.dumps(lock))
+            for name in lock['artifacts']:
+                (app / 'cores/dolphin' / name).write_bytes(b'Wii fixture ' + name.encode())
+            (app / 'core-info.json').write_text(json.dumps({
+                'nativeBuild': lock, 'sourceSha256': cache.sha(app / 'wii-source.tar.gz')}))
+            return subprocess.CompletedProcess(command, 0)
+        native = self.root / 'release/wii-native'
+        with patch.dict(os.environ, {'FORCE_CORE_REBUILD': 'false', 'WII_NATIVE_CACHE': '/untrusted'}), \
+                patch.object(cache.subprocess, 'run', side_effect=fake_build):
+            cache.prepare('wii', self.root)
+            cache.prepare('wii', self.root)
+            self.assertEqual(builds, [str(legacy)])
+            shutil.rmtree(legacy)
+            self.changed('deploy/webrcade/retro-wii/input.mjs')
+            cache.prepare('wii', self.root)
+            self.assertEqual(builds, [str(legacy), str(native)])
+            # A bad package is regenerated using intact, locked native bytes.
+            (self.root / 'release/wii/app/wii-source.tar.gz').write_bytes(b'corrupt')
+            cache.prepare('wii', self.root)
+            self.assertEqual(builds[-1], str(native))
+            # Corrupt native bytes must never be offered to the builder.
+            (native / next(iter(lock['artifacts']))).write_bytes(b'corrupt')
+            self.changed('deploy/webrcade/retro-wii/input.mjs')
+            cache.prepare('wii', self.root)
+            self.assertIsNone(builds[-1])
+            with patch.dict(os.environ, {'FORCE_CORE_REBUILD': 'true'}):
+                cache.prepare('wii', self.root)
+            self.assertIsNone(builds[-1])
+            self.assertEqual(len(builds), 5)
+        self.assertTrue(cache.native_valid(native, self.root, 'wii'))
+        self.changed('deploy/webrcade/retro-wii/wii-input.patch')
+        self.assertFalse(cache.native_valid(native, self.root, 'wii'))
+
+    def test_beta_platform_selection_and_no_forced_all_core_build(self):
+        workflow = (ROOT / '.github/workflows/docker.yml').read_text()
+        step = workflow.split('      - name: Select image tags\n', 1)[1].split('      - name:', 1)[0]
+        script = step.split('        run: |\n', 1)[1]
+        script = '\n'.join(line[10:] for line in script.splitlines())
+        for branch, platforms in [('beta/wii-core', 'linux/amd64'),
+                                  ('beta/future-core', 'linux/amd64'),
+                                  ('main', 'linux/amd64,linux/arm64')]:
+            output = self.root / 'workflow-output'
+            output.write_text('')
+            subprocess.run(['bash', '-eu', '-c', script], check=True, env=dict(os.environ,
+                REPOSITORY='example/arcade', REF_NAME=branch, REF_TYPE='branch',
+                COMMIT='a' * 40, GITHUB_OUTPUT=str(output)))
+            self.assertIn('platforms=' + platforms + '\n', output.read_text())
+        for label in ('uses: docker/setup-qemu-action@v3',
+                      'name: Build ARM64 app image',
+                      'name: Verify ARM64 app and scheduled feed builder under QEMU'):
+            block = workflow.split('      - ' + label + '\n', 1)[1].split('      - ', 1)[0]
+            self.assertIn('if: "!startsWith(github.ref, \'refs/heads/beta/\')"', block)
+        force = re.search(r'^      FORCE_CORE_REBUILD: (.+)$', workflow, re.M).group(1)
+        self.assertIn("!startsWith(github.ref, 'refs/heads/beta/')", force)
 
     def test_force_3ds_also_bypasses_legacy_pinned_release_download(self):
         deploy = runpy.run_path(str(self.root / cache.BASE / 'retro-azahar/deploy.py'))

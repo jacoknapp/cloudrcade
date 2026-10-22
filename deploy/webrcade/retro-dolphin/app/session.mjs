@@ -1,3 +1,4 @@
+import {jitCacheProfile} from './jit-cache-profile.mjs';
 const INPUT_FIELDS = ['mask','stickX','stickY','cStickX','cStickY','triggerLeft','triggerRight','analogA','analogB'];
 // CloudRcade GameCube session. The upstream Dolphin runtime is GPL-2.0-or-later.
 export function requireCapabilities(scope = globalThis) {
@@ -48,6 +49,7 @@ export class GameCubeSession {
     this.canvas = canvas;
     this.timeoutMs = timeoutMs;
     this.nativeTimingEnabled = Boolean(nativeTimingEnabled);
+    this.frameSkip = 1;
     this.adapter = null;
     this.initializing = null;
     this.closed = false;
@@ -124,6 +126,10 @@ export class GameCubeSession {
       adapter.telemetryIntervalMs = 1000;
       await this.bounded(adapter.load());
       if (this.closed) throw new Error('GameCube session is closed.');
+      this.jitCache = await this.bounded(adapter.request('jitCacheProfile',
+        {profile:jitCacheProfile(this.scope.navigator)}));
+      if (this.closed) throw new Error('GameCube session is closed.');
+      if (this.frameSkip !== 1) await this.bounded(adapter.request('frameSkip',{divisor:this.frameSkip}));
       if (this.nativeTimingEnabled) await this.bounded(adapter.request('nativeTiming',{enabled:true}));
       adapter.worker?.addEventListener?.('error', event => this.fail(new Error(event.message || 'GameCube worker failed.')));
       adapter.worker?.addEventListener?.('messageerror', () => this.fail(new Error('GameCube worker communication failed.')));
@@ -175,6 +181,11 @@ export class GameCubeSession {
     if (!previous) this.lastInput = {};
     for (const field of INPUT_FIELDS) this.lastInput[field] = state[field];
     this.adapter.setInputState(state);
+  }
+  async setFrameSkip(divisor) {
+    const adapter=this.adapter;
+    if(adapter?.loaded) await this.bounded(adapter.request('frameSkip',{divisor}));
+    this.frameSkip=divisor;
   }
   async pause() {
     if (!this.booted || this.closed) return;

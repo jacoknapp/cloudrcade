@@ -1,0 +1,254 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+index 646f703..f928a91 100644
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -339,6 +339,8 @@ constexpr u32 DOLPHIN_WEB_DISABLE_COMPILE_THROTTLE = 1u << 22; // §28ce cap JIT
+ // in. Scoped to 32-bit D-form int load/store (lwz/lwzu/stw/stwu, OPCD 32/33/36/37).
+ constexpr u32 DOLPHIN_WEB_ENABLE_FASTMEM_HOIST = 1u << 23;
+ constexpr u32 DOLPHIN_WEB_DISABLE_MEMORY_GROUPS = 1u << 30;
++// Full compiled-block dispatch chain; disable for same-binary controls.
++constexpr u32 DOLPHIN_WEB_DISABLE_FAST_CHAIN = 1u << 29;
+ // §28ce burst smearing: when ENABLED (gate bit CLEARED), TryWriteWasmBlock
+ // returns false (falls to interpret) once this many compiles OR this much
+ // compile wall time have happened in the current CoreTiming slice. Smears
+@@ -363,6 +365,7 @@ u32 s_wasm_block_compile_count = 0;
+ u32 s_wasm_block_merge_count = 0; // §28bx adjacent-block merges performed
+ u32 s_wasm_regalloc_dead_store_skip_count = 0; // §28by GPR dead-store skips (per emit, sum across blocks)
+ u32 s_wasm_block_run_count = 0;
++std::atomic<u32> s_wasm_fast_chain_blocks{0};
+ u32 s_wasm_block_reject_log_count = 0;
+ u32 s_wasm_block_attempt_count = 0;
+ u32 s_wasm_block_compile_fail_count = 0;
+@@ -8257,6 +8260,74 @@ void CachedInterpreter::Shutdown()
+ #line 7779
+ }
+ 
++#if defined(__EMSCRIPTEN__) && DOLPHIN_WEB_STATIC_EXIT_LINKS
++// A separate, small loop for full compiled blocks. Preserve exact instruction
++// state/timing and CLOCK stores; avoid the legacy callback switch and per-block
++// TLS completion publication. Capture operand scalars before the call because
++// a helper can invalidate the source's callback storage.
++__attribute__((noinline)) bool CachedInterpreter::ExecuteWasmFastChain(
++    const u8* entry, bool allow_dispatch)
++{
++  const auto full = [](const u8* candidate) {
++    return candidate && *reinterpret_cast<const AnyCallback*>(candidate) == AnyCallbackCast(RunWasmBlock) &&
++        reinterpret_cast<const WasmBlockOperands*>(candidate + sizeof(AnyCallback))->end_block == 1;
++  };
++  if (!full(entry)) return false;
++  struct Counts
++  {
++    u32 blocks = 0;
++    ~Counts() { s_wasm_fast_chain_blocks.fetch_add(blocks, std::memory_order_relaxed); }
++  } counts;
++  // Shield any enclosing/nested legacy callback scope. We resolve the actual
++  // completed full block's descriptor directly and never dereference TLS data.
++  StaticExitLinks::Scope boundary(&m_block_cache, &m_ppc_state, false);
++  auto& state = m_ppc_state;
++  const CPU::State* const cpu_state = m_system.GetCPU().GetStatePtr();
++  const bool links_enabled = StaticExitLinksEnabled();
++  using WasmFunction = int (*)(int);
++  do
++  {
++    const auto* const op = reinterpret_cast<const WasmBlockOperands*>(entry + sizeof(AnyCallback));
++    const u64 source_epoch = m_block_cache.StaticLinkEpoch();
++    const u32 source_features = static_cast<u32>(state.feature_flags);
++    const auto* const links = &op->links;
++    const int handle = op->handle;
++    const u32 cycles = op->downcount, loads = op->num_load_stores, fp = op->num_fp_inst;
++    ++counts.blocks;
++    ++s_wasm_block_run_count;
++    *op->referenced = 1;
++    const int halted = reinterpret_cast<WasmFunction>(static_cast<std::uintptr_t>(handle))(
++        static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++    if (halted) return true;
++    state.pc = state.npc;
++    state.downcount -= cycles;
++    UpdatePerformanceMonitorIfNeeded(cycles, loads, fp, state);
++    if (state.downcount <= 0 || *cpu_state != CPU::State::Running) return true;
++    // Mandatory guards BEFORE touching a descriptor that may have been freed or
++    // reused by a helper. A feature change re-enters the ordinary keyed lookup.
++    if (source_epoch == 0 || source_epoch != m_block_cache.StaticLinkEpoch() ||
++        source_features != static_cast<u32>(state.feature_flags)) return true;
++    const u8* next = nullptr;
++    if (links_enabled)
++      for (u32 i = 0; i < links->count && i < links->cells.size(); ++i)
++        if (links->cells[i].pc == state.pc) { next = links->cells[i].entry; break; }
++    if (!next)
++    {
++      if (!allow_dispatch) return true;  // standalone fixture; product always true
++      next = m_block_cache.Dispatch();
++      if (!next)
++      {
++        boundary.Close();  // no cached callback active at this code-generation safe point
++        Jit(state.pc);
++        return true;
++      }
++    }
++    entry = next;
++  } while (full(entry));
++  return true;  // next entry belongs to the legacy path; leave its PC untouched
++}
++#endif
++
+ void CachedInterpreter::ExecuteOneBlock([[maybe_unused]] bool allow_redispatch)
+ {
+   const u8* normal_entry = m_block_cache.Dispatch();
+@@ -8270,6 +8341,12 @@ void CachedInterpreter::ExecuteOneBlock([[maybe_unused]] bool allow_redispatch)
+     return;
+   }
+ 
++#if defined(__EMSCRIPTEN__) && DOLPHIN_WEB_STATIC_EXIT_LINKS
++  const bool fast_chain_enabled = allow_redispatch && !DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_FAST_CHAIN) &&
++      !DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_BLOCK_REDISPATCH) &&
++      !s_ppc_block_profile_enabled && !DOLPHIN_WEB_STATIC_EXIT_LINK_STATS &&
++      !IsDebuggingEnabled() && !IsBranchWatchEnabled() && !IsProfilingEnabled();
++#endif
+   auto& ppc_state = m_ppc_state;
+ #ifdef __EMSCRIPTEN__
+   // §28bt: gated in-place block re-dispatch. When a block ends with timing
+@@ -8313,6 +8390,11 @@ void CachedInterpreter::ExecuteOneBlock([[maybe_unused]] bool allow_redispatch)
+ #line 7825
+   for (;;)
+   {
++#if defined(__EMSCRIPTEN__) && DOLPHIN_WEB_STATIC_EXIT_LINKS
++    // Re-enter the direct path after a legacy block too, rather than making
++    // an occasional interpreted/partial block pin the entire slice to legacy.
++    if (fast_chain_enabled && ExecuteWasmFastChain(normal_entry, true)) return;
++#endif
+ #if DOLPHIN_WEB_STATIC_EXIT_LINKS
+     static_link_scope.BeginBlock(m_block_cache.StaticLinkEpoch(),
+                                 static_cast<u32>(ppc_state.feature_flags));
+@@ -11979,6 +12061,7 @@ extern "C" const char* GetPpcWasmHelperStats()
+   out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
+   const u32 average_prefix =
+       s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
++  out << "fastchain:" << s_wasm_fast_chain_blocks.load(std::memory_order_relaxed) << " ";
+   out << "jit attempts:" << s_wasm_block_attempt_count
+       << " compiled:" << s_wasm_block_compile_count
+       << " full:" << s_wasm_block_full_compile_count
+@@ -12663,8 +12746,109 @@ static int RunWasmMemoryGroupSmoke()
+   return 1;
+ }
+ 
++// Standalone contracts for the actual fast-chain loop and generated blocks.
++// Product dispatch is excluded from these fixtures; gameplay covers real misses.
++#if DOLPHIN_WEB_STATIC_EXIT_LINKS
++int RunWasmFastChainSmoke()
++{
++  auto& system = Core::System::GetInstance();
++  CachedInterpreter jit(system);
++  auto& state = system.GetPPCState();
++  auto* cpu_state = const_cast<CPU::State*>(system.GetCPU().GetStatePtr());
++  const auto original_cpu = *cpu_state;
++  const auto original_features = state.feature_flags;
++  struct Restore
++  {
++    CPU::State* cpu; CPU::State original;
++    PowerPC::PowerPCState& state; decltype(state.feature_flags) features;
++    ~Restore() { *cpu = original; state.feature_flags = features; }
++  } restore{cpu_state, original_cpu, state, original_features};
++  using Callback = CachedInterpreter::AnyCallback;
++  using Operands = CachedInterpreter::WasmBlockOperands;
++  struct Entry { Callback callback; Operands operands; };
++  static_assert(offsetof(Entry, operands) == sizeof(Callback));
++  const auto callback = CachedInterpreter::AnyCallbackCast(
++      static_cast<s32 (*)(PowerPC::PowerPCState&, const Operands&)>(CachedInterpreter::RunWasmBlock));
++  const auto ptr = [](const void* p) { return reinterpret_cast<const u8*>(p); };
++  constexpr u32 pc0 = 0x80003100, pc1 = 0x80003200;
++  std::array<u8, 64> ram{};
++  const auto layout = MakeWasmBlockTestLayout(state, ram.data(), ram.size());
++  int handles[2]{};
++  for (u32 i = 0; i < 2; ++i)
++  {
++    const u32 pc = i ? pc1 : pc0, target = i ? pc0 : pc1;
++    auto add = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(14, 3, 3, i + 1), pc);
++    add.regsIn[3] = true; add.regsOut[3] = true;
++    auto branch = MakeWasmBlockTestOp(
++        UGeckoInstruction{0x48000000u | ((target - pc - 4) & 0x03fffffcu)}, pc + 4);
++    branch.canEndBlock = true; branch.branchTo = target;
++    const std::array<PPCAnalyst::CodeOp, 2> ops{add, branch};
++    const auto bytes = BuildWasmCachedInterpreterBlock(ops, layout, pc + 8, false);
++    if (bytes.empty()) return 2000 + i;
++    handles[i] = CompileWasmCachedInterpreterBlockForTest(bytes);
++    if (handles[i] <= 0) return 2010 + i;
++  }
++  static CachedInterpreter* fixture = nullptr;
++  static CPU::State* fixture_cpu = nullptr;
++  static u32 action = 0;
++  fixture = &jit; fixture_cpu = cpu_state;
++  const auto control = +[](int address) -> int {
++    auto& st = *reinterpret_cast<PowerPC::PowerPCState*>(static_cast<std::uintptr_t>(address));
++    st.npc = pc1;
++    if (action == 1) fixture->m_block_cache.AdvanceStaticLinkEpoch();
++    if (action == 2) st.feature_flags = static_cast<decltype(st.feature_flags)>(1);
++    if (action == 3) *fixture_cpu = CPU::State::Stepping;
++    return action == 4 ? 1 : 0;
++  };
++  for (u32 test = 0; test < 10; ++test)
++  {
++    *cpu_state = CPU::State::Running;
++    state.feature_flags = static_cast<decltype(state.feature_flags)>(0);
++    state.pc = state.npc = pc0; state.msr.Hex = 0; state.gpr[3] = 7;
++    state.downcount = test == 1 ? 0 : test == 2 ? -1 : test == 0 ? 11 : 100;
++    u8 touched[2]{};
++    Entry entries[2]{{callback, {handles[0], &touched[0], pc1, 3, 0, 0, 1}},
++                     {callback, {handles[1], &touched[1], pc0, 3, 0, 0, 1}}};
++    entries[0].operands.links.count = entries[1].operands.links.count = 1;
++    entries[0].operands.links.cells[0] = {pc1, 0, ptr(&entries[1])};
++    entries[1].operands.links.cells[0] = {pc0, 0, ptr(&entries[0])};
++    if (test == 3) entries[0].operands.end_block = 0;
++    if (test == 4) entries[1].operands.end_block = 0;
++    if (test == 5) entries[0].operands.links.count = 0;
++    action = test >= 6 ? test - 5 : 0;
++    if (action)
++    {
++      entries[0].operands.handle = static_cast<s32>(reinterpret_cast<std::uintptr_t>(control));
++      // Must exit before inspecting a stale/invalid destination.
++      entries[0].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
++    }
++    const u32 before = s_wasm_block_run_count, before_fast = s_wasm_fast_chain_blocks.load(std::memory_order_relaxed);
++    const bool handled = jit.ExecuteWasmFastChain(ptr(entries), false);
++    const u32 blocks = test == 0 ? 4 : test == 3 ? 0 : 1;
++    if (handled != (test != 3)) return 2100 + test;
++    if (s_wasm_block_run_count - before != blocks ||
++        s_wasm_fast_chain_blocks.load(std::memory_order_relaxed) - before_fast != blocks) return 2200 + test;
++    if (touched[0] != (blocks != 0) || touched[1] != (blocks > 1)) return 2300 + test;
++    if (test == 0 && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
++                      state.downcount != -1)) return 2400;
++    if (test == 9)
++    {
++      if (state.pc != pc0 || state.downcount != 100) return 2500;
++    }
++    else if (blocks == 1 && (state.pc != pc1 ||
++             state.downcount != (test == 1 ? -3 : test == 2 ? -4 : 97))) return 2600 + test;
++  }
++  fixture = nullptr; fixture_cpu = nullptr;
++  return 1;
++}
++
++#endif
+ extern "C" int RunPpcWasmMultipleWordMemorySmoke()
+ {
++#if DOLPHIN_WEB_STATIC_EXIT_LINKS
++  const int chain_result = RunWasmFastChainSmoke();
++  if (chain_result != 1) return chain_result;
++#endif
+   const int group_result = RunWasmMemoryGroupSmoke();
+   if (group_result != 1) return group_result;
+ 
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
+index e9e83a8..9665626 100644
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
+@@ -88,6 +88,10 @@ private:
+ 
+ #ifdef __EMSCRIPTEN__
+   bool TryWriteWasmBlock(u32 nextPC);
++#if DOLPHIN_WEB_STATIC_EXIT_LINKS
++  bool ExecuteWasmFastChain(const u8* entry, bool allow_dispatch);
++  friend int RunWasmFastChainSmoke();
++#endif
+   void PruneWasmInstances();
+ #endif
+ 

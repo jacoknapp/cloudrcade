@@ -9,7 +9,7 @@ terminate public HTTPS at your proxy, or place your certificates in `config/tls/
 ROMs and BIOS files are supplied by the operator. Place games under
 `./roms/<system>/roms/` (for example `nes/roms`) and BIOS files under
 `./roms/<system>/bios/`. The included 3DS and GameCube apps scan `./roms/3DS/`
-and `./roms/GameCube/` recursively; PlayStation 2 scans `./roms/ps2/` and
+and `./roms/GameCube/` recursively; Wii scans `./roms/Wii/` (case insensitive); PlayStation 2 scans `./roms/ps2/` and
 `./roms/PS2/` recursively.
 
 `WEBRCADE_PUBLIC_URL` is the public HTTPS origin; `WEBRCADE_FEED_URL` selects the
@@ -250,3 +250,12 @@ validation, independent manual/auto settings, optional access hints and
 cross-server credential guards without network access. `WEBRCADE_PHP` may
 select a PHP CLI command. The browser suite also checks disabled/denied return
 messages, retained return URLs and manual Link with automatic login off.
+
+
+## Standard Wii support
+
+Wii is included in the standard image without a player or Docker enable flag.
+Use Wii ISO, complete single-file WBFS or Wii CISO discs under `Wii/`. It shares
+Dolphin streaming, native frame skip and bounded compiled-code retirement while
+keeping its own controller, readout preference and save namespace. See the
+[Wii guide](retro-wii/README.md) for requirements and controller modes.

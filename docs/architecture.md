@@ -27,6 +27,7 @@ python3 scripts/core-cache.py prepare psp
 python3 scripts/core-cache.py prepare gamecube
 # Required by the Dockerfile:
 python3 scripts/core-cache.py prepare ps2
+python3 scripts/core-cache.py prepare wii
 docker build --target web -t cloudrcade:local .
 ```
 
@@ -73,6 +74,16 @@ with no enable setting. Its optional performance readout lives in Core Settings.
 The historical `/experimental/ps2/` launch URL remains compatible. The
 `beta/ps2-core` candidate branch publishes `beta-ps2-core` for AMD64 only;
 main publishes the standard cores for both AMD64 and ARM64.
+The standard image includes Wii as its own category, core type, controller
+profile and save namespace, available without an enable flag. It reuses the
+current GameCube native patches and browser adapter, with a separately qualified
+Wii Remote/Nunchuk build. Touch/mouse gestures supply IR, acceleration and
+simulated MotionPlus pitch/yaw; opt-in device sensors provide phone motion.
+Only the optional performance readout has a default-off Core Settings switch.
+Retired Wii enable preferences are ignored; the historical `/experimental/wii/`
+URL and all existing save IDs remain compatible. Main publishes these cores to
+`latest` for AMD64 and ARM64. See the [Wii adapter](../deploy/webrcade/retro-wii/README.md).
+
 Storage namespaces and user-facing names are configured through `WEBRCADE_*`
 environment variables.
 
@@ -95,7 +106,7 @@ pointers retain the original carousel. Browser regression:
 ## Reusing unchanged cores in CI
 
 The release workflow maintains separate exact-input caches for the GameCube,
-3DS, PSP and PlayStation 2 packages, including their corresponding
+3DS, PSP, PlayStation 2 and Wii packages, including their corresponding
 source distributions.
 `scripts/core-cache.py` hashes each core directory, upstream pins, patches,
 build/packaging scripts, SDK locks and shared inputs. It verifies a complete
@@ -117,7 +128,7 @@ options in tracked recipes or global/job/preparation-step environment variables;
 the workflow fingerprint reads the build job's ordinary block-form steps.
 Mutable remote dependencies are not polled; tracked pins remain the build inputs.
 
-GameCube and PS2 also have separate native-artifact caches. Browser adapter and
+GameCube, Wii and PS2 also have separate native-artifact caches. Browser adapter and
 SDK changes can regenerate the app and corresponding source without compiling
 Dolphin, Play or the PS2 WebGPU worker again. Restored native JS/WASM must match
 the committed artifact locks; current native source, patch and recipe checks

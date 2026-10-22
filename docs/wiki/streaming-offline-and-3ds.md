@@ -9,13 +9,13 @@ For an ordinary cartridge game, the browser usually downloads the required game 
 | Scenario | What to expect |
 | --- | --- |
 | Ordinary game with all required files already cached | May work offline; test it on the same browser/profile first |
-| Streamed PlayStation/GameCube/PS2 disc, PSP game over 128 MiB or 3DS ROM over 512 MiB | Keep access to the game server available during play |
+| Streamed PlayStation/GameCube/Wii/PS2 disc, PSP game over 128 MiB or 3DS ROM over 512 MiB | Keep access to the game server available during play |
 | Encrypted 3DS cold launch needing runtime keys | Keys are fetched separately and never cached; do not count on offline launch |
 | Offline gameplay with cloud storage linked | Cloud transfer still needs a connection; preserve local regular-save backups and check upload later |
 
 ## Streamed games require a connection
 
-**Streamed games require a connection to their game server during play.** This includes streamed PlayStation, GameCube and PlayStation 2 discs and large PSP/3DS files. They fetch game bytes on demand. Startup success does not mean the rest of the file is available offline; keep access to the server throughout play. Network latency or a missing chunk can briefly pause emulation. A local server can remain reachable without public internet access, but external assets and cloud transfers may still need it.
+**Streamed games require a connection to their game server during play.** This includes streamed PlayStation, GameCube, Wii and PlayStation 2 discs and large PSP/3DS files. They fetch game bytes on demand. Startup success does not mean the rest of the file is available offline; keep access to the server throughout play. Network latency or a missing chunk can briefly pause emulation. A local server can remain reachable without public internet access, but external assets and cloud transfers may still need it.
 
 Direct same-origin PlayStation CHD/PBP files use HTTP byte ranges when their server advertises compatible binary/range responses. Startup probes with HEAD and fetches an initial chunk. A bounded resident chunk cache reduces whole-disc transfer and memory use. Existing BIOS selection, disc selection, memory cards, save states and feed save IDs remain the native PlayStation interfaces.
 
@@ -27,9 +27,24 @@ PSP files **larger than 128 MiB** use a bounded HTTP range reader with at most 1
 
 <a id="gamecube-and-the-ps2-beta"></a>
 
-## GameCube and PlayStation 2
+## GameCube, Wii and PlayStation 2
 
 GameCube is included when the Dolphin core is packaged and has no enable flag. Supply valid ISO/GCM files under `roms/GameCube/`; RVZ and Wii discs are unsupported. Games larger than 50,000,000 bytes use strict HTTP 206 streaming with a bounded cache. The player's browser needs HTTPS (or localhost), shared-memory isolation, OffscreenCanvas and hardware WebGPU. Software GPU fallback is rejected. The core reserves 768 MiB of WASM memory; browser and GPU allocations add to that. Compatibility and performance depend on the game, browser and device.
+
+Wii is available by default with no player or Docker enable flag. Place ISO,
+complete single-file WBFS or Wii CISO discs under `roms/Wii/` (case insensitive).
+It uses device WebGPU and the same strict streaming/isolation requirements as
+GameCube, with a768MiB WASM reserve plus browser/GPU allocations. It has its own
+controller and `wii/<game ID>/` save namespace. Only title-data files are synced;
+console keys, tickets and title content are excluded. Compatibility and speed
+vary by game/browser/device. See the [Wii guide](../../deploy/webrcade/retro-wii/README.md)
+for controller modes, phone motion and current format/input limitations.
+
+GameCube and Wii retire cold compiled functions when their bounded cache fills.
+GameCube permits a larger cache on suitable desktops while keeping the smaller
+standard/mobile budget. Full compiled blocks use chaining by default. These
+changes preserve save formats and do not guarantee full speed or prevent every
+browser/device termination; physical iOS behavior needs device testing.
 
 PlayStation 2 is available by default with no player or Docker enable flag. ISO, CHD v5 and homebrew ELF files are scanned recursively under `roms/PS2/` or `roms/ps2/`. Play! supplies an HLE BIOS and does not need an external PS2 BIOS. PlayStation 2 requires hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). Remote ISO/CHD discs use strict HTTP 206 ranges and a bounded cache throughout play; a server returning the full file instead of the requested range fails the launch/read.
 

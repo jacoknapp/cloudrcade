@@ -39,6 +39,7 @@ function cloudConfig(): array {
         'storagePrefix' => $prefix, 'saveFolder' => $folder, 'feedUrl' => $feed,
         'enable3DS' => cloudBool('WEBRCADE_ENABLE_3DS'),
         'gamecubeUrl' => is_file('/var/www/html/experimental/gamecube/core-info.json') ? '/experimental/gamecube/' : '',
+        'wiiUrl' => is_file('/var/www/html/experimental/wii/core-info.json') ? '/experimental/wii/' : '',
         'ps2Url' => is_file('/var/www/html/experimental/ps2/core-info.json') ? '/experimental/ps2/' : '',
         'n3dsKeysUrl' => cloudBool('WEBRCADE_ENABLE_3DS') && n3dsKeysPath() !== '' ? '/cloud-saves/3ds-keys.php' : '',
         'dropbox' => ['enabled' => $dropboxEnabled, 'appKey' => $dropboxKey],

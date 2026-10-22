@@ -138,3 +138,12 @@ Controller settings merge preferences and per-platform/orientation layouts indep
 SameBoy GB/GBC cartridge clocks synchronize to local time and weekday while preserving RTC behavior; English retail Pokémon Gold/Silver/Crystal offsets are compensated. Other game-defined calendars can differ. GBA/DS retain their native host-clock handling. Supported RTC sidecars travel as `clock.rtc` in ordinary save ZIPs; older saves without them remain usable.
 
 3DS ordinary saves include SD/NAND and shader data, while external decryption keys are excluded. Shader caches depend on the graphics-driver tag and observed shaders; copying a cache does not guarantee that every scene is precompiled. Failed shader-link reports may persist locally and sync to the connected cloud account. See [privacy](privacy-and-licenses.md) before sharing diagnostics.
+
+
+## Wii saves
+
+Wii uses its own `wii/<game ID>/` save namespace and the standard save-state slots.
+Graduating Wii from beta preserves existing game/save IDs, including previously
+saved states. NAND synchronization includes title `data/` files only, bounded to
+64MiB; it excludes installed titles, content, tickets and console keys. Use the
+normal save/exit flow and wait for cloud feedback before changing devices.

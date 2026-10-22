@@ -1,0 +1,518 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -338,6 +338,7 @@
+ // mask 0 → feature OFF → byte-identical codegen to today. ?fastmemhoist=1 opts
+ // in. Scoped to 32-bit D-form int load/store (lwz/lwzu/stw/stwu, OPCD 32/33/36/37).
+ constexpr u32 DOLPHIN_WEB_ENABLE_FASTMEM_HOIST = 1u << 23;
++constexpr u32 DOLPHIN_WEB_DISABLE_MEMORY_GROUPS = 1u << 30;
+ // §28ce burst smearing: when ENABLED (gate bit CLEARED), TryWriteWasmBlock
+ // returns false (falls to interpret) once this many compiles OR this much
+ // compile wall time have happened in the current CoreTiming slice. Smears
+@@ -3665,9 +3666,14 @@
+   body.push_back(0x6a);
+ }
+ 
++struct WasmMemoryGroupContext { bool proven = false; u32 offset = 0; };
++static WasmMemoryGroupContext s_memory_group;
++
+ void EmitSetEffectiveAddressLocal(std::vector<u8>& body, const WasmStateLayout& layout,
+                                   UGeckoInstruction inst)
+ {
++  if (s_memory_group.proven && !(inst.OPCD & 1))
++    return;  // Non-update member uses the single proven group pointer.
+   EmitEffectiveAddress(body, layout, inst);
+   EmitLocalSet(body, 1);
+ }
+@@ -3737,6 +3743,7 @@
+ 
+ void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
+   EmitI32Const(body, layout.ram_base);
+   EmitRamOffset(body);
+   body.push_back(0x6a);
+@@ -3751,6 +3758,9 @@
+   body.push_back(0x6a);
+ }
+ 
++
++
++// Byte-order conversion is shared by checked and proven memory accesses.
+ void EmitBswap32FromLocal(std::vector<u8>& body, u32 local_index)
+ {
+   EmitLocalGet(body, local_index);
+@@ -3807,7 +3817,7 @@
+   EmitRamAddress(body, layout);
+   body.push_back(0x28);
+   body.push_back(0x00);
+-  EmitU32Leb(body, byte_offset);
++  EmitU32Leb(body, byte_offset + (s_memory_group.proven ? s_memory_group.offset : 0));
+   EmitLocalSet(body, 2);
+   EmitBswap32FromLocal(body, 2);
+ }
+@@ -3864,7 +3874,7 @@
+   EmitLocalGet(body, 3);
+   body.push_back(0x36);
+   body.push_back(0x00);
+-  EmitU32Leb(body, byte_offset);
++  EmitU32Leb(body, byte_offset + (s_memory_group.proven ? s_memory_group.offset : 0));
+ }
+ 
+ void EmitStoreU32BigEndianToL1AddressOffset(std::vector<u8>& body,
+@@ -3946,6 +3956,13 @@
+ 
+ void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); body.insert(body.end(), {0x28, 0x00});
++    EmitU32Leb(body, s_memory_group.offset);
++    EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -3973,6 +3990,12 @@
+ 
+ void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); body.insert(body.end(), {0x2d, 0x00});
++    EmitU32Leb(body, s_memory_group.offset);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -3998,6 +4021,13 @@
+ 
+ void EmitReadU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); body.insert(body.end(), {0x2f, 0x00});
++    EmitU32Leb(body, s_memory_group.offset);
++    EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4039,6 +4069,12 @@
+ 
+ void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); EmitBswap32FromLocal(body, 2);
++    body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4068,6 +4104,12 @@
+ 
+ void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); EmitLocalGet(body, 2);
++    body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4095,6 +4137,12 @@
+ 
+ void EmitWriteU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
++  if (s_memory_group.proven)
++  {
++    EmitLocalGet(body, 40); EmitBswap16FromLocal(body, 2);
++    body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4707,6 +4755,17 @@
+                         const PPCAnalyst::CodeOp& op, u32 downcount, bool load, bool update)
+ {
+   const UGeckoInstruction inst = op.inst;
++  if (s_memory_group.proven)
++  {
++    if (load) EmitDirectLfs(body, layout, inst, false); else EmitDirectStfs(body, layout, inst, false);
++    if (update)
++    {
++      EmitStateStoreU32Prefix(body); EmitLocalGet(body, 1);
++      EmitStateStoreU32Suffix(body, GprOffset(layout, inst.RA));
++    }
++    return;
++  }
++
+ 
+   EmitAlignedFloatFastPathCondition(body, layout, false);
+   body.push_back(0x04);
+@@ -4766,6 +4825,17 @@
+                  const PPCAnalyst::CodeOp& op, u32 downcount, bool update)
+ {
+   const UGeckoInstruction inst = op.inst;
++  if (s_memory_group.proven)
++  {
++    EmitDirectLfdFromRam(body, layout, inst);
++    if (update)
++    {
++      EmitStateStoreU32Prefix(body); EmitLocalGet(body, 1);
++      EmitStateStoreU32Suffix(body, GprOffset(layout, inst.RA));
++    }
++    return;
++  }
++
+ 
+   EmitHighMem1FloatCondition(body, layout, sizeof(u64));
+   body.push_back(0x04);
+@@ -4795,6 +4865,17 @@
+                    const PPCAnalyst::CodeOp& op, u32 downcount, bool update)
+ {
+   const UGeckoInstruction inst = op.inst;
++  if (s_memory_group.proven)
++  {
++    EmitDirectStfdToRam(body, layout, inst);
++    if (update)
++    {
++      EmitStateStoreU32Prefix(body); EmitLocalGet(body, 1);
++      EmitStateStoreU32Suffix(body, GprOffset(layout, inst.RA));
++    }
++    return;
++  }
++
+ 
+   EmitHighMem1FloatCondition(body, layout, sizeof(u64));
+   body.push_back(0x04);
+@@ -7681,14 +7762,91 @@
+   return count;
+ }
+ 
++// Only consecutive integer/float memory ops; no helper/system/ALU may intervene.
++// A member which writes the base is included last, using its original value.
++std::size_t WasmMemoryGroupLength(std::span<const PPCAnalyst::CodeOp> ops)
++{
++  if (ops.empty()) return 0;
++  const u32 base = ops.front().inst.RA;
++  if (!base) return 0;
++  std::size_t count = 0;
++  s32 fp_offset = 0; bool have_fp = false;
++  for (const auto& op : ops)
++  {
++    const u32 code = op.inst.OPCD;
++    if (op.skip || !op.opinfo || code < 32 || code > 55 || code == 46 || code == 47 || op.inst.RA != base ||
++        !IsPpcWasmDirectInstructionCandidate(op))
++      break;
++    if (code >= 48)
++    {
++      const s32 off = op.inst.SIMM_16;
++      if (have_fp && ((off - fp_offset) & 3)) break;
++      fp_offset = off; have_fp = true;
++    }
++    ++count;
++    const bool load = code <= 35 || (code >= 40 && code <= 43);
++    if ((code & 1) || op.regsOut[base] || (load && op.inst.RD == base) || count == 8)
++      break;
++  }
++  return count >= 3 ? count : 0;
++}
++
++u32 WasmMemoryAccessSize(u32 opcode)
++{
++  if (opcode >= 48) return opcode == 50 || opcode == 51 || opcode == 54 || opcode == 55 ? 8u : 4u;
++  return opcode <= 33 || opcode == 36 || opcode == 37 ? 4u : opcode >= 40 ? 2u : 1u;
++}
++
++void EmitWasmMemoryGroupProof(std::vector<u8>& body, const WasmStateLayout& layout,
++                              u32 base, s32 low, s32 high, bool fp = false, bool high_alias = false, u32 align_offset = 0)
++{
++  EmitStateLoadU32(body, GprOffset(layout, base)); EmitI32Const(body, static_cast<u32>(low));
++  body.push_back(0x6a); EmitI32Const(body, 0x3fffffff); body.push_back(0x71);
++  body.push_back(0x22); EmitU32Leb(body, 40);
++  EmitStateLoadU32(body, GprOffset(layout, base)); EmitI32Const(body, static_cast<u32>(high));
++  body.push_back(0x6a); EmitI32Const(body, 0x3fffffff); body.push_back(0x71);
++  body.push_back(0x22); EmitU32Leb(body, 3);
++  body.push_back(0x4d);  // unsigned low <= high, rejects masked-address wrap
++  EmitLocalGet(body, 3); EmitI32Const(body, layout.ram_size_real);
++  body.push_back(0x49); body.push_back(0x71);  // highest byte < RAM size
++  if (fp)
++  {
++    EmitStateLoadU32(body, layout.msr_offset); EmitI32Const(body, (1u << 13) | 1u);
++    body.push_back(0x71); EmitI32Const(body, 1u << 13); body.push_back(0x46); body.push_back(0x71);
++    EmitLocalGet(body, 40); EmitI32Const(body, align_offset); body.push_back(0x6a);
++    EmitI32Const(body, 3); body.push_back(0x71); body.push_back(0x45); body.push_back(0x71);
++    if (high_alias)
++    {
++      EmitStateLoadU32(body, GprOffset(layout, base)); EmitI32Const(body, static_cast<u32>(low)); body.push_back(0x6a);
++      EmitI32Const(body, 0x80000000u); body.push_back(0x71); EmitI32Const(body, 0);
++      body.push_back(0x47); body.push_back(0x71);
++    }
++  }
++}
++
+ std::vector<u8> BuildWasmCachedInterpreterBlock(std::span<const PPCAnalyst::CodeOp> ops,
+                                                 const WasmStateLayout& layout, u32 next_pc,
+                                                 bool write_npc,
+                                                 bool allow_interpret_fallback = false,
+-                                                bool record_emit_failure = false)
++                                                bool record_emit_failure = false,
++                                                bool force_memory_groups_for_test = false)
+ {
+   AnalyzeFastmemHoistability(ops);
+-  AnalyzeFastmemHoistPlan(ops);  // §28cz build the hoist plan (no-op unless enable bit set)
++  AnalyzeFastmemHoistPlan(ops);
++  // The existing opt-in per-access experiment owns local40 when selected.
++  // Otherwise choose groups at code generation time, with no runtime policy load.
++  // Keep the 16K/mobile profile's generated code unchanged. Tests can exercise
++  // both implementations without changing or unsealing the native cache budget.
++  const bool memory_group_budget = DolphinWeb_GetWasmCacheCapacity() >= 32768 ||
++      force_memory_groups_for_test;
++  const bool use_memory_groups = memory_group_budget &&
++      !DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_MEMORY_GROUPS) &&
++      !DolphinWebFeatureEnabled(DOLPHIN_WEB_ENABLE_FASTMEM_HOIST);
++  bool has_memory_groups = false;
++  if (use_memory_groups)
++    for (std::size_t i = 0; i < ops.size(); ++i)
++      if (WasmMemoryGroupLength(ops.subspan(i))) { has_memory_groups = true; break; }
++  s_memory_group = {};
+   std::vector<u8> bytes = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+ 
+   std::vector<u8> types;
+@@ -7768,7 +7926,7 @@
+   std::vector<u8> body = has_fpr_run
+       ? std::vector<u8>{0x07, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
+                         0x01, 0x7f, 0x20, 0x7f, 0x01, 0x7f, 0x40, 0x7e}
+-      : s_fmh_plan.active
++      : (s_fmh_plan.active || has_memory_groups)
+           ? std::vector<u8>{0x06, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
+                             0x01, 0x7f, 0x20, 0x7f, 0x01, 0x7f}
+           : std::vector<u8>{0x05, 0x03, 0x7f, 0x02, 0x7e, 0x01, 0x7c,
+@@ -7816,6 +7974,57 @@
+       fpr_run_end = op_index + BeginFprCacheRun(body, layout, ops.subspan(op_index));
+       if (fpr_run_end == op_index)
+         ++fpr_run_end;
++    }
++    const std::size_t group_length = has_memory_groups ? WasmMemoryGroupLength(ops.subspan(op_index)) : 0;
++    if (group_length)
++    {
++      s32 low = op.inst.SIMM_16;
++      s32 high = low + static_cast<s32>(WasmMemoryAccessSize(op.inst.OPCD)) - 1;
++      for (std::size_t j = 1; j < group_length; ++j)
++      {
++        const auto& member = ops[op_index + j];
++        const s32 off = member.inst.SIMM_16;
++        low = std::min(low, off);
++        high = std::max(high, off + static_cast<s32>(WasmMemoryAccessSize(member.inst.OPCD)) - 1);
++      }
++      bool fp = false, high_alias = false;
++      u32 align_offset = 0;
++      for (std::size_t j = 0; j < group_length; ++j)
++      {
++        const auto inst = ops[op_index + j].inst;
++        if (inst.OPCD >= 48)
++        {
++          fp = true; align_offset = static_cast<s32>(inst.SIMM_16) - low;
++          high_alias |= inst.OPCD == 50 || inst.OPCD == 51 || inst.OPCD == 54 || inst.OPCD == 55;
++        }
++      }
++      EmitWasmMemoryGroupProof(body, layout, op.inst.RA, low, high, fp, high_alias, align_offset);
++      body.insert(body.end(), {0x04, 0x40});
++      EmitLocalGet(body, 40); EmitI32Const(body, layout.ram_base); body.push_back(0x6a);
++      EmitLocalSet(body, 40);
++      const u32 prefix = downcount;
++      for (u32 branch = 0; branch < 2; ++branch)
++      {
++        downcount = prefix;
++        s_memory_group.proven = branch == 0;
++        for (std::size_t j = 0; j < group_length; ++j)
++        {
++          const auto& member = ops[op_index + j];
++          s_memory_group.offset = static_cast<s32>(member.inst.SIMM_16) - low;
++          downcount += member.opinfo->num_cycles;
++          if (!EmitWasmSupportedIntegerInstruction(body, layout, member, downcount))
++          {
++            s_memory_group = {}; s_gpr_rc.active = false; s_fpr_rc = {};
++            s_fmh_plan.active = false; s_fmh_plan.ops.clear();
++            return {};
++          }
++        }
++        if (branch == 0) body.push_back(0x05);
++      }
++      s_memory_group = {}; body.push_back(0x0b);
++      op_index += group_length - 1;
++      fpr_run_end = op_index + 1;
++      continue;
+     }
+     downcount += op.opinfo->num_cycles;
+     if (op.skip)
+@@ -12308,8 +12517,160 @@
+   return handle > 0 ? 1 : -2;
+ }
+ 
++static int RunWasmByteOrderSmoke()
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  const u32 original_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore { u32 mask; ~Restore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } restore{original_mask};
++  std::array<u8, 256> ram{};
++  const auto layout = MakeWasmBlockTestLayout(state, ram.data(), ram.size());
++  for (u32 cache = 0; cache < 2; ++cache)
++  for (u32 old = 0; old < 2; ++old)
++  {
++    s_dolphin_web_disable_mask.store((cache ? DOLPHIN_WEB_DISABLE_REGALLOC : 0) | (old ? 1u << 30 : 0), std::memory_order_relaxed);
++    auto store = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(36, 3, 1, 1), 0x80003100);
++    auto load = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(32, 4, 1, 1), 0x80003104);
++    store.regsIn[1] = store.regsIn[3] = load.regsIn[1] = true; load.regsOut[4] = true;
++    const std::array<PPCAnalyst::CodeOp, 2> ops{store, load};
++    const auto bytes = BuildWasmCachedInterpreterBlock(ops, layout, 0x80003108, true);
++    const int handle = bytes.empty() ? -1 : CompileWasmCachedInterpreterBlockForTest(bytes);
++    if (handle <= 0) return 5100;
++    u32 value = 0;
++    for (u32 i = 0; i < 1024; ++i)
++    {
++      if (i < 32) value = 1u << i;
++      else value = value * 1664525u + 1013904223u;
++      ram.fill(0xa5); state.gpr[1] = 0x80000020; state.gpr[3] = value;
++      state.gpr[4] = ~value; state.msr.Hex = 0; state.Exceptions = 0;
++      if (DolphinWeb_CachedInterpreterRunWasmBlockForTest(handle,
++          static_cast<int>(reinterpret_cast<std::uintptr_t>(&state))) != 0) return 5101;
++      if (state.gpr[4] != value || state.npc != 0x80003108) return 5102;
++      for (u32 byte = 0; byte < 4; ++byte)
++        if (ram[0x21 + byte] != static_cast<u8>(value >> ((3 - byte) * 8))) return 5103;
++      if (ram[0x20] != 0xa5 || ram[0x25] != 0xa5) return 5104;
++    }
++  }
++  return 1;
++}
++
++static int RunWasmMemoryGroupSmoke()
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  const u32 original_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore { u32 mask; ~Restore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } restore{original_mask};
++  std::array<u8, 512> ram{};
++  const auto layout = MakeWasmBlockTestLayout(state, ram.data(), ram.size());
++  // Validate emitted proof separately, including rejected addresses, without
++  // calling an uninitialized MMU on an out-of-range synthetic fixture.
++  for (u32 fp_mode=0;fp_mode<4;++fp_mode)
++  for (const auto bounds : std::array<std::array<s32, 2>, 6>{{{0,3},{-4,31},{-32768,32770},{0,511},{1,1},{-32,-1}}})
++  {
++    auto module = BuildWasmCachedInterpreterBlock({}, layout, 0, false);
++    if (module.empty()) return 5200;
++    const auto leb = [&](std::size_t& pos) { u32 value=0, shift=0; for (;;) { const u8 byte=module[pos++]; value|=static_cast<u32>(byte&127)<<shift; if (!(byte&128)) return value; shift+=7; } };
++    std::size_t pos=8, start=0;
++    while (pos < module.size()) { start=pos; const u8 id=module[pos++]; const u32 length=leb(pos); if (id==10) break; pos+=length; }
++    module.resize(start);
++    std::vector<u8> body{1,40,0x7f};  // parameter0 plus 40i32 locals, proof uses3/40
++    EmitWasmMemoryGroupProof(body, layout, 1, bounds[0], bounds[1], fp_mode>0, fp_mode==3, fp_mode==2?3:0); body.push_back(0x0b);
++    std::vector<u8> code{1}; EmitU32Leb(code, body.size()); code.insert(code.end(),body.begin(),body.end()); EmitSection(module,10,code);
++    const int handle=CompileWasmCachedInterpreterBlockForTest(module); if (handle<=0) return 5201;
++    s_dolphin_web_disable_mask.store(DOLPHIN_WEB_ENABLE_FASTMEM_HOIST, std::memory_order_relaxed);
++    u32 random=1;
++    for (u32 i=0;i<10032;++i)
++    {
++      const std::array<u32,16> corners{0,1,3,31,32,127,255,508,509,511,512,0x3fffffffu,0x40000000u,0x7fffffffu,0x80000000u,0xffffffffu};
++      random=random*1664525u+1013904223u;
++      const u32 base=i<32 ? corners[i%16] + (i>=16 ? 0x80000000u:0) : random;
++      state.gpr[1]=base; state.msr.Hex=i%4==0||i%4==3?1u<<13:i%4==1?(1u<<13)|1u:0;
++      const u32 low=(base+static_cast<u32>(bounds[0]))&0x3fffffffu;
++      const u32 high=(base+static_cast<u32>(bounds[1]))&0x3fffffffu;
++      const bool expected=low<=high && high<ram.size() && (!fp_mode || ((state.msr.Hex&0x2001u)==0x2000u && ((low+(fp_mode==2?3:0))&3)==0 && (fp_mode!=3 || ((base+static_cast<u32>(bounds[0]))&0x80000000u)!=0)));
++      const int actual=DolphinWeb_CachedInterpreterRunWasmBlockForTest(handle,static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++      if (actual!=static_cast<int>(expected)) return 5202;
++      // Independent exhaustive byte-address check for accepted ranges.
++      if (actual) for(s32 off=bounds[0];off<=bounds[1];++off)
++        if (((base+static_cast<u32>(off))&0x3fffffffu)>=ram.size()) return 5203;
++    }
++  }
++  for (u32 cache=0;cache<2;++cache)
++  for (u32 count : {3u,4u,8u})
++  for (u32 kind=0;kind<19;++kind)
++  for (u32 edge=0;edge<3;++edge)
++  {
++    std::vector<PPCAnalyst::CodeOp> ops;
++    s32 min_offset=100000, max_end=-100000;
++    for (u32 j=0;j<count;++j)
++    {
++      u32 opcode=kind==0?32:kind==1?36:(j%2?32:36);
++      if (kind==3) { constexpr u32 codes[]{32,34,40,42,36,38,44,32}; opcode=codes[j]; }
++      if (kind>=9) opcode=kind==9||kind==14?48:kind==10||kind==15?52:kind==11||kind==17?50:54;
++      if (kind==13 || kind==16) { constexpr u32 codes[]{48,32,52,50,54,40,48,36}; opcode=codes[j]; }
++      if (j==count-1 && kind>=14 && kind!=16) opcode=kind==14?49:kind==15?53:kind==17?51:55;
++      if (kind==6 && j==count-1) opcode=32;
++      if (kind==4 && j==count-1) opcode=33;
++      if (kind==5 && j==count-1) opcode=37;
++      const u32 reg=kind==6 && j==count-1?1:kind==8?3:3+j;
++      const s32 offset=kind>=9?static_cast<s32>(j)*8-16:kind==7?static_cast<s32>(j%2)*2-15:static_cast<s32>(j)*5-13;
++      auto op=MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(opcode,reg,1,static_cast<u16>(offset)),0x80003100+j*4);
++      const bool load=opcode<=35||(opcode>=40&&opcode<=43);
++      op.regsIn[1]=true; if(opcode<48) { if(load) op.regsOut[reg]=true; else op.regsIn[reg]=true; }
++      if(opcode&1) op.regsOut[1]=true;
++      ops.push_back(op); min_offset=std::min(min_offset,offset);
++      max_end=std::max(max_end,offset+static_cast<s32>(WasmMemoryAccessSize(opcode))-1);
++    }
++    if(WasmMemoryGroupLength(ops)!=count) return 5210;
++    int handles[2]{};
++    std::array<std::vector<u8>, 2> variants;
++    for (u32 grouped=0;grouped<2;++grouped)
++    {
++      s_dolphin_web_disable_mask.store((cache?DOLPHIN_WEB_DISABLE_REGALLOC:0)|
++          (grouped?0:DOLPHIN_WEB_DISABLE_MEMORY_GROUPS),std::memory_order_relaxed);
++      const auto bytes=BuildWasmCachedInterpreterBlock(ops,layout,0x80003200,true,false,false,true);
++      variants[grouped]=bytes;
++      handles[grouped]=bytes.empty()?-1:CompileWasmCachedInterpreterBlockForTest(bytes);
++      if(handles[grouped]<=0) return 5211;
++    }
++    // The default policy must emit exactly the original bytes at16K, and
++    // exactly the grouped bytes at32K. All memory contracts still force both.
++    const auto selected=BuildWasmCachedInterpreterBlock(ops,layout,0x80003200,true);
++    if(selected!=variants[DolphinWeb_GetWasmCacheCapacity()>=32768?1:0])return 5217;
++    std::array<u32,32> expected_gprs{}; std::array<u64,64> expected_fp{}; std::array<u8,512> expected_ram{};
++    u32 expected_npc=0; s32 expected_downcount=0;
++    for(u32 grouped=0;grouped<2;++grouped)
++    {
++      for(u32 j=0;j<32;++j)
++      {
++        state.gpr[j]=0x12345678u+j*0x11111111u;
++        state.ps[j].SetPS0(j%3==0?u64{0x7ff0000000001234}:std::bit_cast<u64>(1.25+j));
++        state.ps[j].SetPS1(std::bit_cast<u64>(-2.5-j));
++      }
++      for(u32 j=0;j<ram.size();++j) ram[j]=static_cast<u8>(j*71+13);
++      state.gpr[1]=0x80000000u+(edge==2?ram.size()-1-max_end:(kind>=9?64u+edge*32:64u+edge));
++      state.npc=state.pc=0x80003100;state.downcount=1234;state.msr.Hex=kind>=9?1u<<13:0;state.Exceptions=0;state.fpscr.Hex=0;state.cr.Set(0x12345678);
++      s_dolphin_web_disable_mask.store(cache?DOLPHIN_WEB_DISABLE_REGALLOC:0,std::memory_order_relaxed);
++      const int result=DolphinWeb_CachedInterpreterRunWasmBlockForTest(handles[grouped],static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++      if(result!=0||state.Exceptions) return 5212;
++      if(!grouped) { for(u32 j=0;j<32;++j) expected_gprs[j]=state.gpr[j]; for(u32 j=0;j<32;++j) { expected_fp[j*2]=state.ps[j].PS0AsU64(); expected_fp[j*2+1]=state.ps[j].PS1AsU64(); } expected_ram=ram;expected_npc=state.npc;expected_downcount=state.downcount; }
++      else { for(u32 j=0;j<32;++j) { if(expected_gprs[j]!=state.gpr[j]) return 5213; if(expected_fp[j*2]!=state.ps[j].PS0AsU64()||expected_fp[j*2+1]!=state.ps[j].PS1AsU64())return 5215; } if(state.fpscr.Hex||state.cr.Get()!=0x12345678)return 5216; if(expected_ram!=ram||expected_npc!=state.npc||expected_downcount!=state.downcount||state.pc!=0x80003100) return 5214; }
++    }
++    auto barrier=ops;barrier[1].skip=true;if(WasmMemoryGroupLength(barrier)!=0)return 5220;
++    barrier=ops;barrier[1].inst=EncodeDFormForWasmBlockTest(14,7,7,1);if(WasmMemoryGroupLength(barrier)!=0)return 5221;
++    barrier=ops;barrier[0].inst=EncodeDFormForWasmBlockTest(32,3,0,0);if(WasmMemoryGroupLength(barrier)!=0)return 5222;
++    barrier=ops;barrier[1].inst=EncodeDFormForWasmBlockTest(32,1,1,0);if(WasmMemoryGroupLength(barrier)!=0)return 5223;
++    barrier=ops;barrier[1].inst=EncodeDFormForWasmBlockTest(32,3,2,0);if(WasmMemoryGroupLength(barrier)!=0)return 5224;
++  }
++  return 1;
++}
++
+ extern "C" int RunPpcWasmMultipleWordMemorySmoke()
+ {
++  const int group_result = RunWasmMemoryGroupSmoke();
++  if (group_result != 1) return group_result;
++
++  const int byte_order_result = RunWasmByteOrderSmoke();
++  if (byte_order_result != 1) return byte_order_result;
++
+   auto& state = Core::System::GetInstance().GetPPCState();
+   std::array<u8, 256> ram{};
+   state.npc = 0;

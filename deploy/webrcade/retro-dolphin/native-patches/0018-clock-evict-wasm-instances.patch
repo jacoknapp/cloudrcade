@@ -1,0 +1,363 @@
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -233,14 +233,17 @@
+ EM_JS(int, DolphinWeb_WasmInstancesFull, (), {
+   return Module._dolphinWasmInstances.full() ? 1 : 0;
+ });
+-EM_JS(void, DolphinWeb_WasmInstancesReset, (), {
+-  Module._dolphinWasmInstances.reset();
++EM_JS(void, DolphinWeb_WasmInstancesRetire, (const int* handles, int count), {
++  for (let i = 0; i < count; ++i)
++    Module._dolphinWasmInstances.retire(HEAP32[(handles >> 2) + i]);
+ });
++std::atomic<u32> s_wasm_instance_evictions{0};
++std::atomic<u32> s_wasm_instance_live{0};
+ u32 s_wasm_instance_reset_count = 0;
+ u32 s_wasm_instance_full_refusals = 0;
+-bool s_wasm_instance_reset_pending = false;
+-std::chrono::steady_clock::time_point s_wasm_instance_last_reset{};
+-constexpr auto WASM_INSTANCE_RESET_MIN_INTERVAL = std::chrono::milliseconds(30000);
++bool s_wasm_instance_prune_pending = false;
++std::chrono::steady_clock::time_point s_wasm_instance_last_prune{};
++u32 s_wasm_instance_prune_slices = 0;
+ 
+ static std::array<char, 86> DolphinWeb_MakeWasmBlockCacheKey(std::span<const u8> bytes)
+ {
+@@ -488,6 +491,10 @@
+     s_deferred_wasm_queues.erase(&cpu);
+     return;
+   }
++  // Keep full-cache interpreter fallbacks until retirement creates room.
++  // Retrying them every slice would repeatedly regenerate the same code bytes.
++  if (s_wasm_instance_prune_pending)
++    return;
+   auto found = s_deferred_wasm_queues.find(&cpu);
+   if (found == s_deferred_wasm_queues.end())
+     return;
+@@ -7980,7 +7987,7 @@
+ #line 7757
+   RefreshConfig();
+ 
+-  AllocCodeSpace(CODE_SIZE);
++  AllocCodeSpace(CODE_SIZE / 2);
+   ResetFreeMemoryRanges();
+ 
+   jo.enableBlocklink = false;
+@@ -8329,6 +8336,30 @@
+ #endif
+ }
+ 
++#ifdef __EMSCRIPTEN__
++__attribute__((noinline)) void CachedInterpreter::PruneWasmInstances()
++{
++  const auto now = std::chrono::steady_clock::now();
++  const auto interval = s_wasm_instance_prune_pending ? std::chrono::milliseconds(16) :
++                                                     std::chrono::milliseconds(250);
++  if (now - s_wasm_instance_last_prune < interval)
++    return;
++  s_wasm_instance_last_prune = now;
++  const auto handles = m_block_cache.wasm_instances.Retire(2048, 256, [this](JitBlock* block) {
++    m_block_cache.EraseSingleBlock(*block);
++  });
++  FreeRanges();
++  s_wasm_instance_live.store(static_cast<u32>(m_block_cache.wasm_instances.Size()),
++                             std::memory_order_relaxed);
++  if (!handles.empty())
++  {
++    DolphinWeb_WasmInstancesRetire(handles.data(), static_cast<int>(handles.size()));
++    s_wasm_instance_evictions.fetch_add(static_cast<u32>(handles.size()), std::memory_order_relaxed);
++    s_wasm_instance_prune_pending = false;
++  }
++}
++#endif
++
+ void CachedInterpreter::Run()
+ {
+   auto& core_timing = m_system.GetCoreTiming();
+@@ -8338,20 +8369,11 @@
+   {
+ #ifdef __EMSCRIPTEN__
+     ApplyRequestedWasmPolicy(*this);
+-    // Slice boundary: no block is executing. Recycle a full instance cache.
+-    if (s_wasm_instance_reset_pending)
+-    {
+-      s_wasm_instance_reset_pending = false;
+-      const auto now = std::chrono::steady_clock::now();
+-      if (s_wasm_instance_reset_count == 0 ||
+-          now - s_wasm_instance_last_reset >= WASM_INSTANCE_RESET_MIN_INTERVAL)
+-      {
+-        s_wasm_instance_last_reset = now;
+-        ++s_wasm_instance_reset_count;
+-        ClearCache();
+-        DolphinWeb_WasmInstancesReset();
+-      }
+-    }
++    // Cheap slice gate: metrics-off gameplay must not call a JS clock on
++    // every CoreTiming slice. Maintenance never interrupts a compiled block.
++    if ((m_block_cache.wasm_instances.Size() >= 20480 || s_wasm_instance_prune_pending) &&
++        (++s_wasm_instance_prune_slices & 63u) == 0)
++      PruneWasmInstances();
+ #endif
+     // §28cn metrics-gated per-slice wall-time profiling. The timestamp below
+     // spans Advance + ExecuteOneBlock; >16000us means the CPU pthread crossed
+@@ -10890,6 +10912,7 @@
+   using WasmBlockFunction = int (*)(int);
+ 
+   ++s_wasm_block_run_count;
++  *operands.referenced = 1;
+   const int halted =
+       reinterpret_cast<WasmBlockFunction>(static_cast<std::uintptr_t>(operands.handle))(
+           static_cast<int>(reinterpret_cast<std::uintptr_t>(&ppc_state)));
+@@ -11327,12 +11350,17 @@
+     if (DolphinWeb_WasmInstancesFull())
+     {
+       ++s_wasm_instance_full_refusals;
+-      s_wasm_instance_reset_pending = true;
++      s_wasm_instance_prune_pending = true;
++      s_deferred_wasm_queues[this].Defer(js.blockStart,
++          static_cast<u32>(m_ppc_state.feature_flags), js.curBlock->normalEntry);
+     }
+     LogWasmBlockReject("compile", nullptr, 0, js.blockStart, code_block.m_num_instructions);
+     return false;
+   }
+ 
++  auto* const referenced = m_block_cache.wasm_instances.Acquire(handle, js.curBlock);
++  s_wasm_instance_live.store(static_cast<u32>(m_block_cache.wasm_instances.Size()),
++                             std::memory_order_relaxed);
+   ++s_wasm_block_compile_count;
+   if (did_merge)
+     ++s_wasm_block_merge_count;
+@@ -11369,14 +11397,14 @@
+   auto* const emitted = reinterpret_cast<WasmBlockOperands*>(
+       GetWritableCodePtr() + sizeof(AnyCallback));
+   Write(RunWasmBlock,
+-        {handle, block_next_pc, eff_downcount, eff_loadstores, eff_fpinst,
++        {handle, referenced, block_next_pc, eff_downcount, eff_loadstores, eff_fpinst,
+          static_cast<s32>(fuse_end_block ? 1 : 0), static_links});
+   if (!HasWriteFailed())
+     RegisterStaticExitLinks(&emitted->links);
+ #else
+ #line 11081
+   Write(RunWasmBlock,
+-        {handle, block_next_pc, eff_downcount, eff_loadstores, eff_fpinst,
++        {handle, referenced, block_next_pc, eff_downcount, eff_loadstores, eff_fpinst,
+          static_cast<s32>(fuse_end_block ? 1 : 0)});
+ #endif
+ #line 11084
+@@ -11721,6 +11749,8 @@
+       << " emitfail:" << s_wasm_block_emit_fail_count
+       << " compilefail:" << s_wasm_block_compile_fail_count
+       << " instreset:" << s_wasm_instance_reset_count << "/" << s_wasm_instance_full_refusals
++      << " instevict:" << s_wasm_instance_evictions.load(std::memory_order_relaxed)
++      << " instlive:" << s_wasm_instance_live.load(std::memory_order_relaxed)
+       << " pre:" << average_prefix << "/" << s_wasm_prefix_instruction_max
+       << " hist:" << s_wasm_prefix_histogram[0] << "," << s_wasm_prefix_histogram[1] << ","
+       << s_wasm_prefix_histogram[2] << "," << s_wasm_prefix_histogram[3] << ","
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.h
+@@ -88,6 +88,7 @@
+ 
+ #ifdef __EMSCRIPTEN__
+   bool TryWriteWasmBlock(u32 nextPC);
++  void PruneWasmInstances();
+ #endif
+ 
+   struct StartProfiledBlockOperands;
+@@ -342,6 +343,7 @@
+ struct CachedInterpreter::WasmBlockOperands
+ {
+   s32 handle;
++  u8* referenced;
+   u32 next_pc;
+   u32 downcount;
+   u32 num_load_stores;
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.cpp b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.cpp
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.cpp
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.cpp
+@@ -27,6 +27,9 @@
+ #endif
+ #line 21
+   JitBaseBlockCache::DestroyBlock(block);
++#ifdef __EMSCRIPTEN__
++  wasm_instances.Release(&block);
++#endif
+ 
+   if (block.near_begin != block.near_end)
+     m_ranges_to_free_on_next_codegen.emplace_back(block.near_begin, block.near_end);
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h
+@@ -8,6 +8,9 @@
+ 
+ #include "Common/CommonTypes.h"
+ #include "Core/PowerPC/JitCommon/JitCache.h"
++#ifdef __EMSCRIPTEN__
++#include "Core/PowerPC/CachedInterpreter/WasmInstanceClock.h"
++#endif
+ #include "Core/PowerPC/CachedInterpreter/CachedInterpreterLink.h"
+ #line 11
+ 
+@@ -23,6 +26,9 @@
+   void DestroyBlock(JitBlock& block) override;
+ 
+   void ClearRangesToFree();
++#ifdef __EMSCRIPTEN__
++  WasmInstanceClock<JitBlock> wasm_instances;
++#endif
+ #if DOLPHIN_WEB_STATIC_EXIT_LINKS
+ 
+   u64 StaticLinkEpoch() const { return m_static_link_epoch; }
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+--- a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+@@ -4,15 +4,25 @@
+ // Exact generated bytes and helper bindings identify an immutable function.
+ (() => {
+   const entries = new Map();
+-  const capacity = 32768;
+-  // Handles returned by reset(); only reused after the JIT block cache was
+-  // cleared, so no native callback or static link can still reference them.
++  const signatures = new Map();
++  const capacity = 16384;
++  // Handles become reusable only after the CPU unlinks every native user
++  // at a safe point. Permanent helper slots never enter this free list.
+   const free = [];
+   const key = (identity, bindings) => [identity, ...bindings].join('|');
+   Module._dolphinWasmInstances = {
+     get: (identity, bindings) => entries.get(key(identity, bindings)),
+     full: () => entries.size >= capacity,
+     size: () => entries.size,
++    retire(handle) {
++      const signature = signatures.get(handle);
++      if (signature === undefined) return;
++      // The owning CPU has already unlinked every native user at a safe point.
++      wasmTable.set(handle, null);
++      entries.delete(signature);
++      signatures.delete(handle);
++      free.push(handle);
++    },
+     reset() {
+       for (const handle of entries.values()) {
+         // ClearCache has invalidated every native block/static link before
+@@ -22,6 +32,7 @@
+         free.push(handle);
+       }
+       entries.clear();
++      signatures.clear();
+     },
+     insert(identity, bindings, fn) {
+       const signature = key(identity, bindings);
+@@ -39,6 +50,7 @@
+       }
+       wasmTable.set(handle, fn);
+       entries.set(signature, handle);
++      signatures.set(handle, signature);
+       return handle;
+     },
+   };
+diff --git a/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceClock.h b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceClock.h
+new file mode 100644
+--- /dev/null
++++ b/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceClock.h
+@@ -0,0 +1,99 @@
++// Copyright 2026 CloudRcade contributors
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++
++#include <algorithm>
++#include <cassert>
++#include <cstddef>
++#include <cstdint>
++#include <list>
++#include <unordered_map>
++#include <vector>
++
++// CPU-thread-only lifetime registry. Callback operands keep a stable pointer to
++// the reference byte; execution needs one store, with no JS call, clock or map.
++// Native invalidation drops users but never frees a possibly executing function.
++// Retire must run only after all compiled callbacks have returned.
++template <typename Block>
++class WasmInstanceClock
++{
++  struct Entry
++  {
++    int handle;
++    std::uint8_t referenced = 1;
++    std::vector<Block*> users;
++  };
++  using Entries = std::list<Entry>;
++  using Iterator = typename Entries::iterator;
++
++public:
++  WasmInstanceClock() = default;
++  WasmInstanceClock(const WasmInstanceClock&) = delete;
++  WasmInstanceClock& operator=(const WasmInstanceClock&) = delete;
++  WasmInstanceClock(WasmInstanceClock&&) = delete;
++  WasmInstanceClock& operator=(WasmInstanceClock&&) = delete;
++
++  std::uint8_t* Acquire(int handle, Block* block)
++  {
++    assert(!m_users.contains(block));
++    auto found = m_handles.find(handle);
++    if (found == m_handles.end())
++    {
++      auto entry = m_entries.insert(m_entries.end(), Entry{handle, 1, {}});
++      found = m_handles.emplace(handle, entry).first;
++    }
++    auto entry = found->second;
++    entry->referenced = 1;
++    entry->users.push_back(block);
++    m_users.emplace(block, entry);
++    return &entry->referenced;
++  }
++
++  void Release(Block* block)
++  {
++    const auto found = m_users.find(block);
++    if (found == m_users.end())
++      return;
++    auto& users = found->second->users;
++    users.erase(std::find(users.begin(), users.end(), block));
++    m_users.erase(found);
++  }
++
++  std::size_t Size() const { return m_entries.size(); }
++
++  template <typename Invalidate>
++  std::vector<int> Retire(std::size_t scan_budget, std::size_t retire_budget,
++                          Invalidate invalidate)
++  {
++    std::vector<int> retired;
++    // Never clear and then evict an entry in the same maintenance pass.
++    const auto scans = std::min(scan_budget, m_entries.size());
++    for (std::size_t i = 0; i < scans && retired.size() < retire_budget; ++i)
++    {
++      if (m_hand == m_entries.end())
++        m_hand = m_entries.begin();
++      const auto entry = m_hand++;
++      if (!entry->users.empty() && entry->referenced)
++      {
++        entry->referenced = 0;
++        continue;
++      }
++      while (!entry->users.empty())
++      {
++        Block* block = entry->users.back();
++        invalidate(block);  // Must unlink every native/static reference first.
++        assert(!m_users.contains(block));
++      }
++      retired.push_back(entry->handle);
++      m_handles.erase(entry->handle);
++      m_entries.erase(entry);
++    }
++    return retired;
++  }
++
++private:
++  Entries m_entries;
++  Iterator m_hand = m_entries.end();
++  std::unordered_map<int, Iterator> m_handles;
++  std::unordered_map<Block*, Iterator> m_users;
++};

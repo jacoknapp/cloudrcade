@@ -55,6 +55,23 @@ DS retains native stylus touch on the game screen. Its drawer has **DS screens**
 
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
 
+## Wii controls
+
+Wii is available by default with Wii Remote + Nunchuk, upright Remote and sideways
+Remote layouts. The Nunchuk uses its own stick and C/Z buttons; the Remote has
+A/B, 1/2, Plus/Minus, Home and a D-pad. Point by touching the picture or moving
+the mouse; tap/click is A and right click is B. Drags supply tilt and swing/shake.
+Choose a controller layout in the drawer. **Enable phone motion** requests device
+sensor access; **Recenter phone** sets your neutral holding position. If sensors
+are unavailable or permission is denied, touch/mouse controls remain usable.
+Layouts save independently of GameCube and of the other Wii controller layouts.
+
+The Wii and GameCube drawers offer **Frame skip**: **Off** (default), **2×**,
+**3×** or **4×**. This omits native graphics work for the skipped frames while
+CPU emulation, game state and audio continue. Each system remembers its own
+choice. Graphics-readback dependent games may require Off; a CPU-bound game
+will not necessarily run twice as fast at 2×.
+
 ## Experimental settings and defaults
 
 The inherited **Experimental apps** preference is enabled once when the fork's migration first runs so experimental systems such as N64 can be used. After that migration, a player's saved choice is respected. It is a browser preference, not a guarantee of compatibility or speed.
@@ -66,6 +83,11 @@ The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator s
 GameCube is available when its core is packaged, without a player enable switch. Its **GameCube performance readout** is in **Core Settings**. Keyboard, gamepad and touch input include separate sticks and its own button layout. It requires device WebGPU; see [device requirements](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta).
 
 PlayStation 2 is available by default with no player or Docker enable switch. The optional **PS2 performance readout** is in **Settings → Core Settings** and starts off; Cancel discards changes. PS2 controls include both analog sticks, D-pad, Sony face buttons, L1/R1/L2/R2/L3/R3, Select, Start and Menu; Escape also opens its pause menu. Compatibility and speed vary by game and device.
+
+Wii has no enable switch, even for browsers that disabled the old beta. Its
+optional **Wii performance readout** in **Settings → Core Settings** starts off;
+OK applies the change and Cancel discards it. It is independent of the
+GameCube and PS2 readouts.
 
 3DS uses native 1x resolution and the original console model by default. See [3DS performance](streaming-offline-and-3ds.md#3ds-shaders-and-performance) before changing settings expecting full-speed playback.
 

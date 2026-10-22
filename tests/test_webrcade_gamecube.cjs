@@ -20,13 +20,28 @@ function fake() {
     async load() { calls.load++; this.loaded = true; }, setAudioMuted(value) { assert.equal(value,true); },
     async mountGame(file) { calls.mounted = file; return {fullCore:true, coreBoot:{accepted:true}}; },
     start() { calls.started++; }, pause() { calls.paused++; },
-    async request(type) { assert(['start','pause'].includes(type)); if(type==='start')calls.started++;else calls.paused++;return {}; }, applyFrame() {},
+    async request(type,payload) { if(type==='jitCacheProfile'){calls.cacheProfile=payload.profile;return {profile:payload.profile,capacity:16384};} assert(['start','pause'].includes(type)); if(type==='start')calls.started++;else calls.paused++;return {}; }, applyFrame() {},
     setInputState(state) { calls.input = {...state}; calls.inputCalls++; }, pollFrame() {},
     rejectAll() { calls.rejected++; }, frameData:new Uint8Array(4)};
 }
 (async () => {
   const {requireCapabilities, requireHardwareGpu, inspectDisc, GameCubeSession} = await import(pathToFileURL(path.join(root,'session.mjs')));
   const {padState, BUTTONS} = await import(pathToFileURL(path.join(root,'input.mjs')));
+  const {jitCacheProfile} = await import(pathToFileURL(path.join(root,'jit-cache-profile.mjs')));
+  for (const navigator of [
+    {platform:'Win32',deviceMemory:8}, {platform:'Win32',maxTouchPoints:10,deviceMemory:16},
+    {platform:'MacIntel',maxTouchPoints:0}, {platform:'Linux x86_64'},
+    {userAgentData:{platform:'Windows',mobile:false},deviceMemory:8},
+    {userAgentData:{platform:'Linux',mobile:false},userAgent:'Mozilla/5.0 (X11; Linux x86_64)'}
+  ]) assert.equal(jitCacheProfile(navigator),'desktop');
+  for (const navigator of [
+    {}, {platform:'Win32',deviceMemory:4}, {platform:'Win32',deviceMemory:NaN},
+    {platform:'MacIntel',maxTouchPoints:5,userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X)'},
+    {platform:'iPhone'}, {platform:'Linux armv8l',userAgent:'Android'},
+    {platform:'Linux x86_64',userAgent:'Android'}, {platform:'Win32',userAgentData:{mobile:true}},
+    {platform:'Linux x86_64',maxTouchPoints:5,userAgentData:{platform:'Linux',mobile:false},userAgent:'Mozilla/5.0 (X11; Linux x86_64)'},
+    {userAgentData:{platform:'Linux',mobile:false},userAgent:'Mozilla/5.0 (Linux)'}
+  ]) assert.equal(jitCacheProfile(navigator),'standard');
   const scope = {isSecureContext:true, crossOriginIsolated:true, SharedArrayBuffer, Worker:function(){},
     navigator:{gpu:{requestAdapter:async()=>({info:{isFallbackAdapter:false,description:'device GPU'}})}}};
   const canvas = {transferControlToOffscreen(){return {};}};
@@ -53,11 +68,12 @@ function fake() {
   }});
   await Promise.all([session.initialize(), session.initialize()]);
   assert.equal(adapter.calls.load,1,'parallel initialization shares one worker');
+  assert.equal(adapter.calls.cacheProfile,'standard','unknown device keeps the standard cache before boot');
   const profiled=fake(),profileCalls=[];
   profiled.request=async(type,payload)=>{profileCalls.push({type,payload});return {available:true,enabled:true};};
   const timingSession=new GameCubeSession({...options,nativeTimingEnabled:true,createAdapter:async()=>profiled});
   await timingSession.initialize();
-  assert.deepEqual(profileCalls,[{type:'nativeTiming',payload:{enabled:true}}],
+  assert.deepEqual(profileCalls,[{type:'jitCacheProfile',payload:{profile:'standard'}},{type:'nativeTiming',payload:{enabled:true}}],
     'opt-in native slice timing uses its narrow API without global metrics/PPC profiling');
   timingSession.dispose();
   const original = disc(); await session.boot(original);
@@ -249,6 +265,7 @@ function fake() {
   assert.deepEqual(requests,['bytes=0-31'],'large URL images never fetch the full disc');
   const streamed = fake(); let remoteRequest;
   streamed.request=async(type,payload)=>{
+    if(type === 'jitCacheProfile') return {profile:payload.profile,capacity:16384};
     if(type === 'start') {streamed.calls.started++;return {};}
     assert.equal(type,'mountUrl');remoteRequest=payload;return {fullCore:true,coreBoot:{accepted:true}};
   };

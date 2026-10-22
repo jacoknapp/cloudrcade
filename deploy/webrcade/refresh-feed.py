@@ -17,6 +17,7 @@ BASE = os.environ.get('WEBRCADE_CONTENT_URL', '/content/').rstrip('/') + '/'
 NAMESPACE = os.environ.get('WEBRCADE_STORAGE_PREFIX', 'cloudrcade')
 FEED_TITLE = os.environ.get('WEBRCADE_FEED_TITLE', 'CloudRcade')
 FEED_DESCRIPTION = os.environ.get('WEBRCADE_FEED_DESCRIPTION', 'Games from your ROM library.')
+WII_CORE_INFO = Path('/var/www/html/experimental/wii/core-info.json')
 PS2_CORE_INFO = Path('/var/www/html/experimental/ps2/core-info.json')
 SYSTEMS = {
  'nes': ('Nintendo Entertainment System', 'nes', {'.nes'}, 18),
@@ -31,14 +32,17 @@ SYSTEMS = {
  'psp': ('PlayStation Portable', 'psp', {'.iso', '.cso', '.pbp', '.elf'}, 38),
  'ps2': ('PlayStation 2', 'ps2', {'.iso', '.chd', '.elf'}, 8),
  '3DS': ('Nintendo 3DS', '3ds', {'.cia', '.3ds', '.cci'}, 37),
+ 'Wii': ('Nintendo Wii', 'wii', {'.iso', '.wbfs', '.ciso'}, 5),
  'GameCube': ('Nintendo GameCube', 'gamecube', {'.iso', '.gcm'}, 21),
 }
 
 def managed_matches(path,folder,extensions):
  if path.suffix.lower() not in extensions:return False
+ if folder=='Wii':return wii_game(path) is not None
  if folder=='ps2':return path.suffix.lower()=='.iso' and ps2_game(path) is not None
  if path.suffix.lower()=='.pbp':return pbp_platform(path)==folder
  if path.suffix.lower()=='.iso':
+  if folder=='Wii':return wii_game(path) is not None
   if folder=='GameCube':return gamecube_game(path) is not None
   if folder!='psp':return False
   with path.open('rb') as f:return b'PSP_GAME' in f.read(512*1024)
@@ -70,6 +74,37 @@ def pbp_platform(path):
       if keys<=key_at<data and sfo[key_at:data].split(b'\x00',1)[0]==b'CATEGORY' and kind==0x204 and used<=maximum and data<=value_at<=value_at+used<=length:
        if sfo[value_at:value_at+used].rstrip(b'\x00')==b'ME':return 'psx'
   return 'psp'
+
+def wii_game(path):
+ # Match Dolphin's single-game WBFS and Wii CISO readers. Only bounded
+ # container metadata/header reads; never hash or convert multi-GB discs.
+ size=path.stat().st_size
+ with path.open('rb') as stream:
+  head=stream.read(0x20)
+  if len(head)!=0x20:return None
+  if path.suffix.lower()=='.wbfs':
+   if head[:4]!=b'WBFS' or not 9<=head[8]<=16 or not 15<=head[9]<=26 or head[9]<head[8]:return None
+   sector=1<<head[8];block=1<<head[9]
+   if int.from_bytes(head[4:8],'big')*sector!=size:return None
+   stream.seek(0);slots=stream.read(512)[12:]
+   if len(slots)!=500 or not slots[0] or any(slots[1:]):return None
+   count=(143432*2*0x8000+block-1)//block
+   stream.seek(sector+256);table=stream.read(count*2)
+   if len(table)!=count*2:return None
+   entries=[v[0] for v in struct.iter_unpack('>H',table)]
+   if not entries[0] or any((entry+1)*block>size for entry in entries):return None
+   stream.seek(entries[0]*block);head=stream.read(0x20)
+  elif path.suffix.lower()=='.ciso':
+   stream.seek(0);header=stream.read(0x8000)
+   if len(header)!=0x8000 or header[:4]!=b'CISO':return None
+   block=int.from_bytes(header[4:8],'little');mapping=header[8:]
+   if not 0x8000<=block<=1<<26 or block&(block-1) or mapping[0]!=1 or any(v>1 for v in mapping):return None
+   if 0x8000+sum(mapping)*block!=size:return None
+   head=stream.read(0x20)
+  elif path.suffix.lower()!='.iso':return None
+ if len(head)!=0x20 or head[0x18:0x1c]!=bytes.fromhex('5d1c9ea3'): return None
+ if not re.fullmatch(b'[A-Z0-9]{6}',head[:6]): return None
+ return 'wii:'+head[:8].hex()+':'+str(size)
 
 def gamecube_game(path):
  # Disc identity and format validation need only the header, never a GB hash.
@@ -253,10 +288,13 @@ def main():
   counts={}; scanned=0; duplicates=0; seen=set(); errors=[]
   for folder,(title,core,extensions,platform) in SYSTEMS.items():
    if folder == '3DS' and not env_bool('WEBRCADE_ENABLE_3DS'): continue
+   if folder == 'Wii' and not WII_CORE_INFO.is_file(): continue
    if folder == 'GameCube' and not Path('/var/www/html/experimental/gamecube/core-info.json').is_file(): continue
    if folder == 'ps2' and not PS2_CORE_INFO.is_file(): continue
    items=[]
-   candidates=sorted((ROOT/folder if folder in ('3DS','GameCube','ps2') else ROOT/folder/'roms').rglob('*'))
+   candidates=sorted((ROOT/folder if folder in ('3DS','GameCube','Wii','ps2') else ROOT/folder/'roms').rglob('*'))
+   if folder=='Wii':
+    candidates=sorted(p for directory in ROOT.iterdir() if directory.is_dir() and directory.name.casefold()=='wii' for p in directory.rglob('*'))
    if folder=='ps2':candidates+=sorted((ROOT/'PS2').rglob('*'))
    candidates += [p for p in managed_files if managed_platforms.get(str(p))==platform or (str(p) not in managed_platforms and managed_matches(p,folder,extensions))]
    # A SNES hack was filed under NES; route it by format.
@@ -269,8 +307,8 @@ def main():
      identity=ps2_game(p)
      if identity is None: continue
      scanned+=1;md5=None;info={}
-    elif folder=='GameCube':
-     identity=gamecube_game(p)
+    elif folder in ('GameCube','Wii'):
+     identity=wii_game(p) if folder=='Wii' else gamecube_game(p)
      if identity is None: continue
      scanned+=1; md5=None; info={}
     elif folder=='3DS':

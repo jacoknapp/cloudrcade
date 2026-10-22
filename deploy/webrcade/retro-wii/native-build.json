@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "image": "emscripten/emsdk@sha256:c2ac84c26ee40ae2f2c5a15bd3f9e608d1959e1b37413fa7f08138046a188dc5",
+  "platform": "linux/amd64",
+  "rustToolchain": "nightly-2026-05-10",
+  "sourceDateEpoch": 1789334235,
+  "memoryPages": 12288,
+  "patches": {
+    "0001-release-webgpu-resources.patch": "abb08ed6fffb9c1a633dd3207e5f60bbdc3cf62546c22feab8032ce6285fba69",
+    "0002-reuse-wasm-instances.patch": "d55859a987c5424bceaa4b1939cb08f7375c1cbec68f1cf938df7b5b3c744d9d",
+    "0003-direct-wasm-dispatch.patch": "61b2b702aeaa2010c754cc619363f2bb91cb0e6eabbd6c26894eebb9b3d66aa0",
+    "0004-heap-usage.patch": "44e580a5af74ad7ee1450c21b503c0b347188493f554f8df3f63582c0209923f",
+    "0005-bounded-state-buffers.patch": "ffaeee8346ffe69f98335f73750273d6a813ba867810043d3d85b14ee79666cb",
+    "0006-release-completed-load-undo.patch": "05d452956558a58176b2265ce3e1c0191a50d5affffd80e020d9bea56ce0414f",
+    "0007-pixel-depth-convention.patch": "efdfaf2ca5a109f701037c8b5c1b57042c971a34d0c170a0a9e8457f40bc51b1",
+    "0008-destination-alpha-shader.patch": "444b658224309f4c36bc3769a935fb56c09c64acba2073932eaffd421f5d153c",
+    "0009-compress-restore-rollback.patch": "7de837843d57f5f22dc5505f14fa3b5df8408d4da79a57953df9889da8012dd3",
+    "0010-fpr-locals-and-slice-totals.patch": "136b0730605720ece8159a07f67c41fdd43cfa62ee87a773b92e224f95eab5b8",
+    "0011-cache-shader-translations.patch": "c22d44bbe45ac00f3e0c019fa311324931a696a274cbdb840ff861b31a4b80fb",
+    "0012-webgpu-texture-decode.patch": "af3a4ae167ba0c7c6a8a75825204efc6dc104e561414aad5d9a4f12346b617a8",
+    "0013-snapshot-paired-scalar.patch": "a35c135f28984fc77d2ff44b3823e9872870ec70ac63d0457d14945cb95ce06e",
+    "0014-order-texture-transfers.patch": "2d297b1d7bbe5523dda2cfcfe7e722a9b6e29af6cb61dbc97ec56609e88a453c",
+    "0015-sampled-slice-timing.patch": "fe28f3aefa415a4e706c01f65d2f580918b3e2e1fef91f85cba3ccf7c1c721d8",
+    "0016-recycle-full-wasm-instance-cache.patch": "efdf63afe0f0f08baeda0d2059fb46d32a840dc0a2e8fa01e7053d1c20958a13",
+    "0017-release-recycled-wasm-functions.patch": "81afeeaf77098f713896489e6cb6749bf95c1e1e327037a6b516a954f2352193",
+    "0018-clock-evict-wasm-instances.patch": "84802209e9587200a8e5ca8310853b7fc46570dba004eee4b317c2f81ec5e260",
+    "0019-native-graphics-frame-skip.patch": "1574b0ed72c9d827a67063c44396e156f298dba7c3cb965bd4fe8953914f137b",
+    "0020-device-jit-cache-budget.patch": "f66b7c09e8dac1390643b4a1ac0a7562ae78a5f0e876821967499eeb76b57a32",
+    "0021-group-ram-accesses.patch": "93b6e1b47554d493219474e97cae4b4514abd7edb7929990f51775ddc82be745",
+    "0022-chain-compiled-blocks.patch": "ed4d291857e31c07ee437c791f5730f96e41d3f74be2857ecf357cefcbc9a75e"
+  },
+  "artifacts": {
+    "dolphin-core-upstream.wasm": "95be6a22df4233163aab55495022dacf13862d915ec5d31bb8181807dd223c5d",
+    "dolphin-core-upstream.js": "bb5d06543bb5a6ce4f1a27b236d33304d6f683ab07c011a4f8ea9f907307c89e"
+  },
+  "recipeSha256": "94288947ace541053f2b227147cfa038d7b1f60f230e5f9ebf6dad9ba1b547e8",
+  "sourceTreeSha256": "e7bb3610d177a097025fcc4c75f191590c41f3f5037197cad85ce3f49312433f",
+  "stateFormatId": "137f3d2c385d14ec772c06e6abc5dd26f308ee9ea8303cfe8fd881460aac74ad",
+  "baseNativeSourceSha256": "604822c543c7812ebb05d6fd74515c7b7831e8b81c23dc64708e2c2665230c20",
+  "patchSha256": "de59911230965e3b0b319ce46ce054fcd8fda3508e948c9808ab5ff3dd0d2da7"
+}

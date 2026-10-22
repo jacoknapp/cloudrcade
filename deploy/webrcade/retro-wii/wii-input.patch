@@ -1,0 +1,775 @@
+diff --git a/core/upstream/dolphin_web_core.cpp b/core/upstream/dolphin_web_core.cpp
+index 9f07725..b225e30 100644
+--- a/core/upstream/dolphin_web_core.cpp
++++ b/core/upstream/dolphin_web_core.cpp
+@@ -38,6 +38,9 @@
+ #include "Core/HW/EXI/EXI_Device.h"
+ #include "Core/HW/GCKeyboard.h"
+ #include "Core/HW/GCPad.h"
++#include "Core/HW/Wiimote.h"
++#include "Core/HW/SI/SI_Device.h"
++#include "Core/Config/WiimoteSettings.h"
+ #include "Core/HW/SystemTimers.h"
+ #include "Core/Host.h"
+ #include "Core/PowerPC/PowerPC.h"
+@@ -646,6 +649,10 @@ void EnsureRuntime()
+   Pad::Initialize();
+   Pad::InitializeGBA();
+   Keyboard::Initialize();
++  for (int port = 0; port < 4; ++port)
++    Config::SetBase(Config::GetInfoForSIDevice(port), SerialInterface::SIDEVICE_NONE);
++  Config::SetBase(Config::WIIMOTE_1_SOURCE, WiimoteSource::Emulated);
++  Wiimote::Initialize(Wiimote::InitializeMode::DO_NOT_WAIT_FOR_WIIMOTES);
+ 
+   // §27 savestate-load backend resync. Probe evidence: after
+   // State::Load the WebGPU command-ring producer (the dual-core GPU
+diff --git a/core/upstream/dolphin_web_discio.cpp b/core/upstream/dolphin_web_discio.cpp
+index be24a6b..7adf19c 100644
+--- a/core/upstream/dolphin_web_discio.cpp
++++ b/core/upstream/dolphin_web_discio.cpp
+@@ -1085,6 +1085,23 @@ const char* GetVideoStats()
+   return current_video_stats.c_str();
+ }
+ 
++// Wii-only build: preserve a coherent native snapshot for the 200 Hz Remote poll.
++int DolphinWeb_GetWiiInput(int index, std::uint32_t* mask, std::uint8_t* values)
++{
++  if (index != 0) return 0;
++  const std::lock_guard<std::mutex> lock(s_input_state_mutex);
++  *mask = s_input_state.mask;
++  values[0] = s_input_state.stick_x;
++  values[1] = s_input_state.stick_y;
++  values[2] = s_input_state.c_stick_x;
++  values[3] = s_input_state.c_stick_y;
++  values[4] = s_input_state.trigger_left;
++  values[5] = s_input_state.trigger_right;
++  values[6] = s_input_state.analog_a;
++  values[7] = s_input_state.analog_b;
++  return 1;
++}
++
+ int DolphinWeb_GetPadStatus(int pad_num, GCPadStatus* status)
+ {
+   if (!status || pad_num != 0)
+diff --git a/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp b/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
+index 7fc81f6..b9045df 100644
+--- a/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
++++ b/vendor/dolphin/Source/Core/Core/HW/WiimoteEmu/WiimoteEmu.cpp
+@@ -27,6 +27,10 @@
+ #include "Core/HW/WiimoteCommon/WiimoteConstants.h"
+ #include "Core/HW/WiimoteCommon/WiimoteHid.h"
+ #include "Core/HW/WiimoteEmu/DesiredWiimoteState.h"
++#ifdef __EMSCRIPTEN__
++#include <emscripten/emscripten.h>
++#include "InputCommon/InputConfig.h"
++#endif
+ #include "Core/HW/WiimoteEmu/Extension/Classic.h"
+ #include "Core/HW/WiimoteEmu/Extension/DesiredExtensionState.h"
+ #include "Core/HW/WiimoteEmu/Extension/DrawsomeTablet.h"
+@@ -50,6 +54,10 @@
+ #include "InputCommon/ControllerEmu/ControlGroup/ModifySettingsButton.h"
+ #include "InputCommon/ControllerEmu/ControlGroup/Tilt.h"
+ 
++#ifdef __EMSCRIPTEN__
++extern "C" int DolphinWeb_GetWiiInput(int index, u32* mask, u8* values);
++#endif
++
+ namespace WiimoteEmu
+ {
+ using namespace WiimoteCommon;
+@@ -479,6 +487,45 @@ GetPassthroughCameraPoints(ControllerEmu::IRPassthrough* ir_passthrough)
+ void Wiimote::BuildDesiredWiimoteState(DesiredWiimoteState* target_state,
+                                        SensorBarState sensor_bar_state)
+ {
++#ifdef __EMSCRIPTEN__
++  u32 mask = 0;
++  std::array<u8, 8> input{};
++  if (DolphinWeb_GetWiiInput(m_bt_device_index, &mask, input.data()))
++  {
++    // Same transport as GameCube; Wii owns the interpretation and build.
++    target_state->buttons.hex = 0;
++    target_state->camera_points = DesiredWiimoteState::DEFAULT_CAMERA;
++    constexpr std::array<u16, 13> buttons = {BUTTON_A, BUTTON_B, BUTTON_ONE, BUTTON_TWO,
++        BUTTON_PLUS, 0, 0, BUTTON_MINUS, PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT, BUTTON_HOME};
++    for (size_t bit = 0; bit < buttons.size(); ++bit)
++      if (mask & (1u << bit)) target_state->buttons.hex |= buttons[bit];
++    // Touch/mouse coordinates are normalized against the actual video rectangle.
++    if ((mask & (1u << 13)) && sensor_bar_state == SensorBarState::Enabled)
++    {
++      const u16 x = 80 + (255 - input[2]) * 863 / 255;
++      const u16 y = input[3] * 767 / 255;
++      target_state->camera_points[0] = CameraPoint({u16(x - 60), y}, 8);
++      target_state->camera_points[1] = CameraPoint({u16(x + 60), y}, 8);
++    }
++    target_state->acceleration = WiimoteCommon::AccelData({
++        u16(input[4] * 4), u16(input[5] * 4), u16(input[6] * 4)});
++    Nunchuk::DesiredState nunchuk{};
++    nunchuk.jx = input[0]; nunchuk.jy = input[1];
++    nunchuk.SetAccel({Nunchuk::ACCEL_ZERO_G << 2, Nunchuk::ACCEL_ZERO_G << 2,
++                      Nunchuk::ACCEL_ONE_G << 2});
++    nunchuk.SetButtons((mask & (1u << 5) ? Nunchuk::BUTTON_C : 0) |
++                       (mask & (1u << 6) ? Nunchuk::BUTTON_Z : 0));
++    // Upright/sideways Remote layouts must really unplug the Nunchuk.
++    // Dolphin's regular Update handles the extension-port disconnect event.
++    if (mask & (1u << 14)) target_state->extension.data = std::monostate{};
++    else target_state->extension.data = nunchuk;
++    const bool pointing = mask & ((1u << 13) | (1u << 15));
++    target_state->motion_plus = MotionPlus::GetGyroscopeData({
++        pointing ? (int((mask >> 16) & 255) - 128) / 12.f : 0.f,
++        pointing ? (int(input[7]) - 128) / 12.f : 0.f, 0.f});
++    return;
++  }
++#endif
+   // Hotkey / settings modifier
+   // Data is later accessed in IsSideways and IsUpright
+   m_hotkeys->UpdateState();
+@@ -675,6 +722,12 @@ void Wiimote::SendDataReport(const DesiredWiimoteState& target_state)
+ ButtonData Wiimote::GetCurrentlyPressedButtons()
+ {
+   const auto lock = GetStateLock();
++#ifdef __EMSCRIPTEN__
++  // Bluetooth reconnect polls this path before regular report generation starts.
++  DesiredWiimoteState browser_state;
++  BuildDesiredWiimoteState(&browser_state, SensorBarState::Disabled);
++  return browser_state.buttons;
++#endif
+ 
+   ButtonData buttons{};
+   m_buttons->GetState(&buttons.hex, button_bitmasks, m_input_override_function);
+@@ -966,4 +1019,24 @@ Common::Matrix44 Wiimote::GetTotalTransformation() const
+       Common::Quaternion::RotateX(m_imu_cursor_state.recentered_pitch)));
+ }
+ 
++#ifdef __EMSCRIPTEN__
++// Opt-in paused diagnostics: reads the same report builder used by Wii Bluetooth.
++// Never called in the frame loop and never changes controller state.
++extern "C" EMSCRIPTEN_KEEPALIVE const u32* DolphinWeb_GetWiiReport()
++{
++  static std::array<u32, 13> report{};
++  auto* remote = static_cast<Wiimote*>(::Wiimote::GetConfig()->GetController(0));
++  DesiredWiimoteState state;
++  remote->PrepareInput(&state, WiimoteCommon::HIDWiimote::SensorBarState::Enabled);
++  const auto* nunchuk = std::get_if<Nunchuk::DesiredState>(&state.extension.data);
++  report = {remote->GetCurrentlyPressedButtons().hex, state.acceleration.value.x, state.acceleration.value.y,
++      state.acceleration.value.z, state.camera_points[0].position.x,
++      state.camera_points[0].position.y, state.camera_points[1].position.x,
++      state.camera_points[1].position.y, nunchuk ? u32(nunchuk->jx) : 128u, nunchuk ? u32(nunchuk->jy) : 128u,
++      nunchuk ? u32(nunchuk->GetButtons()) : 0u,
++      state.motion_plus.has_value() ? 1u : 0u, u32(state.extension.data.index())};
++  return report.data();
++}
++#endif
++
+ }  // namespace WiimoteEmu
+diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+index f928a91..161853a 100644
+--- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
++++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
+@@ -120,7 +120,7 @@ StaticExitLinks::Stats s_static_link_stats;
+ #endif
+ // Selected before boot, then sealed before allocating callback operands. The
+ // shared atomic lets the actual compiling pthread configure its own JS table.
+-constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 16384;
++constexpr u32 DEFAULT_WASM_INSTANCE_CAPACITY = 32768;
+ constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
+ std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
+ extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
+@@ -2010,6 +2010,31 @@ void WriteRamU16BE(u8* ram, u32 offset, u16 value)
+   ram[offset + 1] = static_cast<u8>(value);
+ }
+ 
++// Retarget a C++ fast helper from MEM1 to Wii EXRAM when the access is
++// translated by a cached DBAT into EXRAM and stays within one BAT page. Leaves
++// the MEM1 selection unchanged otherwise, so callers keep their MMU fallback.
++static void SelectWiiMem2Window(Core::System& system, const PowerPC::PowerPCState& ppc_state,
++                                u32 address, u32 bytes, u8*& ram, u32& offset, u32& ram_size)
++{
++  if (offset < ram_size || !ppc_state.msr.DR || ppc_state.m_enable_dcache || !system.IsWii())
++    return;
++  auto& memory = system.GetMemory();
++  if (memory.GetEXRAM() == nullptr || bytes == 0 || bytes > PowerPC::BAT_PAGE_SIZE ||
++      (address & (PowerPC::BAT_PAGE_SIZE - 1)) > PowerPC::BAT_PAGE_SIZE - bytes)
++    return;
++  const u32 entry = system.GetMMU().GetDBATTable()[address >> PowerPC::BAT_INDEX_SHIFT];
++  if ((entry & (PowerPC::BAT_MAPPED_BIT | PowerPC::BAT_PHYSICAL_BIT | PowerPC::BAT_WI_BIT)) !=
++      (PowerPC::BAT_MAPPED_BIT | PowerPC::BAT_PHYSICAL_BIT))
++    return;
++  const u32 physical =
++      (entry & PowerPC::BAT_RESULT_MASK) | (address & (PowerPC::BAT_PAGE_SIZE - 1));
++  if ((physical >> 28) != 0x1)
++    return;
++  ram = memory.GetEXRAM();
++  offset = physical & 0x0fffffff;
++  ram_size = memory.GetExRamSizeReal();
++}
++
+ void WriteRamU32BE(u8* ram, u32 offset, u32 value)
+ {
+   ram[offset] = static_cast<u8>(value >> 24);
+@@ -2092,13 +2117,13 @@ bool TryFastPairedQuantizedMemory(Core::System& system, PowerPC::PowerPCState& p
+ 
+   const u32 element_bytes = PairedQuantizedElementBytes(type);
+   const u32 bytes = inst.W ? element_bytes : element_bytes * 2;
+-  const u32 offset = address & 0x3fffffff;
+-  const u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u32 offset = address & 0x3fffffff;
++  u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u8* ram = system.GetMemory().GetRAM();
++  SelectWiiMem2Window(system, ppc_state, address, bytes, ram, offset, ram_size);
+   if (offset > ram_size - bytes)
+     return false;
+ 
+-  u8* ram = system.GetMemory().GetRAM();
+-
+   if (load)
+   {
+     double ps0 = 0.0;
+@@ -2578,6 +2603,10 @@ struct WasmStateLayout
+   u32 ram_size_real;
+   u32 l1_base;
+   u32 l1_size;
++  // Wii MEM2 direct path. Nonzero only while the DBATs map the whole cached
++  // 0x9xxxxxxx window onto EXRAM; otherwise generated code is unchanged.
++  u32 exram_base = 0;
++  u32 exram_size_real = 0;
+ };
+ 
+ constexpr u32 WASM_IMPORT_FASTCHECK_GPFIFO_INDEX = 14;
+@@ -3697,6 +3726,30 @@ void EmitIsMem1Address(std::vector<u8>& body, const WasmStateLayout& layout)
+   body.push_back(0x4d);
+ }
+ 
++void EmitIsMem2AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
++{
++  // (ea >> 28) == 0x9: the cached MEM2 BAT window verified at compile time.
++  EmitLocalGet(body, 1);
++  EmitI32Const(body, 0xf0000000);
++  body.push_back(0x71);
++  EmitI32Const(body, 0x90000000);
++  body.push_back(0x46);
++  // (ea & 0x0fffffff) <= exram_size_real - bytes
++  EmitLocalGet(body, 1);
++  EmitI32Const(body, 0x0fffffff);
++  body.push_back(0x71);
++  EmitI32Const(body, layout.exram_size_real - bytes);
++  body.push_back(0x4d);
++  body.push_back(0x71);
++  // Data translation must be on (MSR.DR); real mode takes the MMU helper.
++  EmitStateLoadU32(body, layout.msr_offset);
++  EmitI32Const(body, 4);
++  body.push_back(0x76);
++  EmitI32Const(body, 1);
++  body.push_back(0x71);
++  body.push_back(0x71);
++}
++
+ void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
+ {
+   EmitLocalGet(body, 1);
+@@ -3704,6 +3757,15 @@ void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layo
+   body.push_back(0x71);
+   EmitI32Const(body, layout.ram_size_real - bytes);
+   body.push_back(0x4d);
++  if (layout.exram_size_real < 32)
++    return;
++  // MEM1 hits skip the MEM2 test entirely.
++  body.push_back(0x04);
++  body.push_back(0x7f);
++  EmitI32Const(body, 1);
++  body.push_back(0x05);
++  EmitIsMem2AddressForSize(body, layout, bytes);
++  body.push_back(0x0b);
+ }
+ 
+ void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
+@@ -3719,11 +3781,7 @@ void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& l
+ 
+ void EmitIsMem1LineAddress(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
+-  EmitLocalGet(body, 1);
+-  EmitI32Const(body, 0x3fffffff);
+-  body.push_back(0x71);
+-  EmitI32Const(body, layout.ram_size_real - 32);
+-  body.push_back(0x4d);
++  EmitIsMem1AddressForSize(body, layout, 32);
+ }
+ 
+ void EmitIsOutsideLowDcbzHackRange(std::vector<u8>& body)
+@@ -3747,8 +3805,20 @@ void EmitRamOffset(std::vector<u8>& body)
+ void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
+ {
+   if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
+-  EmitI32Const(body, layout.ram_base);
++  if (layout.exram_size_real < 32)
++  {
++    EmitI32Const(body, layout.ram_base);
++    EmitRamOffset(body);
++    body.push_back(0x6a);
++    return;
++  }
+   EmitRamOffset(body);
++  EmitI32Const(body, layout.exram_base - 0x10000000);
++  EmitI32Const(body, layout.ram_base);
++  EmitLocalGet(body, 1);
++  EmitI32Const(body, 0x10000000);
++  body.push_back(0x71);
++  body.push_back(0x1b);
+   body.push_back(0x6a);
+ }
+ 
+@@ -3966,6 +4036,25 @@ void EmitReadU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
++    body.push_back(0x04);
++    body.push_back(0x7f);
++    EmitRamAddress(body, layout);
++    body.push_back(0x28);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    EmitLocalSet(body, 2);
++    EmitBswap32FromLocal(body, 2);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    body.push_back(0x10);
++    EmitU32Leb(body, 0);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -3999,6 +4088,23 @@ void EmitReadU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout)
+     EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u8));
++    body.push_back(0x04);
++    body.push_back(0x7f);
++    EmitRamAddress(body, layout);
++    body.push_back(0x2d);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    body.push_back(0x10);
++    EmitU32Leb(body, 2);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4031,6 +4137,25 @@ void EmitReadU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
++    body.push_back(0x04);
++    body.push_back(0x7f);
++    EmitRamAddress(body, layout);
++    body.push_back(0x2f);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    EmitLocalSet(body, 2);
++    EmitBswap16FromLocal(body, 2);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    body.push_back(0x10);
++    EmitU32Leb(body, 4);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4078,6 +4203,27 @@ void EmitWriteU32MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
+     body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u32));
++    body.push_back(0x04);
++    body.push_back(0x40);
++    EmitBswap32FromLocal(body, 2);
++    EmitLocalSet(body, 2);
++    EmitRamAddress(body, layout);
++    EmitLocalGet(body, 2);
++    body.push_back(0x36);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    EmitLocalGet(body, 2);
++    body.push_back(0x10);
++    EmitU32Leb(body, 1);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4113,6 +4259,25 @@ void EmitWriteU8MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layout
+     body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u8));
++    body.push_back(0x04);
++    body.push_back(0x40);
++    EmitRamAddress(body, layout);
++    EmitLocalGet(body, 2);
++    body.push_back(0x3a);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    EmitLocalGet(body, 2);
++    body.push_back(0x10);
++    EmitU32Leb(body, 3);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -4146,6 +4311,27 @@ void EmitWriteU16MaybeDirect(std::vector<u8>& body, const WasmStateLayout& layou
+     body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
+     return;
+   }
++  if (layout.exram_size_real >= 32)
++  {
++    EmitIsMem1AddressForSize(body, layout, sizeof(u16));
++    body.push_back(0x04);
++    body.push_back(0x40);
++    EmitBswap16FromLocal(body, 2);
++    EmitLocalSet(body, 2);
++    EmitRamAddress(body, layout);
++    EmitLocalGet(body, 2);
++    body.push_back(0x3b);
++    body.push_back(0x00);
++    EmitU32Leb(body, 0);
++    body.push_back(0x05);
++    EmitLocalGet(body, 0);
++    EmitLocalGet(body, 1);
++    EmitLocalGet(body, 2);
++    body.push_back(0x10);
++    EmitU32Leb(body, 5);
++    body.push_back(0x0b);
++    return;
++  }
+   EmitLocalGet(body, 1);
+   EmitI32Const(body, 0x3fffffff);
+   body.push_back(0x71);
+@@ -8131,6 +8317,36 @@ int CompileWasmCachedInterpreterBlockForTest(const std::vector<u8>& bytes)
+       fast_melee_status_call_index, fast_melee_service_poll_call_index);
+ }
+ 
++// The Wasm EXRAM path assumes ea & 0x3fffffff is physical for the cached 0x9
++// window. Prove it from the live DBAT table for the whole EXRAM extent. DBAT
++// updates flush the JIT (MMU::DBATUpdated), so a stale proof is never reused.
++u32 s_wasm_mem2_window_bytes = 0;
++u32 s_wasm_mem2_stop_entry = 0;
++// Returns the length of the verified window starting at 0x90000000 (0 = off).
++// Accesses beyond it keep the MMU helper.
++static u32 WasmMem2DirectWindow(Core::System& system, const PowerPC::PowerPCState& ppc_state)
++{
++  auto& memory = system.GetMemory();
++  if (!system.IsWii() || memory.GetEXRAM() == nullptr || ppc_state.m_enable_dcache)
++    return 0;
++  const u32 size = std::min<u32>(memory.GetExRamSizeReal(), 0x10000000);
++  const auto& dbat = system.GetMMU().GetDBATTable();
++  u32 offset = 0;
++  for (; offset < size; offset += PowerPC::BAT_PAGE_SIZE)
++  {
++    const u32 entry = dbat[(0x90000000 + offset) >> PowerPC::BAT_INDEX_SHIFT];
++    if ((entry & (PowerPC::BAT_MAPPED_BIT | PowerPC::BAT_PHYSICAL_BIT | PowerPC::BAT_WI_BIT)) !=
++            (PowerPC::BAT_MAPPED_BIT | PowerPC::BAT_PHYSICAL_BIT) ||
++        (entry & PowerPC::BAT_RESULT_MASK) != 0x10000000 + offset)
++    {
++      s_wasm_mem2_stop_entry = entry;
++      break;
++    }
++  }
++  s_wasm_mem2_window_bytes = offset;
++  return offset;
++}
++
+ WasmStateLayout MakeWasmBlockTestLayout(PowerPC::PowerPCState& state, u8* ram, u32 ram_size)
+ {
+   const auto state_base = reinterpret_cast<std::uintptr_t>(&state);
+@@ -9651,8 +9867,9 @@ static bool TryFastRamWordLoadStore(Core::System& system, PowerPC::PowerPCState&
+                                        u32(inst.SIMM_16));
+ 
+   u8* ram = system.GetMemory().GetRAM();
+-  const u32 offset = address & 0x3fffffff;
+-  const u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u32 offset = address & 0x3fffffff;
++  u32 ram_size = system.GetMemory().GetRamSizeReal();
++  SelectWiiMem2Window(system, ppc_state, address, sizeof(u32), ram, offset, ram_size);
+   const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
+                       ram_size - offset >= sizeof(u32);
+ 
+@@ -9728,9 +9945,10 @@ static bool TryFastRamByteHalfLoadStore(Core::System& system, PowerPC::PowerPCSt
+                                        u32(inst.SIMM_16));
+ 
+   u8* ram = system.GetMemory().GetRAM();
+-  const u32 offset = address & 0x3fffffff;
+-  const u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u32 offset = address & 0x3fffffff;
++  u32 ram_size = system.GetMemory().GetRamSizeReal();
+   const u32 bytes = (load_half || store_half) ? sizeof(u16) : sizeof(u8);
++  SelectWiiMem2Window(system, ppc_state, address, bytes, ram, offset, ram_size);
+   const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
+                       ram_size - offset >= bytes;
+ 
+@@ -9800,8 +10018,9 @@ static bool TryFastRamMultiwordLoadStore(Core::System& system, PowerPC::PowerPCS
+   const u32 register_count = 32 - inst.RD;
+   const u32 bytes = register_count * sizeof(u32);
+   u8* ram = system.GetMemory().GetRAM();
+-  const u32 offset = start_address & 0x3fffffff;
+-  const u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u32 offset = start_address & 0x3fffffff;
++  u32 ram_size = system.GetMemory().GetRamSizeReal();
++  SelectWiiMem2Window(system, ppc_state, start_address, bytes, ram, offset, ram_size);
+   const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
+                       ram_size - offset >= bytes;
+ 
+@@ -10162,9 +10381,10 @@ static bool TryFastRamFloatLoadStore(Core::System& system, PowerPC::PowerPCState
+   }
+ 
+   u8* ram = system.GetMemory().GetRAM();
+-  const u32 offset = address & 0x3fffffff;
+-  const u32 ram_size = system.GetMemory().GetRamSizeReal();
++  u32 offset = address & 0x3fffffff;
++  u32 ram_size = system.GetMemory().GetRamSizeReal();
+   const u32 bytes = load_double ? sizeof(u64) : sizeof(u32);
++  SelectWiiMem2Window(system, ppc_state, address, bytes, ram, offset, ram_size);
+   const bool in_ram =
+       !ppc_state.msr.LE && ram != nullptr && offset < ram_size && ram_size - offset >= bytes;
+ 
+@@ -11606,6 +11826,8 @@ bool CachedInterpreter::TryWriteWasmBlock(u32 nextPC)
+       m_system.GetMemory().GetRamSizeReal(),
+       static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetL1Cache())),
+       m_system.GetMemory().GetL1CacheSize(),
++      static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetEXRAM())),
++      WasmMem2DirectWindow(m_system, m_ppc_state),
+   };
+   const bool write_npc =
+       did_merge ? merge_write_npc : (compiled_entire_block && !compiled_block_ends_with_branch);
+@@ -12058,6 +12280,8 @@ extern "C" const char* GetPpcWasmHelperStats()
+ 
+   std::ostringstream out;
+   out << (applied_policy < 2 ? "tier:guarded " : "tier:mixed ");
++  out << "mem2win:" << s_wasm_mem2_window_bytes << "/stop:" << std::hex << s_wasm_mem2_stop_entry
++      << std::dec << " ";
+   out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
+   const u32 average_prefix =
+       s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
+@@ -13170,6 +13394,179 @@ extern "C" int RunPpcWasmPairedQuantizedMemorySmoke()
+   return state.npc == 0x80003414 ? 1 : 60;
+ }
+ 
++// Wii MEM2 direct-path smoke: fake MEM1/EXRAM buffers, MSR.FP|DR. Every
++// emitter family must address EXRAM for the cached 0x9 window and still
++// address MEM1 for 0x8. Must run before a disc boots (clobbers PPC state).
++// Grouped transfers must preserve the original MEM2 fallback exactly.
++static int RunWasmMem2GroupSmoke(const WasmStateLayout& layout,
++                                std::array<u8, 256>& ram, std::array<u8, 256>& exram)
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  const u32 previous_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
++  struct Restore { u32 mask; ~Restore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } restore{previous_mask};
++  for (u32 cache = 0; cache < 2; ++cache)
++  for (u32 space : {0x80000000u, 0x90000000u})
++  {
++    std::vector<PPCAnalyst::CodeOp> ops;
++    constexpr std::array<u32, 6> codes{36,32,52,48,54,50};
++    constexpr std::array<u32, 6> regs{4,3,1,2,3,4};
++    constexpr std::array<u32, 6> offsets{0x10,0x10,0x20,0x20,0x28,0x28};
++    for (u32 j = 0; j < codes.size(); ++j)
++    {
++      auto op = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(codes[j],regs[j],2,offsets[j]),0x80003f00+j*4);
++      op.regsIn[2] = true;
++      if (j == 0) op.regsIn[4] = true;
++      if (j == 1) op.regsOut[3] = true;
++      ops.push_back(op);
++    }
++    int handles[2]{};
++    for (u32 grouped=0;grouped<2;++grouped)
++    {
++      s_dolphin_web_disable_mask.store((cache?DOLPHIN_WEB_DISABLE_REGALLOC:0)|
++          (grouped?0:DOLPHIN_WEB_DISABLE_MEMORY_GROUPS),std::memory_order_relaxed);
++      const auto bytes=BuildWasmCachedInterpreterBlock(ops,layout,0x80003f18,true,false,false,true);
++      handles[grouped]=bytes.empty()?-1:CompileWasmCachedInterpreterBlockForTest(bytes);
++      if(handles[grouped]<=0)return 1;
++    }
++    std::array<u32,32> expected_gpr{};std::array<u64,64> expected_fp{};
++    std::array<u8,256> expected_ram{},expected_exram{};
++    for(u32 grouped=0;grouped<2;++grouped)
++    {
++      ram.fill(0xa5);exram.fill(0xa5);
++      for(u32 j=0;j<32;++j) {state.gpr[j]=j*0x11111111u;state.ps[j].SetBoth(0.25+j,-0.5-j);}
++      state.gpr[2]=space;state.gpr[4]=0x12345678;state.ps[1].SetBoth(1.25,-2.5);
++      state.ps[3].SetPS0(u64{0x7ff0000000001234});
++      state.pc=state.npc=0x80003f00;state.downcount=1234;state.Exceptions=0;
++      state.msr.Hex=(1u<<13)|(1u<<4);state.fpscr.Hex=0;state.cr.Set(0x12345678);
++      if(DolphinWeb_CachedInterpreterRunWasmBlockForTest(handles[grouped],static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)))!=0)return 2;
++      if(state.pc!=0x80003f00||state.npc!=0x80003f18||state.downcount!=1234||state.Exceptions||state.fpscr.Hex||state.cr.Get()!=0x12345678)return 3;
++      const auto& other=space==0x90000000u?ram:exram;
++      if(!std::all_of(other.begin(),other.end(),[](u8 value){return value==0xa5;}))return 4;
++      if(!grouped)
++      {
++        for(u32 j=0;j<32;++j){expected_gpr[j]=state.gpr[j];expected_fp[j*2]=state.ps[j].PS0AsU64();expected_fp[j*2+1]=state.ps[j].PS1AsU64();}
++        expected_ram=ram;expected_exram=exram;
++      }
++      else
++      {
++        for(u32 j=0;j<32;++j)if(expected_gpr[j]!=state.gpr[j]||expected_fp[j*2]!=state.ps[j].PS0AsU64()||expected_fp[j*2+1]!=state.ps[j].PS1AsU64())return 5;
++        if(expected_ram!=ram||expected_exram!=exram)return 6;
++      }
++    }
++  }
++  ram.fill(0);exram.fill(0);
++  return 0;
++}
++
++extern "C" EMSCRIPTEN_KEEPALIVE int RunPpcWasmMem2Smoke()
++{
++  auto& state = Core::System::GetInstance().GetPPCState();
++  std::array<u8, 256> ram{};
++  std::array<u8, 256> exram{};
++  state.npc = 0;
++  state.msr.Hex = (1u << 13) | (1u << 4);
++  state.Exceptions = 0;
++  state.spr[SPR_HID0] = 1u << 14;
++  state.spr[SPR_HID2] = 1u << 31;
++  state.spr[SPR_GQR0] = 0;
++  state.m_enable_dcache = false;
++  WasmStateLayout layout =
++      MakeWasmBlockTestLayout(state, ram.data(), static_cast<u32>(ram.size()));
++  layout.exram_base = static_cast<u32>(reinterpret_cast<std::uintptr_t>(exram.data()));
++  layout.exram_size_real = static_cast<u32>(exram.size());
++  const int group_result = RunWasmMem2GroupSmoke(layout, ram, exram);
++  if (group_result) return 1000 + group_result;
++  auto run_op = [&](UGeckoInstruction inst) {
++    const std::array<PPCAnalyst::CodeOp, 1> ops = {MakeWasmBlockTestOp(inst, 0x80003500)};
++    const std::vector<u8> bytes = BuildWasmCachedInterpreterBlock(ops, layout, 0x80003504, true);
++    if (bytes.empty())
++      return -1;
++    const int handle = CompileWasmCachedInterpreterBlockForTest(bytes);
++    if (handle <= 0)
++      return -2;
++    return DolphinWeb_CachedInterpreterRunWasmBlockForTest(
++        handle, static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
++  };
++  auto xform = [](u32 rd, u32 ra, u32 rb, u32 xo) {
++    return UGeckoInstruction{(31u << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (xo << 1)};
++  };
++  auto word = [](const std::array<u8, 256>& m, u32 o) { return ReadRamU32BE(m.data(), o); };
++
++  WriteRamU32BE(exram.data(), 0x10, 0x11223344);
++  WriteRamU32BE(ram.data(), 0x10, 0x55667788);
++  WriteRamU32BE(exram.data(), 0x60, 0x3fc00000);
++  WriteRamU32BE(exram.data(), 0x64, 0xc0100000);
++  WriteRamU32BE(exram.data(), 0x68, 0x40091eb8);
++  WriteRamU32BE(exram.data(), 0x6c, 0x51eb851f);
++  state.gpr[2] = 0x90000000;
++  state.gpr[5] = 0x80000000;
++  state.gpr[6] = 0x10;
++
++  // lwz r3,0x10(r2) -> EXRAM; lwz r3,0x10(r5) -> MEM1.
++  if (run_op(EncodeDFormForWasmBlockTest(32, 3, 2, 0x10)) != 0 || state.gpr[3] != 0x11223344)
++    return 10;
++  if (run_op(EncodeDFormForWasmBlockTest(32, 3, 5, 0x10)) != 0 || state.gpr[3] != 0x55667788)
++    return 11;
++  // lwzx r3,r2,r6
++  state.gpr[3] = 0;
++  if (run_op(xform(3, 2, 6, 23)) != 0 || state.gpr[3] != 0x11223344)
++    return 12;
++  // lbz / lhz / lha
++  if (run_op(EncodeDFormForWasmBlockTest(34, 3, 2, 0x11)) != 0 || state.gpr[3] != 0x22)
++    return 13;
++  if (run_op(EncodeDFormForWasmBlockTest(40, 3, 2, 0x12)) != 0 || state.gpr[3] != 0x3344)
++    return 14;
++  WriteRamU32BE(exram.data(), 0x14, 0xfffe0000);
++  if (run_op(EncodeDFormForWasmBlockTest(42, 3, 2, 0x14)) != 0 || state.gpr[3] != 0xfffffffe)
++    return 15;
++  // stw / stwx / sth / stb
++  state.gpr[4] = 0xa1b2c3d4;
++  if (run_op(EncodeDFormForWasmBlockTest(36, 4, 2, 0x20)) != 0 || word(exram, 0x20) != 0xa1b2c3d4 ||
++      word(ram, 0x20) != 0)
++    return 20;
++  state.gpr[6] = 0x24;
++  if (run_op(xform(4, 2, 6, 151)) != 0 || word(exram, 0x24) != 0xa1b2c3d4)
++    return 21;
++  if (run_op(EncodeDFormForWasmBlockTest(44, 4, 2, 0x28)) != 0 || word(exram, 0x28) != 0xc3d40000)
++    return 22;
++  if (run_op(EncodeDFormForWasmBlockTest(38, 4, 2, 0x2c)) != 0 || word(exram, 0x2c) != 0xd4000000)
++    return 23;
++  if (run_op(EncodeDFormForWasmBlockTest(36, 4, 5, 0x20)) != 0 || word(ram, 0x20) != 0xa1b2c3d4)
++    return 24;
++  // lfs / lfd / stfs / stfd
++  if (run_op(EncodeDFormForWasmBlockTest(48, 1, 2, 0x60)) != 0 ||
++      !NearlyEqualForWasmBlockTest(state.ps[1].PS0AsDouble(), 1.5))
++    return 30;
++  if (run_op(EncodeDFormForWasmBlockTest(50, 2, 2, 0x68)) != 0 ||
++      !NearlyEqualForWasmBlockTest(state.ps[2].PS0AsDouble(), 3.14))
++    return 31;
++  if (run_op(EncodeDFormForWasmBlockTest(52, 1, 2, 0x70)) != 0 || word(exram, 0x70) != 0x3fc00000)
++    return 32;
++  if (run_op(EncodeDFormForWasmBlockTest(54, 2, 2, 0x78)) != 0 || word(exram, 0x78) != 0x40091eb8 ||
++      word(exram, 0x7c) != 0x51eb851f)
++    return 33;
++  // psq_l f3,0x60(r2),0,0 (float GQR) and psq_st
++  if (run_op(EncodeDFormForWasmBlockTest(56, 3, 2, 0x60)) != 0 ||
++      !NearlyEqualForWasmBlockTest(state.ps[3].PS0AsDouble(), 1.5) ||
++      !NearlyEqualForWasmBlockTest(state.ps[3].PS1AsDouble(), -2.25))
++    return 40;
++  if (run_op(EncodeDFormForWasmBlockTest(60, 3, 2, 0x80)) != 0 || word(exram, 0x80) != 0x3fc00000 ||
++      word(exram, 0x84) != 0xc0100000)
++    return 41;
++  // dcbz 0,r7 clears one EXRAM line.
++  for (u32 i = 0xa0; i < 0xc0; ++i)
++    exram[i] = 0xee;
++  state.gpr[7] = 0x900000a4;
++  if (run_op(xform(0, 0, 7, 1014)) != 0)
++    return 50;
++  for (u32 i = 0xa0; i < 0xc0; ++i)
++    if (exram[i] != 0)
++      return 51;
++  if (exram[0x9f] != 0 || exram[0xc0] != 0)
++    return 52;
++  return state.npc == 0x80003504 ? 1 : 60;
++}
++
+ extern "C" int RunPpcWasmFloatCompareSmoke()
+ {
+   auto& state = Core::System::GetInstance().GetPPCState();
+diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+--- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
++++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/WasmInstanceCache.js
+@@ -5,8 +5,8 @@
+ (() => {
+   const entries = new Map();
+   const signatures = new Map();
+-  let capacity = 16384;
++  let capacity = 32768;
+   let configured = false;
+   // Handles become reusable only after the CPU unlinks every native user
+   // at a safe point. Permanent helper slots never enter this free list.
+   const free = [];

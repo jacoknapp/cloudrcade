@@ -145,7 +145,34 @@ def patch_bundle(raw):
  assert patched.count(startup_notes)==1,'Unexpected startup notes timer'
  patched=patched.replace(startup_notes,b'setTimeout((()=>{this.state.mode===this.ScreenEnum.BROWSE&&!this.ctx.isDialogOpen()&&this.ctx.showReleaseNotes(!0)}),0)')
 
+ patched=patch_wii(patched)
  return re.sub(rb'([\"\'])wrcad(\.[A-Za-z0-9_.-]+)\1', lambda m: b'((window.WrcadCloudConfig&&window.WrcadCloudConfig.storagePrefix)||\"webrcade\")+'+b'\"'+m[2]+b'\"', patched)
+
+def patch_wii(raw):
+ # Packaged Wii is available by default; only its optional readout is a preference.
+ available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.wiiUrl)'
+ perf=b'(function(){try{return localStorage.getItem("wrcad.wii.perf.v1")==="1"}catch(e){return!1}})()'
+ active=available
+ app=(b'{key:"retro-dolphin-wii",alias:"wii",name:"Nintendo Wii",coreName:"Dolphin",slowExit:!0,'
+  b'location:"/experimental/wii/",background:"/experimental/wii/wii.svg",thumbnail:"/experimental/wii/wii.svg",'
+  b'description:"Wii browser core. Touch or mouse motion. Device WebGPU required.",validate:Je,extensions:["iso","wbfs","ciso"],multiThreaded:!0,defaults:{rom:""}}')
+ raw=raw.replace(b'{key:tt.RETRO_MELONDS,alias:tt.NDS,',b'...('+active+b'?['+app+b']:[]),{key:tt.RETRO_MELONDS,alias:tt.NDS,',1)
+ raw=raw.replace(b'st(rt,tt.NDS,tt.RETRO_MELONDS),',b'st(rt,tt.NDS,tt.RETRO_MELONDS),'+active+b'&&st(rt,"wii","retro-dolphin-wii"),',1)
+ raw=raw.replace(b't.ps2PerfRef=i.a.createRef(),t.gridComps=',b't.ps2PerfRef=i.a.createRef(),t.wiiPerfRef=i.a.createRef(),t.gridComps=',1)
+ raw=raw.replace(b't.gridComps=[[t.perfRef],[t.litRef],',b't.gridComps=[...('+available+b'?[[t.wiiPerfRef]]:[]),[t.perfRef],[t.litRef],',1)
+ marker=b'n.render=function(){var t=this.context.focusGrid,n=this,r=this.perfRef,l=this.litRef,g=this.gcPerfRef,p=this.ps2PerfRef,c=this.props.values,u=this.props.setValues;return['
+ rows=b''
+ for ref,label,field in [(b'wiiPerfRef',b'Wii performance readout',b'wiiPerf')]:
+  rows+=available+b'?i.a.createElement(ka,null,i.a.createElement(Ta,null,"'+label+b'"),i.a.createElement(La,null,i.a.createElement(Va,{ref:n.'+ref+b',onPad:function(e){return t.moveFocus(e.type,n.'+ref+b')},onChange:function(e){u(j({},c,{'+field+b':e.target.checked}))},checked:c.'+field+b'}))):null,'
+ assert raw.count(marker)==1,'Wii settings anchor changed'
+ raw=raw.replace(marker,marker+rows)
+ raw=raw.replace(b'window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl',b'window.WrcadCloudConfig.wiiUrl||window.WrcadCloudConfig.enable3DS||window.WrcadCloudConfig.gamecubeUrl',1)
+ raw=raw.replace(b'expApps:Yt.isExpAppsEnabled(),vsync:',b'wiiPerf:'+perf+b',expApps:Yt.isExpAppsEnabled(),vsync:',1)
+ save=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url&&s.ps2Perf!==c.ps2Perf)?'
+ raw=raw.replace(save,available+b'&&(s.wiiPerf!==c.wiiPerf)?(function(){try{localStorage.setItem("wrcad.wii.perf.v1",c.wiiPerf?"1":"0");if(s.ps2Perf!==c.ps2Perf)localStorage.setItem("wrcad.ps2.perf.v1",c.ps2Perf?"1":"0")}catch(e){}return Yt.save().finally(function(){window.location.reload()})})():'+save,1)
+ parse=b'_parseFeed=function(e){var t=this,n=Pt.instance;'
+ raw=raw.replace(parse,parse+b'if(!'+active+b'&&Array.isArray(e.categories)){e.categories=e.categories.map(function(c){return Object.assign({},c,{items:Array.isArray(c.items)?c.items.filter(function(a){return a.type!=="wii"&&a.type!=="retro-dolphin-wii"}):c.items})}).filter(function(c){return !Array.isArray(c.items)||c.items.length});if(!e.categories.length){this.filterCategories=!1;e.categories=[{title:"No games",items:[]}]}}',1)
+ return raw
 
 if __name__=='__main__':
  source=os.environ.get('WEBRCADE_SOURCE_ROOT')

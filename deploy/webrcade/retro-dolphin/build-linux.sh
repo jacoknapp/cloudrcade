@@ -9,9 +9,9 @@ export RUSTUP_HOME=/toolchain/rustup CARGO_HOME=/toolchain/cargo
 export PATH=/toolchain/cargo/bin:$PATH
 export SOURCE_DATE_EPOCH=1789334235
 if [ ! -x /toolchain/cargo/bin/rustc ]; then
-  curl --fail --location --proto '=https' --tlsv1.2 https://sh.rustup.rs -o /toolchain/rustup-init.sh
+  curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/rust-lang/rustup/d95a37b6ab92cc1e455d1576039333c97ca3e2c5/rustup-init.sh -o /toolchain/rustup-init.sh
   printf '%s  %s\n' 7d0ea0f8eba7fa1ebfe998091cd7ec4501e33ec5ca6b884eb4d894d7da5170af /toolchain/rustup-init.sh | sha256sum --check
-  sh /toolchain/rustup-init.sh -y --no-modify-path --profile minimal --default-toolchain nightly-2026-05-10
+  RUSTUP_VERSION=1.29.1 sh /toolchain/rustup-init.sh -y --no-modify-path --profile minimal --default-toolchain nightly-2026-05-10
 fi
 rustup component add rust-src --toolchain nightly-2026-05-10
 [ "$(rustc --version)" = 'rustc 1.97.0-nightly (82bee9650 2026-05-09)' ]
