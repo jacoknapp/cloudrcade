@@ -30,12 +30,12 @@
     "0022-chain-compiled-blocks.patch": "ed4d291857e31c07ee437c791f5730f96e41d3f74be2857ecf357cefcbc9a75e"
   },
   "artifacts": {
-    "dolphin-core-upstream.wasm": "f914e98a3d5e3ff85e3508a3baf756080121f2998e2cc53e639edbfdd3f3bde1",
+    "dolphin-core-upstream.wasm": "332e168053c2a32d782fad5bf86ca2002daf5fb14c00c37af706d4c17bd6fd87",
     "dolphin-core-upstream.js": "10cecc332837783c4d4907adc58d92f94931b7476cf180da899a00a59d835080"
   },
   "recipeSha256": "94288947ace541053f2b227147cfa038d7b1f60f230e5f9ebf6dad9ba1b547e8",
-  "sourceTreeSha256": "2712c25d35051c580214400e909bf63c81b78b04a1fb0aba326bba20af5301ed",
+  "sourceTreeSha256": "4ee9587ffadcf0e6169d56555952bae414d0b720c20fd91de30c146ada4d4f59",
   "stateFormatId": "137f3d2c385d14ec772c06e6abc5dd26f308ee9ea8303cfe8fd881460aac74ad",
   "baseNativeSourceSha256": "604822c543c7812ebb05d6fd74515c7b7831e8b81c23dc64708e2c2665230c20",
-  "patchSha256": "45df157c34a25131a505f065aa43829062a2b7eb6b3fc20acd721883c44f0d1c"
+  "patchSha256": "0133620c30f8b5d4c4276cf1f4709f722390d8be88aa52a865a499fdfdf36f69"
 }

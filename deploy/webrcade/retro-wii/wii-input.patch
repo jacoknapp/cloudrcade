@@ -164,7 +164,15 @@ index 7fc81f6..b9045df 100644
 diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 --- a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
 +++ b/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInterpreter.cpp
-@@ -120,7 +120,7 @@
+@@ -12,6 +12,7 @@
+ #include <chrono>
+ #include <cmath>
+ #include <cstdint>
++#include <cstddef>
+ #include <initializer_list>
+ #include <limits>
+ #include <optional>
+@@ -120,7 +121,7 @@
  #endif
  // Selected before boot, then sealed before allocating callback operands. The
  // shared atomic lets the actual compiling pthread configure its own JS table.
@@ -173,7 +181,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  constexpr u32 WASM_INSTANCE_BUDGET_LOCKED = 1u << 31;
  std::atomic<u32> s_wasm_instance_capacity{DEFAULT_WASM_INSTANCE_CAPACITY};
  extern "C" EMSCRIPTEN_KEEPALIVE int DolphinWeb_SetWasmCacheProfile(int desktop)
-@@ -366,6 +366,14 @@
+@@ -366,6 +367,14 @@
  u32 s_wasm_regalloc_dead_store_skip_count = 0; // §28by GPR dead-store skips (per emit, sum across blocks)
  u32 s_wasm_block_run_count = 0;
  std::atomic<u32> s_wasm_fast_chain_blocks{0};
@@ -188,7 +196,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  u32 s_wasm_block_reject_log_count = 0;
  u32 s_wasm_block_attempt_count = 0;
  u32 s_wasm_block_compile_fail_count = 0;
-@@ -2010,6 +2018,31 @@
+@@ -2010,6 +2019,31 @@
    ram[offset + 1] = static_cast<u8>(value);
  }
  
@@ -220,7 +228,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  void WriteRamU32BE(u8* ram, u32 offset, u32 value)
  {
    ram[offset] = static_cast<u8>(value >> 24);
-@@ -2092,12 +2125,12 @@
+@@ -2092,12 +2126,12 @@
  
    const u32 element_bytes = PairedQuantizedElementBytes(type);
    const u32 bytes = inst.W ? element_bytes : element_bytes * 2;
@@ -237,7 +245,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  
    if (load)
    {
-@@ -2578,6 +2611,10 @@
+@@ -2578,6 +2612,10 @@
    u32 ram_size_real;
    u32 l1_base;
    u32 l1_size;
@@ -248,7 +256,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  };
  
  constexpr u32 WASM_IMPORT_FASTCHECK_GPFIFO_INDEX = 14;
-@@ -3697,6 +3734,30 @@
+@@ -3697,6 +3735,30 @@
    body.push_back(0x4d);
  }
  
@@ -279,7 +287,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  void EmitIsMem1AddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
  {
    EmitLocalGet(body, 1);
-@@ -3704,6 +3765,15 @@
+@@ -3704,6 +3766,15 @@
    body.push_back(0x71);
    EmitI32Const(body, layout.ram_size_real - bytes);
    body.push_back(0x4d);
@@ -295,7 +303,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  }
  
  void EmitIsL1CacheAddressForSize(std::vector<u8>& body, const WasmStateLayout& layout, u32 bytes)
-@@ -3719,11 +3789,7 @@
+@@ -3719,11 +3790,7 @@
  
  void EmitIsMem1LineAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
@@ -308,7 +316,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  }
  
  void EmitIsOutsideLowDcbzHackRange(std::vector<u8>& body)
-@@ -3747,8 +3813,20 @@
+@@ -3747,8 +3814,20 @@
  void EmitRamAddress(std::vector<u8>& body, const WasmStateLayout& layout)
  {
    if (s_memory_group.proven) { EmitLocalGet(body, 40); return; }
@@ -330,7 +338,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    body.push_back(0x6a);
  }
  
-@@ -3766,26 +3844,11 @@
+@@ -3766,26 +3845,11 @@
  // Byte-order conversion is shared by checked and proven memory accesses.
  void EmitBswap32FromLocal(std::vector<u8>& body, u32 local_index)
  {
@@ -362,7 +370,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    body.push_back(0x72);
  }
  
-@@ -3964,6 +4027,25 @@
+@@ -3964,6 +4028,25 @@
      EmitLocalGet(body, 40); body.insert(body.end(), {0x28, 0x00});
      EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap32FromLocal(body, 2);
@@ -388,7 +396,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -3999,6 +4081,23 @@
+@@ -3999,6 +4082,23 @@
      EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -412,7 +420,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4029,6 +4128,25 @@
+@@ -4029,6 +4129,25 @@
      EmitLocalGet(body, 40); body.insert(body.end(), {0x2f, 0x00});
      EmitU32Leb(body, s_memory_group.offset);
      EmitLocalSet(body, 2); EmitBswap16FromLocal(body, 2);
@@ -438,7 +446,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -4076,6 +4194,27 @@
+@@ -4076,6 +4195,27 @@
    {
      EmitLocalGet(body, 40); EmitBswap32FromLocal(body, 2);
      body.insert(body.end(), {0x36, 0x00}); EmitU32Leb(body, s_memory_group.offset);
@@ -466,7 +474,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -4113,6 +4252,25 @@
+@@ -4113,6 +4253,25 @@
      body.insert(body.end(), {0x3a, 0x00}); EmitU32Leb(body, s_memory_group.offset);
      return;
    }
@@ -492,7 +500,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    EmitLocalGet(body, 1);
    EmitI32Const(body, 0x3fffffff);
    body.push_back(0x71);
-@@ -4144,6 +4302,27 @@
+@@ -4144,6 +4303,27 @@
    {
      EmitLocalGet(body, 40); EmitBswap16FromLocal(body, 2);
      body.insert(body.end(), {0x3b, 0x00}); EmitU32Leb(body, s_memory_group.offset);
@@ -520,7 +528,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      return;
    }
    EmitLocalGet(body, 1);
-@@ -5368,7 +5547,7 @@
+@@ -5368,7 +5548,7 @@
  }
  
  void EmitPsqFloatFastPathCondition(std::vector<u8>& body, const WasmStateLayout& layout,
@@ -529,7 +537,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  {
    EmitStateLoadU32(body, layout.msr_offset);
    EmitI32Const(body, 1u << 13);
-@@ -5400,7 +5579,10 @@
+@@ -5400,7 +5580,10 @@
    body.push_back(0x45);
    body.push_back(0x71);
  
@@ -541,7 +549,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    body.push_back(0x71);
  }
  
-@@ -5576,6 +5758,65 @@
+@@ -5576,6 +5759,65 @@
      EmitStorePsqU8Scale61Lane(body, layout, inst.RS, 1, sizeof(u8));
  }
  
@@ -607,7 +615,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  void EmitPairedQuantizedFloatMemory(std::vector<u8>& body, const WasmStateLayout& layout,
                                      const PPCAnalyst::CodeOp& op, u32 downcount)
  {
-@@ -5619,6 +5860,34 @@
+@@ -5619,6 +5861,34 @@
    }
  
    body.push_back(0x05);
@@ -642,7 +650,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    if (!load)
    {
      EmitPsqGatherPipeFloatStoreCondition(body, layout, inst);
-@@ -5670,6 +5939,7 @@
+@@ -5670,6 +5940,7 @@
    body.push_back(0x0b);
    if (!load)
      body.push_back(0x0b);
@@ -650,7 +658,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    body.push_back(0x0b);
  }
  
-@@ -7827,12 +8097,53 @@
+@@ -7827,12 +8098,53 @@
    }
  }
  
@@ -705,7 +713,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  {
    AnalyzeFastmemHoistability(ops);
    AnalyzeFastmemHoistPlan(ops);
-@@ -7952,11 +8263,17 @@
+@@ -7952,11 +8264,17 @@
      BitSet32 used_gprs;
      for (const PPCAnalyst::CodeOp& op : ops)
        used_gprs |= op.regsIn | op.regsOut;
@@ -723,7 +731,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
        EmitLocalGet(body, 0);
        body.push_back(0x28);  // i32.load
        body.push_back(0x02);  // align=2
-@@ -8131,6 +8448,36 @@
+@@ -8131,6 +8449,36 @@
        fast_melee_status_call_index, fast_melee_service_poll_call_index);
  }
  
@@ -760,7 +768,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  WasmStateLayout MakeWasmBlockTestLayout(PowerPC::PowerPCState& state, u8* ram, u32 ram_size)
  {
    const auto state_base = reinterpret_cast<std::uintptr_t>(&state);
-@@ -8276,7 +8623,12 @@
+@@ -8276,7 +8624,13 @@
    struct Counts
    {
      u32 blocks = 0;
@@ -768,22 +776,39 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
 +    u32 hits = 0;
 +    ~Counts()
 +    {
++      s_wasm_block_run_count += blocks;
 +      s_wasm_fast_chain_blocks.fetch_add(blocks, std::memory_order_relaxed);
 +      if (hits) s_wasm_dynamic_link_hits.fetch_add(hits, std::memory_order_relaxed);
 +    }
    } counts;
    // Shield any enclosing/nested legacy callback scope. We resolve the actual
    // completed full block's descriptor directly and never dereference TLS data.
-@@ -8284,6 +8636,8 @@
+@@ -8284,17 +8638,21 @@
    auto& state = m_ppc_state;
    const CPU::State* const cpu_state = m_system.GetCPU().GetStatePtr();
    const bool links_enabled = StaticExitLinksEnabled();
 +  const bool dynamic_cache = links_enabled &&
 +      !DolphinWebHelperDisabled(DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE);
    using WasmFunction = int (*)(int);
++  // A successful mandatory post-call guard proves these values still match
++  // for the linked successor. Refresh on ordinary dispatch; every helper call
++  // is still followed by the complete lifetime and feature checks.
++  u64 source_epoch = m_block_cache.StaticLinkEpoch();
++  u32 source_features = static_cast<u32>(state.feature_flags);
    do
    {
-@@ -8313,13 +8667,31 @@
+     const auto* const op = reinterpret_cast<const WasmBlockOperands*>(entry + sizeof(AnyCallback));
+-    const u64 source_epoch = m_block_cache.StaticLinkEpoch();
+-    const u32 source_features = static_cast<u32>(state.feature_flags);
+     const auto* const links = &op->links;
+     const int handle = op->handle;
+     const u32 cycles = op->downcount, loads = op->num_load_stores, fp = op->num_fp_inst;
+     ++counts.blocks;
+-    ++s_wasm_block_run_count;
+     *op->referenced = 1;
+     const int halted = reinterpret_cast<WasmFunction>(static_cast<std::uintptr_t>(handle))(
+         static_cast<int>(reinterpret_cast<std::uintptr_t>(&state)));
+@@ -8313,13 +8671,33 @@
          if (links->cells[i].pc == state.pc) { next = links->cells[i].entry; break; }
      if (!next)
      {
@@ -818,10 +843,12 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
 +        if (dynamic_cache)
 +          cached = {state.pc, source_features,
 +                    {static_cast<u32>(source_epoch), static_cast<u32>(source_epoch >> 32)}, next};
++        source_epoch = m_block_cache.StaticLinkEpoch();
++        source_features = static_cast<u32>(state.feature_flags);
        }
      }
      entry = next;
-@@ -9651,8 +10023,9 @@
+@@ -9651,8 +10029,9 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -833,7 +860,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= sizeof(u32);
  
-@@ -9728,9 +10101,10 @@
+@@ -9728,9 +10107,10 @@
                                         u32(inst.SIMM_16));
  
    u8* ram = system.GetMemory().GetRAM();
@@ -846,7 +873,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -9800,8 +10174,9 @@
+@@ -9800,8 +10180,9 @@
    const u32 register_count = 32 - inst.RD;
    const u32 bytes = register_count * sizeof(u32);
    u8* ram = system.GetMemory().GetRAM();
@@ -858,7 +885,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram = !ppc_state.msr.LE && ram != nullptr && offset < ram_size &&
                        ram_size - offset >= bytes;
  
-@@ -10162,9 +10537,10 @@
+@@ -10162,9 +10543,10 @@
    }
  
    u8* ram = system.GetMemory().GetRAM();
@@ -871,7 +898,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    const bool in_ram =
        !ppc_state.msr.LE && ram != nullptr && offset < ram_size && ram_size - offset >= bytes;
  
-@@ -11606,6 +11982,8 @@
+@@ -11606,6 +11988,8 @@
        m_system.GetMemory().GetRamSizeReal(),
        static_cast<u32>(reinterpret_cast<std::uintptr_t>(m_system.GetMemory().GetL1Cache())),
        m_system.GetMemory().GetL1CacheSize(),
@@ -880,7 +907,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    };
    const bool write_npc =
        did_merge ? merge_write_npc : (compiled_entire_block && !compiled_block_ends_with_branch);
-@@ -12058,6 +12436,9 @@
+@@ -12058,6 +12442,9 @@
  
    std::ostringstream out;
    out << (applied_policy < 2 ? "tier:guarded " : "tier:mixed ");
@@ -890,7 +917,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
    out << "hotcounts:" << (DOLPHIN_WEB_HOT_COUNTERS ? "on " : "off ");
    const u32 average_prefix =
        s_wasm_block_attempt_count == 0 ? 0 : s_wasm_prefix_instruction_sum / s_wasm_block_attempt_count;
-@@ -12608,9 +12989,8 @@
+@@ -12608,9 +12995,8 @@
    std::array<u8, 256> ram{};
    const auto layout = MakeWasmBlockTestLayout(state, ram.data(), ram.size());
    for (u32 cache = 0; cache < 2; ++cache)
@@ -902,7 +929,42 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
      auto store = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(36, 3, 1, 1), 0x80003100);
      auto load = MakeWasmBlockTestOp(EncodeDFormForWasmBlockTest(32, 4, 1, 1), 0x80003104);
      store.regsIn[1] = store.regsIn[3] = load.regsIn[1] = true; load.regsOut[4] = true;
-@@ -12800,12 +13180,18 @@
+@@ -12761,8 +13147,14 @@
+   {
+     CPU::State* cpu; CPU::State original;
+     PowerPC::PowerPCState& state; decltype(state.feature_flags) features;
+-    ~Restore() { *cpu = original; state.feature_flags = features; }
+-  } restore{cpu_state, original_cpu, state, original_features};
++    std::array<u32,6> pm; u32 exceptions;
++    ~Restore() {
++      *cpu = original; state.feature_flags = features; state.Exceptions = exceptions;
++      state.spr[SPR_MMCR0]=pm[0]; state.spr[SPR_MMCR1]=pm[1]; state.spr[SPR_PMC1]=pm[2];
++      state.spr[SPR_PMC2]=pm[3]; state.spr[SPR_PMC3]=pm[4]; state.spr[SPR_PMC4]=pm[5];
++    }
++  } restore{cpu_state, original_cpu, state, original_features,
++      {state.spr[SPR_MMCR0],state.spr[SPR_MMCR1],state.spr[SPR_PMC1],state.spr[SPR_PMC2],state.spr[SPR_PMC3],state.spr[SPR_PMC4]},state.Exceptions};
+   using Callback = CachedInterpreter::AnyCallback;
+   using Operands = CachedInterpreter::WasmBlockOperands;
+   struct Entry { Callback callback; Operands operands; };
+@@ -12791,21 +13183,48 @@
+   static CachedInterpreter* fixture = nullptr;
+   static CPU::State* fixture_cpu = nullptr;
+   static u32 action = 0;
++  static Operands* changed_operands = nullptr;
+   fixture = &jit; fixture_cpu = cpu_state;
+   const auto control = +[](int address) -> int {
+     auto& st = *reinterpret_cast<PowerPC::PowerPCState*>(static_cast<std::uintptr_t>(address));
+     st.npc = pc1;
+     if (action == 1) fixture->m_block_cache.AdvanceStaticLinkEpoch();
++    if (action == 5)
++    {
++      st.feature_flags = static_cast<decltype(st.feature_flags)>(FEATURE_FLAG_PERFMON);
++      changed_operands->downcount = 99;
++      changed_operands->num_load_stores = 88;
++      changed_operands->num_fp_inst = 77;
++      fixture->m_block_cache.AdvanceStaticLinkEpoch();
++    }
+     if (action == 2) st.feature_flags = static_cast<decltype(st.feature_flags)>(1);
      if (action == 3) *fixture_cpu = CPU::State::Stepping;
      return action == 4 ? 1 : 0;
    };
@@ -911,25 +973,43 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
 +  const u32 saved_mask = s_dolphin_web_disable_mask.load(std::memory_order_relaxed);
 +  struct MaskRestore { u32 mask; ~MaskRestore() { s_dolphin_web_disable_mask.store(mask, std::memory_order_relaxed); } } mask_restore{saved_mask};
 +  for (u32 enabled = 0; enabled < 2; ++enabled)
-+  for (u32 test = 0; test < 15; ++test)
++  for (u32 test = 0; test < 23; ++test)
 +  {
-+    if (test >= 10 && !enabled) continue;
++    if (test >= 10 && test < 15 && !enabled) continue;
 +    s_dolphin_web_disable_mask.store((saved_mask & ~DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE) |
 +        (enabled ? 0 : DOLPHIN_WEB_DISABLE_DYNAMIC_LINK_CACHE), std::memory_order_relaxed);
      *cpu_state = CPU::State::Running;
      state.feature_flags = static_cast<decltype(state.feature_flags)>(0);
      state.pc = state.npc = pc0; state.msr.Hex = 0; state.gpr[3] = 7;
 -    state.downcount = test == 1 ? 0 : test == 2 ? -1 : test == 0 ? 11 : 100;
-+    state.downcount = test == 1 ? 0 : test == 2 ? -1 : (test == 0 || test == 10) ? 11 : 100;
++    state.downcount = test == 1 ? 0 : test == 2 ? -1 : (test == 0 || test == 10) ? 11 : test == 19 ? 4 : (test == 20 || test == 21) ? 2 : 100;
++    state.Exceptions = 0;
++    state.spr[SPR_MMCR0] = state.spr[SPR_MMCR1] = 0;
++    for (u32 spr : {SPR_PMC1, SPR_PMC2, SPR_PMC3, SPR_PMC4}) state.spr[spr] = 0;
++    if (test >= 20)
++    {
++      MMCR0(state).PMC1SELECT = 1; MMCR0(state).PMC2SELECT = 11;
++      MMCR0(state).PMC1INTCONTROL = 1; MMCR0(state).PMCINTCONTROL = 1;
++      MMCR1(state).PMC3SELECT = 11; MMCR1(state).PMC4SELECT = 1;
++      const u32 seed = test == 20 ? 0x7ffffffeu : test == 21 ? 0xfffffffeu : 0;
++      for (u32 spr : {SPR_PMC1, SPR_PMC2, SPR_PMC3, SPR_PMC4}) state.spr[spr] = seed;
++      if (test != 22) state.feature_flags = static_cast<decltype(state.feature_flags)>(FEATURE_FLAG_PERFMON);
++    }
      u8 touched[2]{};
      Entry entries[2]{{callback, {handles[0], &touched[0], pc1, 3, 0, 0, 1}},
                       {callback, {handles[1], &touched[1], pc0, 3, 0, 0, 1}}};
-@@ -12815,21 +13201,39 @@
+@@ -12815,36 +13234,219 @@
      if (test == 3) entries[0].operands.end_block = 0;
      if (test == 4) entries[1].operands.end_block = 0;
      if (test == 5) entries[0].operands.links.count = 0;
 -    action = test >= 6 ? test - 5 : 0;
-+    if (test >= 10)
+-    if (action)
+-    {
+-      entries[0].operands.handle = static_cast<s32>(reinterpret_cast<std::uintptr_t>(control));
+-      // Must exit before inspecting a stale/invalid destination.
+-      entries[0].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
+-    }
++    if (test >= 10 && test < 15)
 +    {
 +      const u64 epoch = jit.m_block_cache.StaticLinkEpoch();
 +      for (u32 i = 0; i < 2; ++i)
@@ -945,18 +1025,22 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
 +      if (test == 14) cache.epoch[1] ^= 1;
 +      if (test >= 11) cache.entry = reinterpret_cast<const u8*>(1);
 +    }
-+    action = test >= 6 && test < 10 ? test - 5 : 0;
-     if (action)
-     {
-       entries[0].operands.handle = static_cast<s32>(reinterpret_cast<std::uintptr_t>(control));
-       // Must exit before inspecting a stale/invalid destination.
-       entries[0].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
-     }
++    action = test >= 6 && test < 10 ? test - 5 : test >= 15 && test <= 18 ? test - 14 : test == 22 ? 5 : 0;
++    if (test >= 20) for (auto& entry : entries) {entry.operands.num_load_stores = 5; entry.operands.num_fp_inst = 7;}
++    if (action || test == 19)
++    {
++      const u32 index = test >= 15 ? 1 : 0;
++      changed_operands = &entries[index].operands;
++      entries[index].operands.handle = static_cast<s32>(reinterpret_cast<std::uintptr_t>(control));
++      // Must exit before inspecting this matching poisoned destination.
++      entries[index].operands.links.cells[0].pc = pc1;
++      entries[index].operands.links.cells[0].entry = reinterpret_cast<const u8*>(1);
++    }
 +    const u32 before_hits = s_wasm_dynamic_link_hits.load(std::memory_order_relaxed);
      const u32 before = s_wasm_block_run_count, before_fast = s_wasm_fast_chain_blocks.load(std::memory_order_relaxed);
      const bool handled = jit.ExecuteWasmFastChain(ptr(entries), false);
 -    const u32 blocks = test == 0 ? 4 : test == 3 ? 0 : 1;
-+    const u32 blocks = (test == 0 || test == 10) ? 4 : test == 3 ? 0 : 1;
++    const u32 blocks = (test == 0 || test == 10) ? 4 : test == 3 ? 0 : ((test >= 15 && test <= 19) || test == 22) ? 2 : 1;
      if (handled != (test != 3)) return 2100 + test;
 +    if (s_wasm_dynamic_link_hits.load(std::memory_order_relaxed) - before_hits != (test == 10 ? 3u : 0u)) return 2700 + test;
      if (s_wasm_block_run_count - before != blocks ||
@@ -965,9 +1049,32 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
 -    if (test == 0 && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
 +    if ((test == 0 || test == 10) && (state.gpr[3] != 13 || state.pc != pc0 || state.npc != pc0 ||
                        state.downcount != -1)) return 2400;
-     if (test == 9)
-     {
-@@ -12843,8 +13247,158 @@
+-    if (test == 9)
+-    {
+-      if (state.pc != pc0 || state.downcount != 100) return 2500;
++    if (test == 9 || test == 18)
++    {
++      if (state.pc != (test == 9 ? pc0 : pc1) || state.downcount != (test == 9 ? 100 : 97)) return 2500 + test;
++    }
++    else if (blocks == 2)
++    {
++      if (state.pc != pc1 || state.npc != pc1 || state.gpr[3] != 8 || state.downcount != (test == 19 ? -2 : 94)) return 2750 + test;
+     }
+     else if (blocks == 1 && (state.pc != pc1 ||
+-             state.downcount != (test == 1 ? -3 : test == 2 ? -4 : 97))) return 2600 + test;
+-  }
+-  fixture = nullptr; fixture_cpu = nullptr;
++             state.downcount != (test == 1 ? -3 : test == 2 ? -4 : (test == 20 || test == 21) ? -1 : 97))) return 2600 + test;
++    if (test >= 20)
++    {
++      const u32 seed = test == 20 ? 0x7ffffffeu : test == 21 ? 0xfffffffeu : 0;
++      if (state.spr[SPR_PMC1] != seed + 3 || state.spr[SPR_PMC2] != seed + 5 ||
++          state.spr[SPR_PMC3] != seed + 7 || state.spr[SPR_PMC4] != seed + 3 ||
++          state.Exceptions != (test == 20 ? EXCEPTION_PERFORMANCE_MONITOR : 0)) return 2800 + test;
++    }
++  }
++  fixture = nullptr; fixture_cpu = nullptr; changed_operands = nullptr;
+   return 1;
  }
  
  #endif
@@ -1126,7 +1233,7 @@ diff --git a/vendor/dolphin/Source/Core/Core/PowerPC/CachedInterpreter/CachedInt
  #if DOLPHIN_WEB_STATIC_EXIT_LINKS
    const int chain_result = RunWasmFastChainSmoke();
    if (chain_result != 1) return chain_result;
-@@ -13168,6 +13722,179 @@
+@@ -13168,6 +13770,179 @@
      return 51;
  
    return state.npc == 0x80003414 ? 1 : 60;
