@@ -264,7 +264,11 @@
     canvas.style.setProperty('width', `${width}px`, 'important');
     canvas.style.setProperty('height', `${height}px`, 'important');
     canvas.style.setProperty('left', `${bounds.left + bounds.width / 2}px`, 'important');
-    canvas.style.setProperty('top', `${bounds.top + (gamepadMode() ? bounds.height / 2 : height / 2)}px`, 'important');
+    // Bring the portrait stack slightly closer to the status bar without
+    // resizing either screen or moving the landscape/controller presentation.
+    const top = !gamepadMode() && innerWidth < innerHeight ?
+      Math.max(visibleViewport().top, bounds.top - 12) : bounds.top;
+    canvas.style.setProperty('top', `${top + (gamepadMode() ? bounds.height / 2 : height / 2)}px`, 'important');
   }
   const n3dsOrigin = system === '3ds' ? safeArea('kt-3ds-origin') : null;
   // The 3DS arrangement is the app's own setting (emulator.getViews/setView);

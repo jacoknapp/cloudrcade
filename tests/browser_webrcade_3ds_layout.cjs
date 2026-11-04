@@ -85,7 +85,7 @@ const { chromium, webkit } = require('playwright');
           dispatchEvent(new Event('resize'));
         });
         await page.waitForTimeout(100);
-        for (const view of system === '3ds' ? [0, 1, 2] : [0, 2]) {
+        for (const view of [0, 1, 2]) {
           await page.evaluate((view) => app.emulator.setView(view), view);
           for (const viewport of [{ width: 874, height: 402 }, { width: 402, height: 874 },
             {width: 393, height: 852}, {width: 320, height: 568}, {width: 768, height: 1024}]) {
@@ -104,9 +104,10 @@ const { chromium, webkit } = require('playwright');
               `${system} view ${view} keeps aspect ratio after rotation`);
             assert.deepEqual(await page.evaluate(() => [app.emulator.canvas.width, app.emulator.canvas.height]),
               [1200, 1440], 'CSS placement must not resize the core drawing buffer');
-            if (viewport.width <= viewport.height && (system === '3ds' || view === 0)) {
+            if (viewport.width <= viewport.height && (system === '3ds' || [0, 1].includes(view))) {
               const canvas = await page.locator('canvas').boundingBox();
-              assert(canvas.y >= 59 - .5, `${system} view ${view} ${viewport.width}x${viewport.height}: game stays below the status-bar safe area (${JSON.stringify(canvas)})`);
+              const top = system === 'nds' ? 47 : 59;
+              assert(Math.abs(canvas.y - top) < .5, `${system} view ${view} ${viewport.width}x${viewport.height}: portrait screen position (${JSON.stringify(canvas)})`);
               const width = Math.min(viewport.width, (viewport.height - 59 - 34) * size.ratio);
               assert(Math.abs(canvas.width - width) < .5 && Math.abs(canvas.height - width / size.ratio) < .5,
                 `${system} view ${view}: screens use the entire safe viewport independently of controls`);
