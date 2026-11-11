@@ -32,6 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-to
  && mkdir -p /usr/local/apache2/conf/ssl \
  && printf '\nEnableMMAP off\nEnableSendfile off\n' >> /etc/apache2/apache2.conf \
  && rm -rf /var/lib/apt/lists/*
+COPY docker/build-apache-runtime.sh /usr/local/bin/build-apache-runtime
+RUN sh /usr/local/bin/build-apache-runtime && rm /usr/local/bin/build-apache-runtime
 COPY --from=php-fpm /usr/local/etc/php-fpm.conf /usr/local/etc/php-fpm.conf
 COPY --from=php-fpm /usr/local/etc/php-fpm.d/ /usr/local/etc/php-fpm.d/
 COPY deploy/webrcade/php-fpm.conf /usr/local/etc/php-fpm.d/zz-cloudrcade.conf

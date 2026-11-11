@@ -114,6 +114,7 @@ with tempfile.TemporaryDirectory(prefix='cloudrcade-smoke-') as temp:
             assert docker('exec', name, 'uname', '-m').strip() == machine, 'Wrong runtime architecture'
         assert docker('exec', name, 'php', '-r', 'echo PHP_VERSION;') == '8.3.36'
         assert docker('exec', name, 'php-fpm', '--version').splitlines()[0].startswith('PHP 8.3.36 ')
+        assert 'Apache/2.4.71 ' in docker('exec', name, 'apache2', '-v')
         assert 'mpm_event_module' in docker('exec', name, 'apache2ctl', '-M')
         assert 'php_module' not in docker('exec', name, 'apache2ctl', '-M')
         port = info['NetworkSettings']['Ports']['443/tcp'][0]['HostPort']
