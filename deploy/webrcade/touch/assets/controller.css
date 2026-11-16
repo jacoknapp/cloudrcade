@@ -184,7 +184,32 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 #wrcad-touch .kt-fold-position output { margin-left: 8px; font-variant-numeric: tabular-nums; }
 #wrcad-touch .kt-fold-position input, #wrcad-touch .kt-fold-position button { width: 100%; min-height: 44px; }
 #wrcad-touch .kt-fold-position input { accent-color: #67e5c5; }
-#wrcad-touch .kt-fold-guide { position: absolute; z-index: 1; background: #67e5c5; box-shadow: 0 0 0 1px #111; pointer-events: none; }
+#wrcad-touch .kt-fold-guide { position: absolute; z-index: 1; background: #67e5c533; pointer-events: none; }
+/* Console presentation: every control belongs to the touchscreen pane. The
+ * primary display has its own full-width, aspect-preserving picture area. */
+#wrcad-touch.kt-sections[data-section-controls] .kt-pad { max-width: none; }
+#wrcad-touch.kt-sections[data-section-controls] .kt-center button { bottom: 0; }
+#wrcad-touch.kt-sections .kt-ds-mic { left: calc(50% - 29px); }
+html.kt-ds-sections #touch-overlay { display: none !important; }
+#wrcad-touch.kt-sections[data-section-controls] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick),
+#wrcad-touch.kt-sections[data-section-controls] .kt-actions { top: auto; bottom: 54px; }
+#wrcad-touch.kt-sections[data-section-controls] .kt-extra-dpad { top: auto; left: 156px; bottom: 54px; }
+#wrcad-touch.kt-sections[data-section-controls] .kt-c-stick { top: auto; left: auto; right: 156px; bottom: 54px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-stick { width: 96px; height: 96px; --kt-arrow-offset: 32px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick) { left: 44px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick),
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions { top: 86px; bottom: auto; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-extra-dpad { width: 88px; height: 88px; --kt-arrow-offset: 29px; left: 44px; top: 214px; bottom: auto; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-c-stick { width: 72px; height: 72px; right: 0; top: 234px; bottom: auto; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions { width: 124px; height: 124px; right: 12px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions button { width: 44px; height: 44px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions [data-cid="7"] { left: 40px; top: 0; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions [data-cid="6"] { left: 0; top: 40px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions [data-cid="5"] { right: 0; top: 40px; }
+#wrcad-touch.kt-sections[data-section-controls="rails"] .kt-actions [data-cid="4"] { left: 40px; bottom: 0; }
+#wrcad-touch.kt-sections[data-section-controls="compact"] .kt-extra-dpad { width: 88px; height: 88px; --kt-arrow-offset: 29px; left: 0; bottom: 214px; }
+#wrcad-touch.kt-sections[data-section-controls="compact"] .kt-c-stick { width: 72px; height: 72px; right: 0; bottom: 214px; }
+#wrcad-touch.kt-sections[data-section-controls="compact"] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick) { bottom: 54px; }
 /* GameCube's own geometry; saved per-system coordinates still override it. */
 #wrcad-touch:is(.kt-gamecube,.kt-wii) .kt-pad { height: 400px; }
 #wrcad-touch:is(.kt-gamecube,.kt-wii) .kt-stick[data-stick-index="0"][data-direction="analog"] { bottom: 176px; }

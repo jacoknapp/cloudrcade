@@ -23,8 +23,11 @@
   let automaticSections = true;
   try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
   const FOLD_KEY = prefix + '.touch.fold-alignment.v1';
+  const FOLD_GAP_KEY = prefix + '.touch.fold-gap.v1';
   let foldAlignment = {};
   try { foldAlignment = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (_) {}
+  let foldGap = 40; // Conservative clearance, not a claimed hardware dimension.
+  try { foldGap = Math.max(16, Math.min(160, Number(localStorage.getItem(FOLD_GAP_KEY)) || 40)); } catch (_) {}
   const foldOffset = mode => Math.max(-15, Math.min(15, Number(foldAlignment?.[mode]) || 0));
   const parseDSView = value => /^[0-5]$/.test(String(value)) ? Number(value) : null;
   let dsView = null, dsEmulator = null, dsObserver = null;
@@ -132,6 +135,8 @@
         <div class="kt-fold-position" hidden>
           <label for="kt-fold-alignment">Fold alignment</label><output for="kt-fold-alignment">0%</output>
           <input id="kt-fold-alignment" type="range" min="-15" max="15" step="0.1" value="0">
+          <label for="kt-fold-gap">Fold gap</label><output class="kt-fold-gap-value" for="kt-fold-gap">40px</output>
+          <input id="kt-fold-gap" type="range" min="16" max="160" step="2" value="40">
           <button class="kt-fold-reset">Reset fold alignment</button>
         </div>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
@@ -158,7 +163,7 @@
     <div class="kt-pad" aria-label="Touch game controller" hidden>
       <div class="kt-shoulders"><button data-cid="8">L</button><button data-cid="10">L2</button><button data-cid="11">R2</button><button data-cid="9">R</button></div>
       <div class="kt-stick" role="group" aria-label="Directional pad: drag in any direction"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><i></i></div>
-      <div class="kt-center"><button data-cid="12">Select</button><button class="kt-menu">Menu</button><button data-cid="13">Start</button></div>
+      <div class="kt-center"><button data-cid="12">Select</button><button class="kt-ds-mic" data-layout-id="microphone" aria-label="Hold microphone" hidden>Mic</button><button class="kt-menu">Menu</button><button data-cid="13">Start</button></div>
       <div class="kt-actions"><button data-cid="7">Y</button><button data-cid="6">X</button><button data-cid="5">B</button><button data-cid="4">A</button></div>
       <div class="kt-cbuttons" hidden><button data-axis="1,-1">C▲</button><button data-axis="0,-1">C◀</button><button data-axis="0,1">C▶</button><button data-axis="1,1">C▼</button></div>
     </div>`;
@@ -197,6 +202,12 @@
   const touchPointers = new Map();
   const held = new Set();
   const axes = [0, 0, 0, 0];
+  let sectionMicOn = false;
+  function setSectionMic(value) {
+    if (value === sectionMicOn) return;
+    sectionMicOn = value; window.app?.emulator?.setMicrophoneOn?.(value);
+    $('.kt-ds-mic').classList.toggle('kt-held', value);
+  }
   const patched = new WeakSet();
   const patchedEmulators = new WeakSet();
   const patchedTouches = new WeakSet();
@@ -253,6 +264,133 @@
   const dsOrigin = system === 'nds' ? safeArea('kt-ds-origin') : null;
   const sectionsToggle = $('.kt-sections-toggle');
   let sectionState = null;
+  // Both pinned frontends present their combined core texture with one final
+  // triangle-strip quad. Reuse that draw twice, with viewport/scissor crops in
+  // the same context. No framebuffer readback, copy, extra canvas or GL context.
+  if (['nds', '3ds'].includes(system)) {
+    const contexts = new WeakMap();
+    const prototypes = [...new Set([window.WebGLRenderingContext?.prototype, window.WebGL2RenderingContext?.prototype].filter(Boolean))];
+    const originals = prototypes.map(prototype => ({prototype,
+      native: Object.fromEntries(['bindFramebuffer','viewport','scissor','enable','disable','clearColor','clear','drawArrays'].map(name => [name, prototype[name]]))}));
+    for (const {prototype, native} of originals) {
+      function state(gl) {
+        if (gl.canvas !== window.app?.emulator?.canvas) return null;
+        let value = contexts.get(gl);
+        if (!value) {
+          if (gl.isContextLost()) return null;
+          value = {framebuffer: gl.getParameter(gl.FRAMEBUFFER_BINDING),
+            viewport: gl.getParameter(gl.VIEWPORT), scissor: gl.getParameter(gl.SCISSOR_BOX),
+            scissorEnabled: gl.isEnabled(gl.SCISSOR_TEST), color: gl.getParameter(gl.COLOR_CLEAR_VALUE)};
+          contexts.set(gl, value);
+          gl.canvas.addEventListener('webglcontextlost', () => { value.lost = true; });
+          gl.canvas.addEventListener('webglcontextrestored', () => contexts.delete(gl));
+        }
+        return value;
+      }
+      prototype.bindFramebuffer = function(target, framebuffer) {
+        const value = state(this);
+        if (value && (target === this.FRAMEBUFFER || target === this.DRAW_FRAMEBUFFER)) value.framebuffer = framebuffer;
+        return native.bindFramebuffer.call(this, target, framebuffer);
+      };
+      for (const name of ['viewport', 'scissor', 'clearColor']) prototype[name] = function(x, y, width, height) {
+        const value = state(this), values = value?.[name === 'clearColor' ? 'color' : name];
+        if (values) { values[0] = x; values[1] = y; values[2] = width; values[3] = height; }
+        return native[name].call(this, x, y, width, height);
+      };
+      for (const name of ['enable', 'disable']) prototype[name] = function(capability) {
+        const value = state(this);
+        if (value && capability === this.SCISSOR_TEST) value.scissorEnabled = name === 'enable';
+        return native[name].call(this, capability);
+      };
+      prototype.drawArrays = function(mode, first, count) {
+        const value = state(this), presentation = sectionState?.presentation;
+        if (!value || value.lost || value.framebuffer || !presentation || mode !== this.TRIANGLE_STRIP || first !== 0 || count !== 4)
+          return native.drawArrays.call(this, mode, first, count);
+        const {viewport, scissor, scissorEnabled, color} = value, {canvas, destinations, sources} = presentation;
+        const scaleX = this.drawingBufferWidth / canvas.width, scaleY = this.drawingBufferHeight / canvas.height;
+        // RetroArch normalizes pointer input through this native viewport,
+        // including its own letterboxing. DS instead uses its DOM touch rect.
+        if (system === '3ds') sectionState.inputViewport = {left: viewport[0] / scaleX,
+          top: (this.drawingBufferHeight - viewport[1] - viewport[3]) / scaleY,
+          width: viewport[2] / scaleX, height: viewport[3] / scaleY};
+        // Clear the unused pane space, then restore every native GL state we
+        // temporarily change. RetroArch's own GL cache remains authoritative.
+        native.disable.call(this, this.SCISSOR_TEST);
+        native.clearColor.call(this, 0, 0, 0, 1);
+        native.clear.call(this, this.COLOR_BUFFER_BIT);
+        native.clearColor.call(this, ...color);
+        native.enable.call(this, this.SCISSOR_TEST);
+        try {
+          for (let i = 0; i < 2; i++) {
+            const source = sources[i], target = destinations[i];
+            const width = target.width / source.width, height = target.height / source.height;
+            const left = target.left - canvas.left - source.left * width;
+            const top = target.top - canvas.top - source.top * height;
+            const vx = Math.round(left * scaleX), vy = Math.round((canvas.height - top - height) * scaleY);
+            const vw = Math.round(width * scaleX), vh = Math.round(height * scaleY);
+            native.viewport.call(this, vx, vy, vw, vh);
+            // Integer viewports must not sample a neighboring screen's edge.
+            const sx = Math.max(Math.round((target.left - canvas.left) * scaleX), Math.ceil(vx + source.left * vw));
+            const sy = Math.max(Math.round((canvas.bottom - target.bottom) * scaleY), Math.ceil(vy + (1 - source.top - source.height) * vh));
+            const right = Math.min(Math.round((target.right - canvas.left) * scaleX), Math.floor(vx + (source.left + source.width) * vw));
+            const upper = Math.min(Math.round((canvas.bottom - target.top) * scaleY), Math.floor(vy + (1 - source.top) * vh));
+            native.scissor.call(this, sx, sy, Math.max(0, right - sx), Math.max(0, upper - sy));
+            native.drawArrays.call(this, mode, first, count);
+          }
+        } finally {
+          native.viewport.call(this, ...viewport); native.scissor.call(this, ...scissor);
+          native[scissorEnabled ? 'enable' : 'disable'].call(this, this.SCISSOR_TEST);
+        }
+      };
+    }
+    // Translate only native-canvas gestures back to its original combined
+    // image. The native DS/3DS stylus path still owns presses and releases.
+    const touches = new Set();
+    let mouseDown = false;
+    function mapPoint(x, y) {
+      const p = sectionState.presentation, target = p.destinations[1], source = p.inputSource;
+      const nx = Math.max(0, Math.min(1, (x - target.left) / target.width));
+      const ny = Math.max(0, Math.min(1, (y - target.top) / target.height));
+      const area = system === '3ds' && sectionState.inputViewport || {left: 0, top: 0, width: p.canvas.width, height: p.canvas.height};
+      return {x: p.canvas.left + area.left + (source.left + nx * source.width) * area.width,
+        y: p.canvas.top + area.top + (source.top + ny * source.height) * area.height};
+    }
+    const insideTouchscreen = (x, y) => {
+      const r = sectionState.presentation.destinations[1];
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    for (const type of ['mousedown','mousemove','mouseup','touchstart','touchmove','touchend','touchcancel']) window.addEventListener(type, event => {
+      if (!sectionState?.presentation || window.app?.isShowOverlay?.() || window.app?.isPauseScreen?.()) { touches.clear(); mouseDown = false; return; }
+      const canvas = sectionState.emulator.canvas;
+      if (event.target !== canvas) return;
+      if (type.startsWith('touch')) {
+        for (const touch of event.changedTouches) if (type === 'touchstart' && insideTouchscreen(touch.clientX, touch.clientY)) touches.add(touch.identifier);
+        const accepted = [...event.changedTouches].some(touch => touches.has(touch.identifier));
+        if (!accepted) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+        // DS converts raw touches to MouseEvents itself; map those events once.
+        if (system === '3ds') for (const name of ['touches','targetTouches','changedTouches']) {
+          const points = [...event[name]].filter(touch => touches.has(touch.identifier)).map(touch => {
+            const point = mapPoint(touch.clientX, touch.clientY);
+            return new Proxy(touch, {get(target, key) {
+              if (['clientX','pageX','screenX'].includes(key)) return point.x + (key === 'pageX' ? scrollX : 0);
+              if (['clientY','pageY','screenY'].includes(key)) return point.y + (key === 'pageY' ? scrollY : 0);
+              return Reflect.get(target, key, target);
+            }});
+          });
+          points.item = index => points[index] || null;
+          Object.defineProperty(event, name, {value: points});
+        }
+        if (type === 'touchend' || type === 'touchcancel') for (const touch of event.changedTouches) touches.delete(touch.identifier);
+      } else {
+        if (type === 'mousedown') mouseDown = insideTouchscreen(event.clientX, event.clientY);
+        if (!mouseDown && !insideTouchscreen(event.clientX, event.clientY)) { event.stopImmediatePropagation(); return; }
+        const point = mapPoint(event.clientX, event.clientY), rect = canvas.getBoundingClientRect();
+        for (const [name, value] of Object.entries({clientX: point.x, clientY: point.y,
+          pageX: point.x + scrollX, pageY: point.y + scrollY, offsetX: point.x - rect.left, offsetY: point.y - rect.top})) Object.defineProperty(event, name, {value});
+        if (type === 'mouseup') mouseDown = false;
+      }
+    }, {capture: true, passive: false});
+  }
   const sectionViews = {stacked: ['default', 'Top'], side: ['side_by_side', 'Top'],
     top: ['single_screen', 'Top'], touch: ['single_screen', 'Bottom']};
   function setNative3DSView(emulator, id) {
@@ -265,7 +403,7 @@
     sectionState.setVariable('citra_swap_screen', view[1]);
   }
   function syncScreenSections(emulator) {
-    if (!['nds', '3ds'].includes(system) || !emulator?.started) return;
+    if (!['nds', '3ds'].includes(system) || !emulator?.started || !emulator.canvas) return;
     if (sectionState?.emulator !== emulator) {
       if (system === '3ds' && (!emulator.useView || !window.Module?.cwrap)) return;
       const state = sectionState = {emulator, mode: null};
@@ -300,10 +438,23 @@
     const previous = state.mode;
     if (mode && !previous) {
       state.savedView = emulator.getView?.(); state.book = emulator.bookMode;
+      state.canvasStyle = Object.fromEntries(['position','transform','width','height','max-width','max-height','left','top'].map(name =>
+        [name, [emulator.canvas.style.getPropertyValue(name), emulator.canvas.style.getPropertyPriority(name)]]));
     }
     state.mode = mode;
+    if (previous !== mode) state.presentation = null;
     host.classList.toggle('kt-sections', Boolean(mode));
+    document.documentElement.classList.toggle('kt-ds-sections', system === 'nds' && Boolean(mode));
     host.dataset.screenSections = mode || '';
+    if (!mode) {
+      if (previous) for (const [name, [value, priority]] of Object.entries(state.canvasStyle)) {
+        if (value) emulator.canvas.style.setProperty(name, value, priority);
+        else emulator.canvas.style.removeProperty(name);
+      }
+      for (const name of ['left','top','right','bottom','width','height','margin']) pad.style.removeProperty(name);
+      delete host.dataset.sectionControls; delete host.dataset.screenRects;
+      document.documentElement.style.removeProperty('--kt-section-controls-top');
+    }
     const changed = previous !== mode;
     if (system === 'nds') {
       if (changed) {
@@ -324,6 +475,7 @@
   }
   sectionsToggle.addEventListener('click', () => chooseAutomaticSections(!automaticSections));
   const foldSlider = $('#kt-fold-alignment'), foldGuide = $('.kt-fold-guide');
+  const foldGapSlider = $('#kt-fold-gap');
   function changeFold(value) {
     if (!sectionState?.mode) return;
     foldAlignment = {...foldAlignment, [sectionState.mode]: Number(value)};
@@ -335,9 +487,18 @@
   foldSlider.addEventListener('blur', () => { foldGuide.hidden = true; });
   for (const event of ['keydown', 'keyup']) foldSlider.addEventListener(event, e => { if (e.key !== 'Escape') e.stopPropagation(); });
   $('.kt-fold-reset').addEventListener('click', () => changeFold(0));
-  function sectionSplit(visible) {
+  foldGapSlider.addEventListener('input', event => {
+    foldGap = Number(event.target.value);
+    try { localStorage.setItem(FOLD_GAP_KEY, String(foldGap)); } catch (_) {}
+    foldGuide.hidden = false; clear(); layoutStamp = ''; draw();
+  });
+  foldGapSlider.addEventListener('focus', () => { foldGuide.hidden = false; });
+  foldGapSlider.addEventListener('blur', () => { foldGuide.hidden = true; });
+  for (const event of ['keydown', 'keyup']) foldGapSlider.addEventListener(event, e => { if (e.key !== 'Escape') e.stopPropagation(); });
+  function sectionFold(visible) {
     const stacked = sectionState.mode === 'stacked';
     let split = stacked ? visible.top + visible.height / 2 : visible.left + visible.width / 2;
+    let reportedGap = 0, reportedStart = null, reportedEnd = null;
     // Segment coordinates belong to the outer window, not necessarily this
     // game iframe. Translate them before placing the native screen boundary.
     try {
@@ -349,54 +510,83 @@
       const segments = outer.viewport?.segments || outer.visualViewport?.segments;
       const ordered = segments?.length === 2 ? [...segments].sort((a, b) => stacked ? a.top - b.top : a.left - b.left) : [];
       if (ordered.length && (stacked ? ordered[0].bottom <= ordered[1].top : ordered[0].right <= ordered[1].left)) {
+        reportedGap = stacked ? ordered[1].top - ordered[0].bottom : ordered[1].left - ordered[0].right;
+        reportedStart = stacked ? ordered[0].bottom - y : ordered[0].right - x;
+        reportedEnd = stacked ? ordered[1].top - y : ordered[1].left - x;
         split = stacked ? (ordered[0].bottom + ordered[1].top) / 2 - y :
           (ordered[0].right + ordered[1].left) / 2 - x;
       } else if (outer.document.documentElement.hasAttribute('data-cr-status-top') &&
           (outer.navigator.standalone || outer.matchMedia('(display-mode: standalone)').matches) && !outer.document.fullscreenElement) {
         // Opaque installed-app status areas are outside innerHeight. Center
         // on the physical display, then translate back into content space.
-        const excluded = outer.screen.height - outer.innerHeight;
-        if (stacked && Math.abs(outer.screen.width - outer.innerWidth) < 1 && excluded > 0 && excluded <= 100)
-          split = outer.screen.height / 2 - excluded - y;
+        // Screen can retain its natural (wide) orientation while the installed
+        // window is portrait. Match its width before using its physical height.
+        const physicalHeight = Math.abs(outer.screen.width - outer.innerWidth) < 1 ? outer.screen.height :
+          Math.abs(outer.screen.height - outer.innerWidth) < 1 ? outer.screen.width : 0;
+        const excluded = physicalHeight - outer.innerHeight;
+        if (stacked && physicalHeight && excluded > 0 && excluded <= 100)
+          split = physicalHeight / 2 - excluded - y;
       }
     } catch (_) { /* Older/cross-origin browsers retain the visible midpoint. */ }
     split += foldOffset(sectionState.mode) / 100 * (stacked ? visible.height : visible.width);
-    return split;
+    const start = Math.min(split - foldGap / 2, reportedStart ?? Infinity);
+    const end = Math.max(split + foldGap / 2, reportedEnd ?? -Infinity);
+    return {center: split, start, end, gap: end - start, reportedGap};
   }
+  const sectionSplit = visible => sectionFold(visible).center;
   function sectionBounds(origin) {
     const safe = origin.getBoundingClientRect(), visible = visibleViewport();
-    return {left: Math.max(safe.left, visible.left) + 182,
-      right: Math.min(safe.right, visible.right) - 182,
+    return {left: Math.max(safe.left, visible.left) + 12,
+      right: Math.min(safe.right, visible.right) - 12,
       top: Math.max(safe.top, visible.top) + 12,
       bottom: Math.min(safe.bottom, visible.bottom) - 12, visible};
   }
   function alignScreenSections(emulator, origin) {
     if (!sectionState?.mode || sectionState.emulator !== emulator) return false;
     const bounds = sectionBounds(origin), {visible} = bounds;
+    const stacked = sectionState.mode === 'stacked', fold = sectionFold(visible);
+    const rectangle = (left, top, right, bottom) => ({left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top)});
+    const upper = rectangle(bounds.left, bounds.top, stacked ? bounds.right : fold.start, stacked ? fold.start : bounds.bottom);
+    const lower = rectangle(stacked ? bounds.left : fold.end, stacked ? fold.end : bounds.top, bounds.right, bounds.bottom);
+    const rails = lower.width >= 576 && lower.height >= (system === '3ds' ? 386 : 286);
+    const wide = lower.width >= 576;
+    const controlsHeight = rails ? lower.height : system === '3ds' && !wide ? 370 : 244;
+    const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - 14, lower.bottom);
+    const picture = rails ? rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64) :
+      rectangle(lower.left, lower.top, lower.right, controls.top - 12);
+    const fit = (area, ratio) => {
+      const width = Math.min(area.width, area.height * ratio), height = width / ratio;
+      return rectangle((area.left + area.right - width) / 2, (area.top + area.bottom - height) / 2,
+        (area.left + area.right + width) / 2, (area.top + area.bottom + height) / 2);
+    };
     const ratio = emulator.getDefaultAspectRatio();
-    if (!(ratio > 0)) return true; // Native geometry may arrive on its next frame.
-    let width, height, left, top;
-    if (sectionState.mode === 'stacked') {
-      top = sectionSplit(visible);
-      height = Math.min(2 * Math.min(top - bounds.top, bounds.bottom - top),
-        (bounds.right - bounds.left) / ratio);
-      width = height * ratio; left = (bounds.left + bounds.right) / 2;
-    } else {
-      const split = sectionSplit(visible);
-      // 3DS top/bottom screens have different widths at the same height.
-      // Align their native boundary with the section boundary, preserving both
-      // aspect ratios instead of stretching the smaller touchscreen.
-      const fraction = system === '3ds' ? 400 / 720 : .5;
-      width = Math.min((split - bounds.left) / fraction,
-        (bounds.right - split) / (1 - fraction), (bounds.bottom - bounds.top) * ratio);
-      height = width / ratio; left = split + (.5 - fraction) * width;
-      top = (bounds.top + bounds.bottom) / 2;
+    if (!(ratio > 0) || system === 'nds' && (stacked ? ratio > 1 : ratio < 2)) return true;
+    const sources = system === '3ds' ? (stacked ?
+      [{left: 0, top: 0, width: 1, height: .5}, {left: .1, top: .5, width: .8, height: .5}] :
+      [{left: 0, top: 0, width: 400 / 720, height: 1}, {left: 400 / 720, top: 0, width: 320 / 720, height: 1}]) :
+      (stacked ? [{left: 0, top: 0, width: 1, height: ratio * .75}, {left: 0, top: 1 - ratio * .75, width: 1, height: ratio * .75}] :
+        [{left: 0, top: 0, width: (4 / 3) / ratio, height: 1}, {left: 1 - (4 / 3) / ratio, top: 0, width: (4 / 3) / ratio, height: 1}]);
+    const destinations = [fit(upper, system === '3ds' ? 5 / 3 : 4 / 3), fit(picture, 4 / 3)];
+    // The pinned DS mouse handler treats horizontal screens as equal halves,
+    // even when its native image includes a gap. Keep that input ABI intact.
+    const inputSource = system === 'nds' && !stacked ? {left: .5, top: 0, width: .5, height: 1} : sources[1];
+    sectionState.presentation = {canvas: visible, sources, inputSource, destinations, controls, rails, lower, fold};
+    host.dataset.sectionControls = rails ? 'rails' : wide ? 'wide' : 'compact';
+    const rects = JSON.stringify(destinations);
+    if (host.dataset.screenRects !== rects) host.dataset.screenRects = rects;
+    const foldJSON = JSON.stringify(fold);
+    if (host.dataset.foldBounds !== foldJSON) host.dataset.foldBounds = foldJSON;
+    document.documentElement.style.setProperty('--kt-section-controls-top', `${lower.top}px`);
+    for (const [name, value] of Object.entries({left: `${controls.left - visible.left}px`, top: `${controls.top - visible.top}px`,
+      width: `${controls.width}px`, height: `${controls.height}px`, right: 'auto', bottom: 'auto', margin: '0'})) {
+      if (pad.style[name] !== value) pad.style[name] = value;
     }
-    if (!(width > 0 && height > 0)) return true;
     const canvas = emulator.canvas;
-    for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
-      width: `${width}px`, height: `${height}px`, 'max-width': 'none', 'max-height': 'none',
-      left: `${left}px`, top: `${top}px`})) canvas.style.setProperty(name, value, 'important');
+    for (const [name, value] of Object.entries({position: 'fixed', transform: 'none',
+      width: `${visible.width}px`, height: `${visible.height}px`, 'max-width': 'none', 'max-height': 'none',
+      left: `${visible.left}px`, top: `${visible.top}px`})) {
+      if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important') canvas.style.setProperty(name, value, 'important');
+    }
     return true;
   }
   const dsViews = [[2, 'Side by side'], [3, 'Side by side ↔'], [0, 'Vertical'],
@@ -573,7 +763,7 @@
     element.dataset.layoutId ||= element === stick ? 'stick' : element.dataset.cid !== undefined ?
       `button-${element.dataset.cid}` : element.dataset.axis ? `axis-${element.dataset.axis}` : 'menu';
   }
-  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}${sectionState?.mode ? ':sections' : ''}`;
+  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}${sectionState?.mode ? ':sections-console' : ''}`;
   function currentLayout() {
     // Keep layouts saved before platform names replaced emulator URL names.
     const legacyKey = `${emulatorPath}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
@@ -756,18 +946,21 @@
       const custom = Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
-      let left = controllerBounds.left, right = controllerBounds.right;
-      if (sectionState?.mode) {
-        const safe = (system === 'nds' ? dsOrigin : n3dsOrigin).getBoundingClientRect();
+      const controls = sectionState?.presentation?.controls;
+      const area = controls && element.classList.contains('kt-ds-mic') ?
+        {...controls, left: controls.left + 156, right: controls.right - 156, top: controls.bottom - 44} : controls || controllerBounds;
+      let left = area.left, right = area.right;
+      if (sectionState?.presentation?.rails && !element.classList.contains('kt-ds-mic')) {
         const isLeft = element === stick || element.classList.contains('kt-extra-dpad') ||
           ['8','10','12'].includes(element.dataset.cid);
-        if (isLeft) { left = Math.max(left, safe.left) + 18; right = left + 152; }
-        else { right = Math.min(right, safe.right) - 18; left = right - 152; }
+        if (isLeft) right = left + 144;
+        else left = right - 136;
       }
-      const clampX = x => Math.max(left + 8 + r.width / 2,
-        Math.min(right - 8 - r.width / 2, x));
-      const clampY = y => Math.max(controllerBounds.top + 8 + r.height / 2,
-        Math.min(controllerBounds.bottom - 8 - r.height / 2, y));
+      const inset = sectionState?.presentation ? 0 : 8;
+      const clampX = x => Math.max(left + inset + r.width / 2,
+        Math.min(right - inset - r.width / 2, x));
+      const clampY = y => Math.max(area.top + inset + r.height / 2,
+        Math.min(area.bottom - inset - r.height / 2, y));
       // Apply the exclusion area to defaults, restored layouts, and live drags.
       // Choose the closest free position alongside/above/below the tab.
       const xs = [desiredX, ...obstacles.flatMap(o => [o.left - gap - r.width / 2, o.right + gap + r.width / 2])].map(clampX);
@@ -817,7 +1010,7 @@
       } catch (_) { /* Session layout still works. */ }
       // Expanded sections belong to this device; keep the normal synced phone
       // layout and the sync protocol's existing orientation keys intact.
-      const synced = Object.fromEntries(Object.entries(changes).filter(([key]) => !key.endsWith(':sections')).map(([key, value]) => ['layout:' + key, value]));
+      const synced = Object.fromEntries(Object.entries(changes).filter(([key]) => !/:sections(?:-console)?$/.test(key)).map(([key, value]) => ['layout:' + key, value]));
       if (Object.keys(synced).length) saveControls(synced);
     } else if (beforeEdit) layouts = beforeEdit;
     editing = false; beforeEdit = null;
@@ -930,6 +1123,7 @@
     element.append(area);
   }
   function clear() {
+    setSectionMic(false);
     if (editDrag) releaseInput(editDrag.pointer, true);
     const captured = [...pointers.keys()];
     pointers.clear(); touchPointers.clear(); held.clear(); axes.fill(0);
@@ -941,6 +1135,7 @@
     }
   }
   function rebuild() {
+    setSectionMic([...pointers.values()].some(value => value.microphone));
     held.clear(); axes.fill(0);
     for (const value of pointers.values()) {
       if (value.cid !== undefined) held.add(value.cid);
@@ -973,8 +1168,9 @@
     const point = currentLayout().dock;
     if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
     if (sectionState?.mode) {
-      const safe = (system === 'nds' ? dsOrigin : n3dsOrigin).getBoundingClientRect();
-      return [dockSide === 'left' ? 0 : 1, (Math.max(controllerBounds.top + 12, safe.top) + 88) / innerHeight];
+      const area = sectionState.presentation?.lower;
+      if (area) return [dockSide === 'left' ? area.left / innerWidth : area.right / innerWidth,
+        (sectionState.presentation.rails ? area.top + 94 : sectionState.presentation.controls.top + 24) / innerHeight];
     }
     if (gameboy && innerWidth < innerHeight && !gamepadMode()) {
       // The wide portrait picture reaches the screen edges. Its default tab
@@ -997,7 +1193,18 @@
   }
   function drawDock() {
     const [x, y] = dockPosition();
-    const left = x < .5;
+    const area = sectionState?.presentation?.lower;
+    const left = x * innerWidth < (area ? (area.left + area.right) / 2 : innerWidth / 2);
+    const dock = $('.kt-dock');
+    const centered = area && !sectionState.presentation.rails && !drawerOpen;
+    dock.style.left = centered ? `${(area.left + area.right) / 2 - controllerBounds.left - 22}px` : area && left ? `${area.left - controllerBounds.left}px` : '';
+    dock.style.right = centered ? 'auto' : area && !left ? `${controllerBounds.right - area.right}px` : '';
+    drawer.style.maxHeight = area ? `${Math.max(44, area.height - 16)}px` : '';
+    drawer.style.maxWidth = area ? `${area.width}px` : '';
+    const editor = $('.kt-editor');
+    editor.style.left = area ? `${(area.left + area.right) / 2 - controllerBounds.left}px` : '';
+    editor.style.top = area ? `${area.top - controllerBounds.top + 8}px` : '';
+    editor.style.maxWidth = area ? `${area.width - 16}px` : '';
     host.classList.toggle('kt-dock-left', left);
     tab.textContent = drawerOpen === left ? '‹' : '›';
     tab.setAttribute('aria-label', editing ? 'Drag settings tab to either edge' : 'Touch controller settings');
@@ -1007,9 +1214,10 @@
     const toolbarBottom = system === 'nds' ? document.querySelector('.touch-overlay-buttons')?.getBoundingClientRect().bottom || 0 : 0;
     const minimum = editing ? $('.kt-editor').getBoundingClientRect().bottom + 10 :
       Math.max(controllerBounds.top + 8, toolbarBottom + 10);
-    const top = Math.max(minimum, Math.min(controllerBounds.bottom - 56, y * innerHeight - 24));
+    const top = Math.max(area ? area.top : minimum, Math.min((area?.bottom || controllerBounds.bottom) - 56, y * innerHeight - 24));
     host.style.setProperty('--kt-dock-top', `${top - controllerBounds.top}px`);
-    drawer.style.marginTop = `${drawerOpen ? Math.min(0, controllerBounds.bottom - 8 - top - drawer.offsetHeight) : 0}px`;
+    drawer.style.marginTop = `${drawerOpen ? Math.max((area?.top || controllerBounds.top) + 8 - top,
+      Math.min(0, (area?.bottom || controllerBounds.bottom) - 8 - top - drawer.offsetHeight)) : 0}px`;
   }
   function draw() {
     fitVisibleViewport();
@@ -1030,6 +1238,9 @@
     toggle.setAttribute('aria-pressed', String(effectiveEnabled));
     toggle.textContent = `Touch controls: ${effectiveEnabled ? 'On' : 'Off'}`;
     const wasHidden = pad.hidden;
+    const microphone = $('.kt-ds-mic');
+    const microphoneHidden = !(system === 'nds' && sectionState?.mode && emulator?.getPrefs?.()?.isMicrophoneSupported?.());
+    if (microphone.hidden !== microphoneHidden) { microphone.hidden = microphoneHidden; layoutStamp = ''; }
     pad.hidden = (dolphin && !touchDevice) || drawerOpen || (!editing && (!effectiveEnabled || !gameReady));
     $('.kt-editor').hidden = !editing || drawerOpen;
     drawDock();
@@ -1040,12 +1251,14 @@
     sectionsToggle.textContent = `Screen sections: ${automaticSections ? 'Auto' : 'Off'}`;
     $('.kt-fold-position').hidden = !sectionState?.mode || editing;
     if (sectionState?.mode) {
-      const split = sectionSplit(controllerBounds), stacked = sectionState.mode === 'stacked';
+      const fold = sectionFold(controllerBounds), split = fold.center, stacked = sectionState.mode === 'stacked';
       host.style.setProperty('--kt-fold-y', `${stacked ? split - controllerBounds.top : controllerBounds.height / 2}px`);
-      foldGuide.style.cssText = stacked ? `left:0;right:0;top:${split - controllerBounds.top}px;height:1px` :
-        `top:0;bottom:0;left:${split - controllerBounds.left}px;width:1px`;
+      foldGuide.style.cssText = stacked ? `left:0;right:0;top:${fold.start - controllerBounds.top}px;height:${fold.gap}px;border-block:1px solid #67e5c5` :
+        `top:0;bottom:0;left:${fold.start - controllerBounds.left}px;width:${fold.gap}px;border-inline:1px solid #67e5c5`;
       foldSlider.value = String(foldOffset(sectionState.mode));
       $('.kt-fold-position output').value = `${foldSlider.value}%`;
+      foldGapSlider.min = String(Math.max(16, fold.reportedGap)); foldGapSlider.max = String(Math.max(160, fold.gap));
+      foldGapSlider.value = String(fold.gap); $('.kt-fold-gap-value').value = `${Math.round(fold.gap)}px`;
     } else foldGuide.hidden = true;
     dsScreens.hidden = system !== 'nds' || !gameReady || editing;
     n3dsScreens.hidden = system !== '3ds' || !gameReady || editing || !window.app?.emulator?.getViews;
@@ -1053,7 +1266,8 @@
       document.documentElement.classList.toggle('kt-ds-playing', gameReady && !editing && !drawerOpen);
     }
     const tabRect = tab.getBoundingClientRect();
-    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${sectionState?.mode ? sectionSplit(controllerBounds) : ''}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
+    const fold = sectionState?.presentation?.fold;
+    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${fold ? `${fold.start}:${fold.end}:${host.dataset.sectionControls}` : ''}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
   }
   function setDrawer(open) {
@@ -1184,6 +1398,7 @@
   }
   function buttonInput(target) {
     if (!target) return {target: null};
+    if (target.classList.contains('kt-ds-mic')) return {target, microphone: true};
     return target.dataset.cid !== undefined ? {target, cid: Number(target.dataset.cid)} :
       {target, axis: target.dataset.axis.split(',').map(Number)};
   }
@@ -1334,6 +1549,10 @@
   }
   window.addEventListener('wrcad:controls-loaded', refreshPreferences);
   window.addEventListener('storage', e => {
+    if (e.key === FOLD_GAP_KEY || e.key === null) {
+      try { foldGap = Math.max(16, Math.min(160, Number(localStorage.getItem(FOLD_GAP_KEY)) || 40)); } catch (_) {}
+      layoutStamp = '';
+    }
     if (e.key === FOLD_KEY || e.key === null) {
       try { foldAlignment = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (_) {}
       layoutStamp = '';

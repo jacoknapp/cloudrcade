@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.4",
+    "date": "November 16, 2026",
+    "title": "DS and 3DS console layout",
+    "changes": [
+      "Expanded DS and 3DS windows put the controls in the touchscreen section. Each game screen fits its own available area while keeping its native aspect ratio.",
+      "The fold stays clear of both pictures and controls. Reported display sections locate its reserved area; Fold alignment and Fold gap in the drawer provide device-local adjustment.",
+      "Portrait stacks the screens and landscape places them side by side. Compact windows and physical controllers restore your manual view."
+    ]
+  },
+  {
     "version": "3.1.3",
     "date": "November 16, 2026",
     "title": "Fold alignment and expanded controls",

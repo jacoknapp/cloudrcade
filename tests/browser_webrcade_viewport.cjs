@@ -24,7 +24,7 @@ const fixture = `
   const controller={isControlDown:function(cid,analogToDigital=true){return analogToDigital && ['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid] ? this[['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid]](0) : false},isPadButtonDown:()=>false,getAxisValue:()=>0,
     isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
   window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{canvas,started:true,paused:false,analogMode:false,
-    SS_16_9:2,SS_FILL:3,getScreenSize:()=>window.fixtureScreen||0,getDefaultAspectRatio:()=>ratio,
+    SS_16_9:2,SS_FILL:3,getScreenSize:()=>window.fixtureScreen||0,getDefaultAspectRatio(){return location.pathname.includes('/nds/')?([0,1].includes(this.getScreenLayout())?2/3:8/3):ratio},
     getProps:()=>({zoomLevel:window.fixtureZoom||0}),
     getScreenLayout:()=>0,getPrefs:()=>({getScreenLayout:()=>0}),
     controllers:{getController:()=>controller},updateScreenSize(){

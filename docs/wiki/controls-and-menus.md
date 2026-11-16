@@ -54,22 +54,28 @@ DS retains native stylus touch on the game screen. Its drawer has **DS screens**
 3DS has its own **3DS screens → View** button in the drawer to cycle that app's available screen arrangements. Its saved choice is separate from the DS view.
 
 On an open iPhone Duo or another expanded touch window, DS and 3DS use one game
-screen per section: stacked in portrait and side by side in landscape. Controls
-stay in the outer left and right columns. Both screens keep their aspect ratios,
-and the lower game screen retains its native touchscreen input.
+screen per section: stacked in portrait and side by side in landscape. Each
+picture scales independently to fit its available space and keeps its native
+aspect ratio. The upper display uses its whole section. All controller buttons,
+sticks and the DS microphone button stay in the touchscreen section, beside the
+picture when there is room or below it in a narrower section. Native touchscreen
+input follows the resized picture.
 
 **Screen sections: Auto** in the drawer controls this behavior on this device.
 Turning it off or choosing a manual View returns to normal screen arrangements.
 Closing the phone, entering narrow Split View or connecting a controller restores
 the saved manual view. Automatic rotation does not replace synced screen choices
-or saved phone button positions. Expanded sections have their own device-local
-button layout; editing it leaves the normal phone layout intact. Controls stay
-within the side columns, clear of one another and the horizontal fold.
+or saved phone button positions. This console arrangement has its own
+device-local button layout; editing it leaves earlier layouts intact.
 
-**Fold alignment** adjusts the screen boundary on this device. A guide appears
-while adjusting the slider; line it up with the physical crease. **Reset fold
-alignment** returns to the reported display boundary, or the display center when
-segment information is unavailable. Home Screen status areas are accounted for.
+**Fold alignment** moves the boundary and **Fold gap** sets the clearance around
+it. A shaded guide appears while adjusting either slider; cover the physical
+crease with the guide. Reported display-section bounds reserve their entire gap.
+When those bounds are unavailable, the app infers the display center, accounting
+for Home Screen status space, and reserves a conservative 40 CSS pixels. This
+fallback is adjustable clearance, not a measured hinge dimension. **Reset fold
+alignment** returns to the reported or inferred boundary. Adjustments stay on
+this device.
 
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
 
