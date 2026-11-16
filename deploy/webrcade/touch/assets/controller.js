@@ -22,6 +22,10 @@
   const SECTIONS_KEY = prefix + '.touch.screen-sections.v1';
   let automaticSections = true;
   try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
+  const FOLD_KEY = prefix + '.touch.fold-alignment.v1';
+  let foldAlignment = {};
+  try { foldAlignment = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (_) {}
+  const foldOffset = mode => Math.max(-15, Math.min(15, Number(foldAlignment?.[mode]) || 0));
   const parseDSView = value => /^[0-5]$/.test(String(value)) ? Number(value) : null;
   let dsView = null, dsEmulator = null, dsObserver = null;
   try { dsView = parseDSView(localStorage.getItem(DS_VIEW_KEY)); } catch (_) { /* Use the game's layout. */ }
@@ -125,6 +129,11 @@
         <button class="kt-mute kt-switch" role="switch" aria-checked="false"><i></i><span>Mute audio</span></button>
         <button class="kt-edit" disabled>Edit layout</button>
         <button class="kt-sections-toggle" aria-pressed="true" hidden>Screen sections: Auto</button>
+        <div class="kt-fold-position" hidden>
+          <label for="kt-fold-alignment">Fold alignment</label><output for="kt-fold-alignment">0%</output>
+          <input id="kt-fold-alignment" type="range" min="-15" max="15" step="0.1" value="0">
+          <button class="kt-fold-reset">Reset fold alignment</button>
+        </div>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
           <strong>DS screens</strong>
           <button class="kt-ds-cycle">View</button>
@@ -145,6 +154,7 @@
       <span>Drag buttons to move them</span>
       <div><button class="kt-save">Save</button><button class="kt-cancel">Cancel</button><button class="kt-reset">Reset</button></div>
     </div>
+    <div class="kt-fold-guide" aria-hidden="true" hidden></div>
     <div class="kt-pad" aria-label="Touch game controller" hidden>
       <div class="kt-shoulders"><button data-cid="8">L</button><button data-cid="10">L2</button><button data-cid="11">R2</button><button data-cid="9">R</button></div>
       <div class="kt-stick" role="group" aria-label="Directional pad: drag in any direction"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><i></i></div>
@@ -313,6 +323,46 @@
     window.app?.emulator?.updateScreenSize?.();
   }
   sectionsToggle.addEventListener('click', () => chooseAutomaticSections(!automaticSections));
+  const foldSlider = $('#kt-fold-alignment'), foldGuide = $('.kt-fold-guide');
+  function changeFold(value) {
+    if (!sectionState?.mode) return;
+    foldAlignment = {...foldAlignment, [sectionState.mode]: Number(value)};
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(foldAlignment)); } catch (_) {}
+    clear(); layoutStamp = ''; draw();
+  }
+  foldSlider.addEventListener('input', e => { foldGuide.hidden = false; changeFold(e.target.value); });
+  foldSlider.addEventListener('focus', () => { foldGuide.hidden = false; });
+  foldSlider.addEventListener('blur', () => { foldGuide.hidden = true; });
+  for (const event of ['keydown', 'keyup']) foldSlider.addEventListener(event, e => { if (e.key !== 'Escape') e.stopPropagation(); });
+  $('.kt-fold-reset').addEventListener('click', () => changeFold(0));
+  function sectionSplit(visible) {
+    const stacked = sectionState.mode === 'stacked';
+    let split = stacked ? visible.top + visible.height / 2 : visible.left + visible.width / 2;
+    // Segment coordinates belong to the outer window, not necessarily this
+    // game iframe. Translate them before placing the native screen boundary.
+    try {
+      let outer = window, x = 0, y = 0;
+      while (outer !== outer.top && outer.frameElement) {
+        const frame = outer.frameElement, rect = frame.getBoundingClientRect();
+        x += rect.left + frame.clientLeft; y += rect.top + frame.clientTop; outer = outer.parent;
+      }
+      const segments = outer.viewport?.segments || outer.visualViewport?.segments;
+      const ordered = segments?.length === 2 ? [...segments].sort((a, b) => stacked ? a.top - b.top : a.left - b.left) : [];
+      if (ordered.length && (stacked ? ordered[0].bottom <= ordered[1].top : ordered[0].right <= ordered[1].left)) {
+        split = stacked ? (ordered[0].bottom + ordered[1].top) / 2 - y :
+          (ordered[0].right + ordered[1].left) / 2 - x;
+      } else if (outer.document.documentElement.hasAttribute('data-cr-status-top') &&
+          (outer.navigator.standalone || outer.matchMedia('(display-mode: standalone)').matches) && !outer.document.fullscreenElement) {
+        // Opaque installed-app status areas are outside innerHeight. Center
+        // on the physical display, then translate back into content space.
+        const excluded = outer.screen.height - outer.innerHeight;
+        if (stacked && Math.abs(outer.screen.width - outer.innerWidth) < 1 && excluded > 0 && excluded <= 100)
+          split = outer.screen.height / 2 - excluded - y;
+      }
+    } catch (_) { /* Older/cross-origin browsers retain the visible midpoint. */ }
+    split += foldOffset(sectionState.mode) / 100 * (stacked ? visible.height : visible.width);
+    return split;
+  }
   function sectionBounds(origin) {
     const safe = origin.getBoundingClientRect(), visible = visibleViewport();
     return {left: Math.max(safe.left, visible.left) + 182,
@@ -327,12 +377,12 @@
     if (!(ratio > 0)) return true; // Native geometry may arrive on its next frame.
     let width, height, left, top;
     if (sectionState.mode === 'stacked') {
-      top = visible.top + visible.height / 2;
+      top = sectionSplit(visible);
       height = Math.min(2 * Math.min(top - bounds.top, bounds.bottom - top),
         (bounds.right - bounds.left) / ratio);
       width = height * ratio; left = (bounds.left + bounds.right) / 2;
     } else {
-      const split = visible.left + visible.width / 2;
+      const split = sectionSplit(visible);
       // 3DS top/bottom screens have different widths at the same height.
       // Align their native boundary with the section boundary, preserving both
       // aspect ratios instead of stretching the smaller touchscreen.
@@ -523,11 +573,11 @@
     element.dataset.layoutId ||= element === stick ? 'stick' : element.dataset.cid !== undefined ?
       `button-${element.dataset.cid}` : element.dataset.axis ? `axis-${element.dataset.axis}` : 'menu';
   }
-  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
+  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}${sectionState?.mode ? ':sections' : ''}`;
   function currentLayout() {
     // Keep layouts saved before platform names replaced emulator URL names.
     const legacyKey = `${emulatorPath}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
-    const value = layouts[layoutKey()] ?? (wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? null : layouts[legacyKey]);
+    const value = layouts[layoutKey()] ?? (sectionState?.mode || wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? null : layouts[legacyKey]);
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
   // A game iframe can be taller than the visible installed-app window. Its
@@ -694,6 +744,10 @@
     const obstacles = [tab.getBoundingClientRect()];
     if (!dsCycle.hidden) obstacles.push(dsCycle.getBoundingClientRect());
     if (editing) obstacles.push($('.kt-editor').getBoundingClientRect());
+    if (sectionState?.mode === 'stacked') {
+      const split = sectionSplit(controllerBounds);
+      obstacles.push({left: controllerBounds.left, right: controllerBounds.right, top: split - 12, bottom: split + 12});
+    }
     const gap = 10; // Includes the editor's dashed outlines and a finger gap.
     for (const element of movable) {
       const point = saved[element.dataset.layoutId];
@@ -718,15 +772,20 @@
       // Choose the closest free position alongside/above/below the tab.
       const xs = [desiredX, ...obstacles.flatMap(o => [o.left - gap - r.width / 2, o.right + gap + r.width / 2])].map(clampX);
       const ys = [desiredY, ...obstacles.flatMap(o => [o.top - gap - r.height / 2, o.bottom + gap + r.height / 2])].map(clampY);
+      const cssRadius = getComputedStyle(element).borderTopLeftRadius;
+      const radius = parseFloat(cssRadius) * (cssRadius.endsWith('%') ? r.width / 100 : 1);
+      const circle = Math.abs(r.width - r.height) < 1 && radius >= r.width / 2;
       const positions = xs.flatMap(x => ys.map(y => ({x, y}))).filter(p => obstacles.every(o =>
-        p.x + r.width / 2 <= o.left - gap || p.x - r.width / 2 >= o.right + gap ||
-        p.y + r.height / 2 <= o.top - gap || p.y - r.height / 2 >= o.bottom + gap));
+        circle && o.circle ? Math.hypot(p.x - (o.left + o.right) / 2, p.y - (o.top + o.bottom) / 2) >= r.width / 2 + (o.right - o.left) / 2 + gap :
+          p.x + r.width / 2 <= o.left - gap || p.x - r.width / 2 >= o.right + gap ||
+          p.y + r.height / 2 <= o.top - gap || p.y - r.height / 2 >= o.bottom + gap));
       positions.sort((a, b) => Math.hypot(a.x - desiredX, a.y - desiredY) - Math.hypot(b.x - desiredX, b.y - desiredY));
       // On an exceptionally small viewport, hide a control rather than cover
       // the settings handle; it returns as soon as there is room again.
       if (!positions.length) { element.style.visibility = 'hidden'; continue; }
       const {x, y} = positions[0];
       element.style.transform = `translate(${x - r.left - r.width / 2}px, ${y - r.top - r.height / 2}px)`;
+      if (sectionState?.mode) obstacles.push({...element.getBoundingClientRect().toJSON(), circle});
     }
     // Read geometry once after layout, not on every high-frequency touch move.
     hitAreas = movable.flatMap(element => {
@@ -756,7 +815,10 @@
         layouts = {...JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'), ...changes};
         localStorage.setItem(LAYOUT_KEY, JSON.stringify(layouts));
       } catch (_) { /* Session layout still works. */ }
-      saveControls(Object.fromEntries(Object.entries(changes).map(([key, value]) => ['layout:' + key, value])));
+      // Expanded sections belong to this device; keep the normal synced phone
+      // layout and the sync protocol's existing orientation keys intact.
+      const synced = Object.fromEntries(Object.entries(changes).filter(([key]) => !key.endsWith(':sections')).map(([key, value]) => ['layout:' + key, value]));
+      if (Object.keys(synced).length) saveControls(synced);
     } else if (beforeEdit) layouts = beforeEdit;
     editing = false; beforeEdit = null;
     host.classList.remove('kt-editing');
@@ -976,17 +1038,27 @@
     sectionsToggle.hidden = !['nds','3ds'].includes(system) || !gameReady || editing;
     sectionsToggle.setAttribute('aria-pressed', String(automaticSections));
     sectionsToggle.textContent = `Screen sections: ${automaticSections ? 'Auto' : 'Off'}`;
+    $('.kt-fold-position').hidden = !sectionState?.mode || editing;
+    if (sectionState?.mode) {
+      const split = sectionSplit(controllerBounds), stacked = sectionState.mode === 'stacked';
+      host.style.setProperty('--kt-fold-y', `${stacked ? split - controllerBounds.top : controllerBounds.height / 2}px`);
+      foldGuide.style.cssText = stacked ? `left:0;right:0;top:${split - controllerBounds.top}px;height:1px` :
+        `top:0;bottom:0;left:${split - controllerBounds.left}px;width:1px`;
+      foldSlider.value = String(foldOffset(sectionState.mode));
+      $('.kt-fold-position output').value = `${foldSlider.value}%`;
+    } else foldGuide.hidden = true;
     dsScreens.hidden = system !== 'nds' || !gameReady || editing;
     n3dsScreens.hidden = system !== '3ds' || !gameReady || editing || !window.app?.emulator?.getViews;
     if (system === 'nds') {
       document.documentElement.classList.toggle('kt-ds-playing', gameReady && !editing && !drawerOpen);
     }
     const tabRect = tab.getBoundingClientRect();
-    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
+    const stamp = `${innerWidth}:${innerHeight}:${controllerBounds.left}:${controllerBounds.top}:${controllerBounds.width}:${controllerBounds.height}:${sectionState?.mode ? sectionSplit(controllerBounds) : ''}:${layoutKey()}:${editing}:${tabRect.x}:${tabRect.y}:${tabRect.width}:${tabRect.height}`;
     if (!pad.hidden && (wasHidden || stamp !== layoutStamp)) { applyLayout(); layoutStamp = stamp; }
   }
   function setDrawer(open) {
     clear(); drawerOpen = open; drawer.hidden = !open;
+    if (!open) foldGuide.hidden = true;
     tab.setAttribute('aria-expanded', String(open));
     draw();
     if (open) cloud()?.syncControls?.();
@@ -1262,6 +1334,10 @@
   }
   window.addEventListener('wrcad:controls-loaded', refreshPreferences);
   window.addEventListener('storage', e => {
+    if (e.key === FOLD_KEY || e.key === null) {
+      try { foldAlignment = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (_) {}
+      layoutStamp = '';
+    }
     if (e.key === SECTIONS_KEY || e.key === null) {
       try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
       clear(); layoutStamp = ''; draw();

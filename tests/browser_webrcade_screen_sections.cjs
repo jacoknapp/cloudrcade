@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {chromium, webkit} = require('playwright');
 const root = path.join(__dirname, '../deploy/webrcade');
-const asset = name => fs.readFileSync(path.join(root, 'touch/assets', name), 'utf8');
+const asset = name => fs.readFileSync(path.join(process.env.WEBRCADE_TOUCH_ASSETS_ROOT || path.join(root, 'touch/assets'), name), 'utf8');
 // Exercise the shipped 3DS view methods, including their real persistence and
 // core-option behavior, rather than a second implementation of those methods.
 const source = fs.readFileSync(path.join(root, 'retro-azahar/app/src/emulator/index.js'), 'utf8');
@@ -16,6 +16,9 @@ const fixture = `
  ${views}
  class ThreeDS {${methods}}
  const canvas=document.createElement('canvas');document.body.append(canvas);
+ const oldLayout={'button-8':[.5,.75],'button-10':[.5,.75],stick:[.5,.75],dpad:[.5,.75],
+  'stick-right':[.5,.75],'button-4':[.5,.75],dock:[1,.18]};
+ localStorage.setItem('webrcade.touch.layouts.v1',JSON.stringify({[system+':portrait']:oldLayout,[system+':landscape']:oldLayout}));
  let savedDS=4;const saved3DS='touch';
  localStorage.setItem('wrcad.touch.3ds-view.v1',saved3DS);
  localStorage.setItem('webrcade.touch.3ds-view.v1',saved3DS);
@@ -80,10 +83,21 @@ const fixture = `
      const fraction=system==='3ds'?400/720:.5;
      assert(Math.abs(side?canvas.x+canvas.width*fraction-size.width/2:
       canvas.y+canvas.height/2-size.height/2)<.5,'native screen boundary matches window sections');
-     for(const control of await page.locator('.kt-pad button:visible,.kt-stick:visible,.kt-tab:visible').evaluateAll(els=>els.map(el=>({...el.getBoundingClientRect().toJSON(),id:el.dataset.layoutId||'tab'})))) {
+     const controls=await page.locator('.kt-pad button:visible,.kt-stick:visible,.kt-tab:visible').evaluateAll(els=>els.map(el=>{
+      const r=el.getBoundingClientRect(),css=getComputedStyle(el).borderTopLeftRadius;
+      return {...r.toJSON(),id:el.dataset.layoutId||'tab',circle:Math.abs(r.width-r.height)<1&&parseFloat(css)*(css.endsWith('%')?r.width/100:1)>=r.width/2};
+     }));
+     assert.equal(controls.length,system==='3ds'?15:11,'all controls remain visible');
+     for(const control of controls) {
       const margin=control.id==='tab'?0:7.5;
       assert(control.x>=margin&&control.y>=margin&&control.right<=size.width-margin&&control.bottom<=size.height-margin,'control fits '+system+' '+JSON.stringify({size,control}));
       assert(control.right<=canvas.x||control.x>=canvas.x+canvas.width,'control stays outside both screens');
+      if(!side&&control.id!=='tab')assert(control.bottom<=size.height/2-12||control.y>=size.height/2+12,'control stays clear of horizontal fold');
+     }
+     for(let i=0;i<controls.length;i++)for(let j=i+1;j<controls.length;j++) {
+      const a=controls[i],b=controls[j];
+      if(a.circle&&b.circle)assert(Math.hypot(a.x+a.width/2-b.x-b.width/2,a.y+a.height/2-b.y-b.height/2)>=a.width/2+b.width/2+5,'round controls do not overlap');
+      else assert(a.right<=b.x-5||a.x>=b.right+5||a.bottom<=b.y-5||a.y>=b.bottom+5,'controls do not overlap '+a.id+'/'+b.id);
      }
      if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-'+size.width+'x'+size.height+'.png')});
     } else {
@@ -92,6 +106,16 @@ const fixture = `
     }
     assert.deepEqual(await page.evaluate(()=>[savedLayout(),localStorage.getItem('wrcad.touch.3ds-view.v1'),localStorage.getItem('webrcade.touch.layouts.v1')]),saved,'automatic layout never saves manual preferences');
    }
+   const edited=await page.evaluate(()=>{
+    const values=JSON.parse(localStorage.getItem('webrcade.touch.layouts.v1'));
+    values[system+':portrait:sections']={'button-8':[.12,.72],'button-12':[.12,.72]};
+    const json=JSON.stringify(values);localStorage.setItem('webrcade.touch.layouts.v1',json);
+    dispatchEvent(new Event('wrcad:controls-loaded'));return json;
+   });
+   await page.waitForTimeout(300);
+   const l=await page.locator('[data-cid="8"]').boundingBox(),select=await page.locator('[data-cid="12"]').boundingBox();
+   assert(l.x+l.width<=select.x-5||select.x+select.width<=l.x-5||l.y+l.height<=select.y-5||select.y+select.height<=l.y-5,'edited section controls resolve collisions');
+   assert.equal(await page.evaluate(()=>localStorage.getItem('webrcade.touch.layouts.v1')),edited,'collision fitting does not rewrite saved coordinates');
    await page.locator('.kt-tab').click();await page.locator('.kt-sections-toggle').click();
    assert.equal(await page.locator('.kt-sections').count(),0,'manual opt-out restores normal view');
    await page.locator('.kt-sections-toggle').click();
@@ -107,6 +131,38 @@ const fixture = `
    assert.equal(await page.locator('.kt-sections').count(),0,'physical controller restores native full-area view');
    assert.deepEqual(errors,[]);
    await page.close();console.log('PASS',engine.name(),system,'native rotation/section boundaries, side controls, saved view/book/layout restoration, opt-out and gamepad');
+   // The installed host can exclude a status strip and offset the game frame.
+   // Segment positions are in host coordinates; game placement is in frame coordinates.
+   const installed=await browser.newPage({hasTouch:true,viewport:{width:669,height:867}});
+   const gameURL='http://sections.test/play/app/retro-'+(system==='3ds'?'azahar':'melonds')+'/';
+   await installed.route('http://sections.test/**',route=>route.fulfill({contentType:'text/html',body:`
+    <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>body{margin:0;background:black}canvas{position:fixed;transform:translate(-50%,-50%)}</style>
+    <style>${asset('controller.css')}</style></head><body><script>${fixture}</script><script>${asset('controller.js')}</script></body></html>`}));
+   await installed.route('http://sections.test/host',route=>route.fulfill({contentType:'text/html',body:`
+    <!doctype html><html data-cr-status-top><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+    <body style="margin:0;background:black"><script>
+    Object.defineProperty(navigator,'standalone',{value:true});
+    Object.defineProperty(screen,'height',{get:()=>innerHeight+64});Object.defineProperty(screen,'width',{get:()=>innerWidth});
+    </script><iframe id="game" src="${gameURL}" style="position:fixed;left:0;top:40px;width:100%;height:calc(100% - 40px);border:0"></iframe></body></html>`}));
+   await installed.goto('http://sections.test/host');
+   const frame=await(await installed.locator('#game').elementHandle()).contentFrame();
+   await frame.locator('.kt-pad').waitFor({state:'visible'});await installed.waitForTimeout(300);
+   const boundary=async()=>{const r=await frame.locator('canvas').boundingBox();return r.y+r.height/2};
+   assert(Math.abs(await boundary()-(867-64)/2)<.6,'installed physical fold excludes status area and accounts for frame offset');
+   if(process.env.WEBRCADE_TEST_OUTPUT)await installed.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-installed.png')});
+   await installed.evaluate(()=>{window.viewport={segments:[{left:0,top:0,right:669,bottom:300},{left:0,top:300,right:669,bottom:867}]}});
+   await installed.waitForTimeout(300);
+   assert(Math.abs(await boundary()-300)<.6,'reported segments override inferred display center');
+   await frame.locator('.kt-tab').click();
+   await frame.locator('#kt-fold-alignment').evaluate(el=>{el.value='3';el.dispatchEvent(new Event('input',{bubbles:true}))});
+   await installed.waitForTimeout(200);
+   assert(Math.abs(await boundary()-(300+827*.03))<.6,'device-local fold adjustment translates native screen boundary');
+   assert.equal(await frame.locator('.kt-fold-guide').isVisible(),true,'alignment has visible guide');
+   assert.equal(await frame.evaluate(()=>JSON.parse(localStorage.getItem('webrcade.touch.fold-alignment.v1')).stacked),3,'fold offset persists independently');
+   await frame.locator('.kt-fold-reset').click();await installed.waitForTimeout(200);
+   assert(Math.abs(await boundary()-300)<.6,'reset returns to reported fold');
+   await installed.close();console.log('PASS',engine.name(),system,'legacy overlap isolation, installed/nested physical fold, reported segments and alignment guide/reset');
   }} finally {await browser.close()}
  }
 })().catch(e=>{console.error(e);process.exitCode=1});

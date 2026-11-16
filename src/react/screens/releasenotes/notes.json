@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.3",
+    "date": "November 16, 2026",
+    "title": "Fold alignment and expanded controls",
+    "changes": [
+      "DS and 3DS align their screen boundary with reported display sections and account for the Home Screen status area when finding the display center.",
+      "Expanded screen sections use their own controller layout, keeping older phone layouts from overlapping the side controls. Controls avoid one another and the horizontal fold.",
+      "Fold alignment in the touch drawer lets you fine-tune the screen boundary with a visible guide. The adjustment stays on this device."
+    ]
+  },
+  {
     "version": "3.1.2",
     "date": "November 16, 2026",
     "title": "DS and 3DS screen sections",
@@ -27,7 +37,7 @@
       "Nintendo Wii is included in the standard release without an enable switch or experimental labels, including browsers that disabled the beta. Existing saves and controller layouts are retained.",
       "Wii supports ISO, single-file WBFS and Wii CISO discs, with Remote/Nunchuk layouts and optional phone motion. Its optional performance readout is in Core Settings.",
       "GameCube and Wii gain compiled-block chaining, bounded cold-code retirement and native graphics frame skip. Desktop GameCube can use a larger cache; standard/mobile limits and save compatibility are retained.",
-      "Frame skip Off/2×/3×/4× omits native graphics work while game state and audio continue. Compatibility and speed depend on the game, browser and device."
+      "Frame skip Off/2\u00d7/3\u00d7/4\u00d7 omits native graphics work while game state and audio continue. Compatibility and speed depend on the game, browser and device."
     ]
   },
   {

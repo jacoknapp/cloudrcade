@@ -62,8 +62,14 @@ and the lower game screen retains its native touchscreen input.
 Turning it off or choosing a manual View returns to normal screen arrangements.
 Closing the phone, entering narrow Split View or connecting a controller restores
 the saved manual view. Automatic rotation does not replace synced screen choices
-or saved button positions; edited buttons are kept within the side columns while
-automatic sections are active.
+or saved phone button positions. Expanded sections have their own device-local
+button layout; editing it leaves the normal phone layout intact. Controls stay
+within the side columns, clear of one another and the horizontal fold.
+
+**Fold alignment** adjusts the screen boundary on this device. A guide appears
+while adjusting the slider; line it up with the physical crease. **Reset fold
+alignment** returns to the reported display boundary, or the display center when
+segment information is unavailable. Home Screen status areas are accounted for.
 
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
 
