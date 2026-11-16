@@ -58,4 +58,11 @@ Use the same browser/profile when relying on local saves or offline files. Priva
 
 A browser may require an explicit tap to start audio. Keep the game tab in the foreground for predictable timing. Rotation releases held inputs and switches to the appropriate saved touch layout. Some emulator apps require cross-origin isolation for shared memory; keep the runtime's security headers intact at your proxy.
 
+iPhone Duo uses the responsive touch layout on its cover display, inner display
+and in Split View. Folding, unfolding and resizing update the game area without
+relaunching the game. Game Boy/Color fit their default picture above the controls
+in portrait and between the side controls in landscape, with Select/Menu/Start
+below the picture. These layouts are covered by Chromium and WebKit viewport
+tests; physical iPhone Duo validation remains pending.
+
 GameCube needs hardware WebGPU, shared-memory isolation and sufficient device memory; its core reserves 768 MiB of WASM memory before other browser/GPU use. PlayStation 2 needs hardware WebGPU, HTTPS (or localhost), cross-origin isolation and SharedArrayBuffer, with no WebGL or software-adapter fallback; see the [PS2 guide](../../deploy/webrcade/retro-play/README.md). A browser that runs cartridge games may not meet these requirements, and meeting them does not guarantee a particular game's speed or compatibility.

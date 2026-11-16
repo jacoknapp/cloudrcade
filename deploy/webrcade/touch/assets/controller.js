@@ -503,32 +503,59 @@
           Math.abs(outer.screen.width - outer.innerWidth) < 1 && difference > 0 && difference <= 100)
         excludedTop = difference;
     } catch (_) { /* Cross-origin hosts retain visible viewport centering. */ }
-    const height = canvas?.getBoundingClientRect().height || 0;
-    // PSX and GB/GBC have default portrait picture areas, independent of live
-    // controller positions, visibility and sizing.
-    const portraitArea = !gamepadMode() && bounds.width < bounds.height && (system === 'psx' || gameboy);
-    const safe = portraitArea ? (gameboy ? gbOrigin : psxOrigin).getBoundingClientRect() : null;
-    const safeTop = portraitArea ? Math.max(bounds.top, safe.top) : bounds.top;
-    const safeBottom = portraitArea ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
-    const middle = portraitArea ? (safeTop + Math.max(safeTop, safeBottom)) / 2 :
+    // Default picture areas stay independent of live controller positions,
+    // visibility and sizing: PSX in portrait, GB/GBC in both orientations.
+    const reservedArea = !gamepadMode() && (gameboy || bounds.width < bounds.height && system === 'psx');
+    const safe = reservedArea ? (gameboy ? gbOrigin : psxOrigin).getBoundingClientRect() : null;
+    const safeTop = reservedArea ? Math.max(bounds.top, safe.top) : bounds.top;
+    const safeBottom = reservedArea ? Math.min(bounds.bottom, safe.bottom) : bounds.bottom;
+    const safeLeft = reservedArea ? Math.max(bounds.left, safe.left) : bounds.left;
+    const safeRight = reservedArea ? Math.min(bounds.right, safe.right) : bounds.right;
+    // Short cover displays and split windows can leave less room than the
+    // native default picture needs. Fit it uniformly above the standard pad.
+    // Measure the untransformed layout size so repeated alignment cannot feed
+    // its own scale back into the next measurement. Native Fill, widescreen
+    // and zoom choices retain their native sizing.
+    let scale = 1;
+    const native = canvas ? getComputedStyle(canvas) : null;
+    const nativeHeight = canvas ? parseFloat(native.height) || canvas.clientHeight : 0;
+    const nativeWidth = canvas ? parseFloat(native.width) || canvas.clientWidth : 0;
+    if (canvas && reservedArea) {
+      const width = nativeWidth, height = nativeHeight;
+      const ratio = emulator.getDefaultAspectRatio?.();
+      const fill = emulator.SS_FILL !== undefined && emulator.getScreenSize?.() === emulator.SS_FILL;
+      const zoom = Number(emulator.getProps?.().zoomLevel) || 0;
+      if (!fill && !zoom && width > 0 && height > 0 && Number.isFinite(ratio) &&
+          Math.abs(width / height - ratio) < .01) {
+        scale = Math.min(1, Math.max(0, safeBottom - safeTop) / height,
+          Math.max(0, safeRight - safeLeft) / width);
+      }
+    }
+    const height = nativeHeight * scale;
+    const middle = reservedArea ? (safeTop + Math.max(safeTop, safeBottom)) / 2 :
       bounds.top + (bounds.height - excludedTop) / 2;
     // Fill/zoom can leave no room to move: keep the native picture visible.
     const center = height <= bounds.height ?
       Math.max(bounds.top + height / 2, Math.min(bounds.bottom - height / 2, middle)) :
       bounds.top + bounds.height / 2;
+    const width = nativeWidth * scale, middleX = (safeLeft + Math.max(safeLeft, safeRight)) / 2;
+    const centerX = width <= bounds.width ?
+      Math.max(bounds.left + width / 2, Math.min(bounds.right - width / 2, middleX)) :
+      bounds.left + bounds.width / 2;
     const pixels = value => `${Math.round(value * 1000) / 1000}px`;
     if (system === 'psx') {
       // The native unmute prompt follows the actual picture, including Fill and
       // landscape. Keep its native gesture handler and timed text dismissal.
-      for (const [name, value] of Object.entries({'--kt-psx-picture-left': pixels(bounds.left + bounds.width / 2),
+      for (const [name, value] of Object.entries({'--kt-psx-picture-left': pixels(centerX),
         '--kt-psx-picture-top': pixels(center)})) {
         if (document.documentElement.style.getPropertyValue(name) !== value)
           document.documentElement.style.setProperty(name, value);
       }
     }
     if (!canvas) return; // Loading coordinates never alter an unstarted canvas.
-    for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
-      left: pixels(bounds.left + bounds.width / 2), top: pixels(center)})) {
+    for (const [name, value] of Object.entries({position: 'fixed',
+      transform: `translate(-50%, -50%)${scale < 1 ? ` scale(${scale})` : ''}`,
+      left: pixels(centerX), top: pixels(center)})) {
       if (canvas.style.getPropertyValue(name) !== value || canvas.style.getPropertyPriority(name) !== 'important')
         canvas.style.setProperty(name, value, 'important');
     }
@@ -755,6 +782,11 @@
   function dockPosition() {
     const point = currentLayout().dock;
     if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
+    if (gameboy && innerWidth < innerHeight && !gamepadMode()) {
+      // The wide portrait picture reaches the screen edges. Its default tab
+      // belongs in the gap below the picture, above the A/B buttons.
+      return [dockSide === 'left' ? 0 : 1, (gbOrigin.getBoundingClientRect().bottom + 44) / innerHeight];
+    }
     if (dolphin && innerWidth > innerHeight && innerWidth <= 650 && innerHeight <= 550) {
       // The short landscape layout reaches the top of the window. Put its
       // settings tab between the shoulder and face buttons, without pushing

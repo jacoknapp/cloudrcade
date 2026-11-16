@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.1",
+    "date": "November 16, 2026",
+    "title": "iPhone Duo and compact game layouts",
+    "changes": [
+      "Game Boy and Game Boy Color keep their default picture clear of the controls: above them in portrait, between the side controls in landscape, with Select/Menu/Start below.",
+      "Compact portrait windows fit the default Game Boy/Color and PlayStation picture without stretching it. Fill and zoom settings remain available.",
+      "Responsive library and controller checks now cover iPhone Duo's cover display, inner display and Split View, including fold/unfold resizing. Saved controller layouts are retained."
+    ]
+  },
+  {
     "version": "3.1.0",
     "date": "October 21, 2026",
     "title": "Wii and Dolphin improvements available by default",

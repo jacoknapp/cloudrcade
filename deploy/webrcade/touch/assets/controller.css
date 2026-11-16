@@ -51,6 +51,24 @@ html[data-cr-installed] #wrcad-touch { height: var(--cr-viewport-height, 100vh);
   html[data-cr-installed] #wrcad-touch.kt-gameboy .kt-pad { bottom: calc(max(12px, calc(env(safe-area-inset-bottom, 0px) - 12px)) + 24px); }
   #wrcad-touch.kt-gameboy .kt-stick, #wrcad-touch.kt-gameboy .kt-actions { bottom: 66px; }
 }
+/* Wider touch windows put the Game Boy picture between the side controls,
+ * with a separate lower row for Select/Menu/Start. Keep this default area
+ * independent of saved button positions and drawer/visibility changes. */
+.kt-gb-origin { --kt-gb-edge: 12px; --kt-gb-center: 64px; }
+@media (min-width: 600px) {
+  .kt-gb-origin { --kt-gb-edge: 26px; --kt-gb-center: 78px; }
+}
+@media (orientation: landscape) {
+  .kt-gb-origin {
+    top: max(8px, env(safe-area-inset-top, 0px));
+    left: calc(max(var(--kt-gb-edge), env(safe-area-inset-left, 0px)) + 156px);
+    right: calc(max(var(--kt-gb-edge), env(safe-area-inset-right, 0px)) + 156px);
+    bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + var(--kt-gb-center));
+  }
+  html[data-cr-installed] .kt-gb-origin {
+    bottom: calc(max(12px, calc(env(safe-area-inset-bottom, 0px) - 12px)) + var(--kt-gb-center));
+  }
+}
 /* Native pinned PSX startup text/progress share the picture's location, even
  * before the core starts. Pause/settings dialogs keep their full-screen layout. */
 html.kt-psx-active ._3o3pD, html.kt-psx-active ._1sp2T { position: fixed; left: var(--kt-psx-picture-left, 50vw); top: var(--kt-psx-picture-top, 50vh); }

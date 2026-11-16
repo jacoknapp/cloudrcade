@@ -88,7 +88,9 @@ const { chromium, webkit } = require('playwright');
         for (const view of [0, 1, 2]) {
           await page.evaluate((view) => app.emulator.setView(view), view);
           for (const viewport of [{ width: 874, height: 402 }, { width: 402, height: 874 },
-            {width: 393, height: 852}, {width: 320, height: 568}, {width: 768, height: 1024}]) {
+            {width: 393, height: 852}, {width: 320, height: 568}, {width: 768, height: 1024},
+            {width: 382, height: 580}, {width: 594, height: 368}, {width: 669, height: 867},
+            {width: 951, height: 585}, {width: 385, height: 571}]) {
             await page.setViewportSize(viewport);
             await page.evaluate(() => document.documentElement.style.setProperty('--test-top',
               innerWidth > innerHeight ? '0px' : '59px'));

@@ -26,7 +26,8 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
    return route.fulfill({status:action==='status'?200:404,json:action==='status'?{csrf:'fixture',config:runtimeConfig}:{error:'Missing fixture'}});});
   await context.route('**/cloud-saves/config.php',async route=>{
    const response = await route.fetch({url:'https://127.0.0.1:'+port+'/cloud-saves/config.php'});
-   const config=JSON.parse((await response.text()).replace(/^window.WrcadCloudConfig\s*=\s*/, '').replace(/;\s*$/, ''));
+   // config.php also appends the crash-journal script after its JSON assignment.
+   const config=JSON.parse((await response.text()).match(/^window.WrcadCloudConfig\s*=\s*(\{[^\n]*\});/)[1]);
    config.enabled=true;config.autoRedirect=false;config.accessAllowed=true;config.feedUrl=origin+'/content/feeds/combined.json';runtimeConfig=config;
    await route.fulfill({response,body:'window.WrcadCloudConfig='+JSON.stringify(config)+';'});
   });
@@ -122,6 +123,10 @@ const findLibrary = () => {function find(n){if(!n)return null;if(n.stateNode?.br
   assert(chromeHeight<=150,'phone navigation leaves space for games: '+chromeHeight);
   await page.waitForTimeout(500);assert((await page.locator('meta[name="viewport"]').getAttribute('content')).includes('viewport-fit=cover'),'safe-area viewport survives iOS native setup');
   await fits(844,390,'mobile-landscape');await fits(768,1024,'mobile-tablet');await fits(390,844,'mobile-phone');
+  for(const [width,height,name] of [[382,580,'cover'],[594,368,'cover-landscape'],
+    [669,867,'inner'],[951,585,'inner-landscape'],[385,571,'split-view']])
+   await fits(width,height,'mobile-duo-'+name);
+  await fits(390,844,'mobile-phone');
   assert.equal(coreRequests.length,0,'library does not preload emulator cores');
   const feedsControl=page.locator('.header-nav-right .cr-mobile-feeds-button');
   assert(await feedsControl.isVisible(),'Feeds is separate from the category selector');

@@ -5,6 +5,14 @@ const fs = require('node:fs'), path = require('node:path');
 const {chromium, webkit} = require('playwright');
 const asset = name => fs.readFileSync(path.join(__dirname, '../deploy/webrcade/touch/assets', name), 'utf8');
 const cores = ['nes','snes','gb','gbc','gba','n64','nds','3ds','genesis','psx','psp'];
+// Safari 27.1's published iPhone Duo cover, inner and Split View sizes.
+// Keep the same page/core alive through folding, rotation and toolbar changes.
+// https://webkit.org/blog/18486/webkit-features-for-safari-27-1/
+const viewports = [
+  {width:382,height:580}, {width:594,height:368},
+  {width:669,height:867}, {width:951,height:585}, {width:385,height:571},
+  {width:390,height:784}, {width:844,height:390}, {width:320,height:568},
+];
 const css = name => asset(name).replaceAll('100lvh', 'calc(100vh + 60px)')
   .replace(/env\(safe-area-inset-top(?:, 0px)?\)/g, '0px')
   .replace(/env\(safe-area-inset-bottom(?:, 0px)?\)/g, '34px');
@@ -16,7 +24,8 @@ const fixture = `
   const controller={isControlDown:function(cid,analogToDigital=true){return analogToDigital && ['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid] ? this[['isAxisUp','isAxisDown','isAxisLeft','isAxisRight'][cid]](0) : false},isPadButtonDown:()=>false,getAxisValue:()=>0,
     isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};
   window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{canvas,started:true,paused:false,analogMode:false,
-    SS_16_9:2,SS_FILL:3,getScreenSize:()=>0,getDefaultAspectRatio:()=>ratio,getProps:()=>({}),
+    SS_16_9:2,SS_FILL:3,getScreenSize:()=>window.fixtureScreen||0,getDefaultAspectRatio:()=>ratio,
+    getProps:()=>({zoomLevel:window.fixtureZoom||0}),
     getScreenLayout:()=>0,getPrefs:()=>({getScreenLayout:()=>0}),
     controllers:{getController:()=>controller},updateScreenSize(){
       canvas.style.width=Math.min(innerWidth*.96,innerHeight*.96*ratio)+'px';
@@ -93,7 +102,7 @@ const fixture = `
         const game=await (await page.locator('iframe').elementHandle()).contentFrame();
         await game.waitForURL('http://viewport.test/play/app/'+core+'/');
         if(core==='psx') {
-          for(const viewport of [{width:390,height:784},{width:844,height:390},{width:320,height:568}]) {
+          for(const viewport of viewports) {
             await page.setViewportSize(viewport);await page.waitForTimeout(180);
             const readyCanvasStyle=await game.locator('canvas').getAttribute('style');
             for(const phase of ['no-app','no-emulator','unstarted']) {
@@ -115,7 +124,7 @@ const fixture = `
           await game.evaluate(()=>{window.app=fixtureApp;fixtureApp.emulator.started=true;fixtureApp.emulator.updateScreenSize();});
         }
         await game.locator('.kt-pad').waitFor({state:'visible'});
-        for(const viewport of [{width:390,height:784},{width:844,height:390},{width:320,height:568}]) {
+        for(const viewport of viewports) {
           await page.setViewportSize(viewport);
           for(const inset of [0,50,0]) {
             await page.evaluate(inset=>{window.chromeInset=inset;visualViewport.dispatchEvent(new Event('resize'));},inset);
@@ -132,15 +141,28 @@ const fixture = `
             const picture=await game.locator('canvas').boundingBox();
             assert(picture.x>=-.5 && picture.y>=-.5 && picture.x+picture.width<=viewport.width+.5 && picture.y+picture.height<=height+.5,
               core+' picture fits visible phone');
-            if(['gb','gbc'].includes(core) && viewport.width<height) {
+            if(['gb','gbc'].includes(core)) {
               const safe=await game.locator('.kt-gb-origin').boundingBox();
               const center=Math.max(picture.height/2,Math.min(height-picture.height/2,safe.y+safe.height/2));
               assert(Math.abs(picture.y+picture.height/2-center)<.5,core+' picture centers above raised default controls');
+              assert(picture.y >= safe.y-.5 && picture.y+picture.height <= safe.y+safe.height+.5,
+                core+' default picture fits above controls on compact/folding displays');
+              assert(picture.x >= safe.x-.5 && picture.x+picture.width <= safe.x+safe.width+.5,
+                core+' landscape picture fits between side controls');
+              for(const r of controls) assert(r.right<=picture.x || r.x>=picture.x+picture.width ||
+                r.bottom<=picture.y || r.y>=picture.y+picture.height,
+                core+' default control does not cover the picture: '+JSON.stringify(r));
+              const dock=await game.locator('.kt-tab').boundingBox();
+              assert(dock.x+dock.width<=picture.x || dock.x>=picture.x+picture.width ||
+                dock.y+dock.height<=picture.y || dock.y>=picture.y+picture.height,
+                core+' default settings handle stays outside the picture');
               assert.equal(await game.locator('#wrcad-touch.kt-gameboy').count(),1);
             }
             if(core==='psx' && viewport.width<height) {
               const safe=await game.locator('.kt-psx-origin').boundingBox();
               assert(Math.abs(picture.y+picture.height/2-(safe.y+safe.height/2))<.5,'PSX approved default picture position remains independent of DualShock controls');
+              assert(picture.y >= safe.y-.5 && picture.y+picture.height <= safe.y+safe.height+.5,
+                'PSX default picture fits above controls on compact/folding displays');
               assert(Math.abs(picture.x+picture.width/2-viewport.width/2)<.5,'PSX horizontal center preserved');
             }
             if(core==='psx') {
@@ -206,11 +228,28 @@ const fixture = `
           await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
           await page.evaluate(()=>window.opaqueInset=0);
         } else if(['gb','gbc'].includes(core)) {
-          await page.setViewportSize({width:390,height:784});await page.waitForTimeout(300);
+          await page.setViewportSize({width:382,height:580});await page.waitForTimeout(300);
           const original=await game.locator('canvas').boundingBox();
           await game.locator('.kt-tab').click();await game.locator('.kt-toggle').click();await page.waitForTimeout(300);
           assert.deepEqual(await game.locator('canvas').boundingBox(),original,core+' hiding controls keeps upper picture placement');
           await game.locator('.kt-toggle').click();await game.locator('.kt-tab').click();
+          for(const option of ['fixtureZoom','fixtureScreen']) {
+            await game.evaluate(option=>{window[option]=option==='fixtureScreen'?3:10},option);
+            await page.waitForTimeout(180);
+            const selected=await game.locator('canvas').boundingBox();
+            const native=await game.locator('canvas').evaluate(el=>parseFloat(getComputedStyle(el).width));
+            assert(Math.abs(selected.width-native)<.5,core+' explicit Fill/zoom bypasses default fitting');
+            await game.evaluate(option=>{window[option]=0},option);await page.waitForTimeout(180);
+            assert.deepEqual(await game.locator('canvas').boundingBox(),original,core+' returning to default restores fitted picture');
+          }
+          const layouts=await game.evaluate(()=>localStorage.getItem('webrcade.touch.layouts.v1'));
+          const action=await game.locator('[data-cid="4"]').boundingBox();
+          await page.mouse.move(action.x+action.width/2,action.y+action.height/2);await page.mouse.down();
+          assert(await game.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(4)),core+' action held before unfolding');
+          await page.setViewportSize({width:951,height:585});await page.waitForTimeout(180);
+          assert.equal(await game.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(4)),false,core+' unfolding releases held touch input');
+          await page.mouse.up();
+          assert.equal(await game.evaluate(()=>localStorage.getItem('webrcade.touch.layouts.v1')),layouts,core+' unfolding never rewrites saved controls');
         } else if(!['nds','3ds','psp'].includes(core)) {
           await page.setViewportSize({width:390,height:784});
           const expectedCenter=async (center) => {
