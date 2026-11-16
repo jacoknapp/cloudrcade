@@ -357,7 +357,7 @@
     }
     const insideTouchscreen = (x, y) => {
       const r = sectionState.presentation.destinations[1];
-      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      return r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
     };
     for (const type of ['mousedown','mousemove','mouseup','touchstart','touchmove','touchend','touchcancel']) window.addEventListener(type, event => {
       if (!sectionState?.presentation || window.app?.isShowOverlay?.() || window.app?.isPauseScreen?.()) { touches.clear(); mouseDown = false; return; }
@@ -550,10 +550,10 @@
     const lower = rectangle(stacked ? bounds.left : fold.end, stacked ? fold.end : bounds.top, bounds.right, bounds.bottom);
     const rails = lower.width >= 576 && lower.height >= (system === '3ds' ? 386 : 286);
     const wide = lower.width >= 576;
-    const controlsHeight = rails ? lower.height : system === '3ds' && !wide ? 370 : 244;
+    const controlsHeight = Math.min(lower.height, rails ? lower.height : system === '3ds' && !wide ? 370 : 244);
     const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - 14, lower.bottom);
     const picture = rails ? rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64) :
-      rectangle(lower.left, lower.top, lower.right, controls.top - 12);
+      rectangle(lower.left, lower.top, lower.right, Math.max(lower.top, controls.top - 12));
     const fit = (area, ratio) => {
       const width = Math.min(area.width, area.height * ratio), height = width / ratio;
       return rectangle((area.left + area.right - width) / 2, (area.top + area.bottom - height) / 2,
