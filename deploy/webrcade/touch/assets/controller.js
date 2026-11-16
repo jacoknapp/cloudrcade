@@ -17,6 +17,11 @@
   const touchEnabled = () => presentedGamepadConnected ? !gamepadMode() : enabled;
   const MUTE_KEY = prefix + '.touch.muted.v1';
   const DS_VIEW_KEY = prefix + '.touch.ds-view.v1';
+  // Device-local: automatic expanded-window presentation must not replace the
+  // player's synced DS/3DS view or button coordinates on other devices.
+  const SECTIONS_KEY = prefix + '.touch.screen-sections.v1';
+  let automaticSections = true;
+  try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
   const parseDSView = value => /^[0-5]$/.test(String(value)) ? Number(value) : null;
   let dsView = null, dsEmulator = null, dsObserver = null;
   try { dsView = parseDSView(localStorage.getItem(DS_VIEW_KEY)); } catch (_) { /* Use the game's layout. */ }
@@ -119,6 +124,7 @@
         <button class="kt-toggle kt-gamepad-touch" aria-pressed="true">Touch controls: On</button>
         <button class="kt-mute kt-switch" role="switch" aria-checked="false"><i></i><span>Mute audio</span></button>
         <button class="kt-edit" disabled>Edit layout</button>
+        <button class="kt-sections-toggle" aria-pressed="true" hidden>Screen sections: Auto</button>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
           <strong>DS screens</strong>
           <button class="kt-ds-cycle">View</button>
@@ -235,11 +241,120 @@
     return element;
   }
   const dsOrigin = system === 'nds' ? safeArea('kt-ds-origin') : null;
+  const sectionsToggle = $('.kt-sections-toggle');
+  let sectionState = null;
+  const sectionViews = {stacked: ['default', 'Top'], side: ['side_by_side', 'Top'],
+    top: ['single_screen', 'Top'], touch: ['single_screen', 'Bottom']};
+  function setNative3DSView(emulator, id) {
+    const view = sectionViews[id];
+    if (!view) return;
+    // useView changes only presentation. The public setView also persists the
+    // choice; automatic rotation must leave that saved choice alone.
+    emulator.useView(id);
+    sectionState.setVariable('citra_layout_option', view[0]);
+    sectionState.setVariable('citra_swap_screen', view[1]);
+  }
+  function syncScreenSections(emulator) {
+    if (!['nds', '3ds'].includes(system) || !emulator?.started) return;
+    if (sectionState?.emulator !== emulator) {
+      if (system === '3ds' && (!emulator.useView || !window.Module?.cwrap)) return;
+      const state = sectionState = {emulator, mode: null};
+      if (system === 'nds') {
+        const getLayout = emulator.getScreenLayout;
+        emulator.getScreenLayout = function(...args) {
+          return state.mode ? (state.mode === 'stacked' ? 0 : 2) : getLayout.apply(this, args);
+        };
+        state.setBook = emulator.setBookMode || function(value) { this.bookMode = value; };
+        emulator.setBookMode = function(value) {
+          if (state.mode) state.book = value;
+          return state.setBook.call(this, state.mode ? false : value);
+        };
+      } else {
+        state.setVariable = window.Module.cwrap('ejs_set_variable', null, ['string', 'string']);
+        const setView = emulator.setView;
+        emulator.setView = function(id, ...args) {
+          if (state.mode && sectionViews[id]) {
+            // An explicit choice equal to the automatic view still needs the
+            // native setter's persistence; compare it with the saved view.
+            const previous = state.savedView;
+            state.savedView = id;
+            if (id === this.getView() && id !== previous) this.useView(previous);
+          }
+          return setView.call(this, id, ...args);
+        };
+      }
+    }
+    const bounds = visibleViewport(), state = sectionState;
+    const mode = automaticSections && !gamepadMode() && bounds.width >= 600 && bounds.height >= 550 ?
+      (bounds.width > bounds.height ? 'side' : 'stacked') : null;
+    const previous = state.mode;
+    if (mode && !previous) {
+      state.savedView = emulator.getView?.(); state.book = emulator.bookMode;
+    }
+    state.mode = mode;
+    host.classList.toggle('kt-sections', Boolean(mode));
+    host.dataset.screenSections = mode || '';
+    const changed = previous !== mode;
+    if (system === 'nds') {
+      if (changed) {
+        state.setBook.call(emulator, mode ? false : state.book);
+        emulator.updateScreenLayout?.(false);
+      }
+    } else if (changed || mode && emulator.getView() !== mode) {
+      setNative3DSView(emulator, mode || state.savedView);
+      emulator.updateScreenSize();
+    }
+    if (changed) { clear(); layoutStamp = ''; }
+  }
+  function chooseAutomaticSections(value) {
+    automaticSections = value;
+    try { localStorage.setItem(SECTIONS_KEY, String(value)); } catch (_) {}
+    clear(); layoutStamp = ''; draw();
+    window.app?.emulator?.updateScreenSize?.();
+  }
+  sectionsToggle.addEventListener('click', () => chooseAutomaticSections(!automaticSections));
+  function sectionBounds(origin) {
+    const safe = origin.getBoundingClientRect(), visible = visibleViewport();
+    return {left: Math.max(safe.left, visible.left) + 182,
+      right: Math.min(safe.right, visible.right) - 182,
+      top: Math.max(safe.top, visible.top) + 12,
+      bottom: Math.min(safe.bottom, visible.bottom) - 12, visible};
+  }
+  function alignScreenSections(emulator, origin) {
+    if (!sectionState?.mode || sectionState.emulator !== emulator) return false;
+    const bounds = sectionBounds(origin), {visible} = bounds;
+    const ratio = emulator.getDefaultAspectRatio();
+    if (!(ratio > 0)) return true; // Native geometry may arrive on its next frame.
+    let width, height, left, top;
+    if (sectionState.mode === 'stacked') {
+      top = visible.top + visible.height / 2;
+      height = Math.min(2 * Math.min(top - bounds.top, bounds.bottom - top),
+        (bounds.right - bounds.left) / ratio);
+      width = height * ratio; left = (bounds.left + bounds.right) / 2;
+    } else {
+      const split = visible.left + visible.width / 2;
+      // 3DS top/bottom screens have different widths at the same height.
+      // Align their native boundary with the section boundary, preserving both
+      // aspect ratios instead of stretching the smaller touchscreen.
+      const fraction = system === '3ds' ? 400 / 720 : .5;
+      width = Math.min((split - bounds.left) / fraction,
+        (bounds.right - split) / (1 - fraction), (bounds.bottom - bounds.top) * ratio);
+      height = width / ratio; left = split + (.5 - fraction) * width;
+      top = (bounds.top + bounds.bottom) / 2;
+    }
+    if (!(width > 0 && height > 0)) return true;
+    const canvas = emulator.canvas;
+    for (const [name, value] of Object.entries({position: 'fixed', transform: 'translate(-50%, -50%)',
+      width: `${width}px`, height: `${height}px`, 'max-width': 'none', 'max-height': 'none',
+      left: `${left}px`, top: `${top}px`})) canvas.style.setProperty(name, value, 'important');
+    return true;
+  }
   const dsViews = [[2, 'Side by side'], [3, 'Side by side ↔'], [0, 'Vertical'],
     [1, 'Vertical ↕'], [4, 'Top screen'], [5, 'Touchscreen']];
   function alignDSScreens(emulator) {
     const canvas = emulator.canvas;
     if (!canvas) return;
+    if (alignScreenSections(emulator, dsOrigin)) return;
     if (!gamepadMode() && (emulator.bookMode || ![0, 1].includes(emulator.getScreenLayout()))) {
       // The core's resize has restored its normal size; restore CSS centering
       // as well when leaving either of the vertically stacked views.
@@ -285,6 +400,7 @@
     if (!gameReady || editing || !emulator?.getViews) return;
     const views = emulator.getViews();
     const next = views[(views.findIndex(([id]) => id === emulator.getView()) + 1) % views.length][0];
+    if (sectionState?.mode) chooseAutomaticSections(false);
     clear(); emulator.setView(next);
     saveControls({n3dsView: next});
     update3DSLabel(emulator);
@@ -293,6 +409,7 @@
   function align3DSScreens(emulator) {
     const canvas = emulator.canvas;
     if (!canvas) return;
+    if (alignScreenSections(emulator, n3dsOrigin)) return;
     // The app has just restored the aspect-preserving size. Landscape keeps it;
     // only portrait's explicit positioning needs clearing on every resize.
     for (const name of ['left', 'top']) canvas.style.removeProperty(name);
@@ -328,6 +445,7 @@
   dsCycle.addEventListener('click', () => {
     const emulator = window.app?.emulator;
     if (!gameReady || editing) return;
+    if (sectionState?.mode) chooseAutomaticSections(false);
     const index = dsViews.findIndex(([value]) => value === emulator.getPrefs().getScreenLayout());
     dsView = dsViews[(index + 1) % dsViews.length][0];
     applyDSView(emulator, dsView);
@@ -335,12 +453,14 @@
   });
   $('.kt-ds-single').addEventListener('click', () => {
     if (!gameReady || editing) return;
+    if (sectionState?.mode) chooseAutomaticSections(false);
     const emulator = window.app.emulator;
     applyDSView(emulator, emulator.getPrefs().getScreenLayout() === 4 ? 5 : 4);
     rememberDSView(emulator);
   });
   $('.kt-ds-dual').addEventListener('click', () => {
     if (!gameReady || editing) return;
+    if (sectionState?.mode) chooseAutomaticSections(false);
     const emulator = window.app.emulator;
     const layout = emulator.getPrefs().getScreenLayout();
     applyDSView(emulator, layout > 3 ? 2 : (layout + 1) % 4);
@@ -582,8 +702,16 @@
       const custom = Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
-      const clampX = x => Math.max(controllerBounds.left + 8 + r.width / 2,
-        Math.min(controllerBounds.right - 8 - r.width / 2, x));
+      let left = controllerBounds.left, right = controllerBounds.right;
+      if (sectionState?.mode) {
+        const safe = (system === 'nds' ? dsOrigin : n3dsOrigin).getBoundingClientRect();
+        const isLeft = element === stick || element.classList.contains('kt-extra-dpad') ||
+          ['8','10','12'].includes(element.dataset.cid);
+        if (isLeft) { left = Math.max(left, safe.left) + 18; right = left + 152; }
+        else { right = Math.min(right, safe.right) - 18; left = right - 152; }
+      }
+      const clampX = x => Math.max(left + 8 + r.width / 2,
+        Math.min(right - 8 - r.width / 2, x));
       const clampY = y => Math.max(controllerBounds.top + 8 + r.height / 2,
         Math.min(controllerBounds.bottom - 8 - r.height / 2, y));
       // Apply the exclusion area to defaults, restored layouts, and live drags.
@@ -782,6 +910,10 @@
   function dockPosition() {
     const point = currentLayout().dock;
     if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
+    if (sectionState?.mode) {
+      const safe = (system === 'nds' ? dsOrigin : n3dsOrigin).getBoundingClientRect();
+      return [dockSide === 'left' ? 0 : 1, (Math.max(controllerBounds.top + 12, safe.top) + 88) / innerHeight];
+    }
     if (gameboy && innerWidth < innerHeight && !gamepadMode()) {
       // The wide portrait picture reaches the screen edges. Its default tab
       // belongs in the gap below the picture, above the A/B buttons.
@@ -819,6 +951,12 @@
   }
   function draw() {
     fitVisibleViewport();
+    const emulator = window.app?.emulator;
+    syncScreenSections(emulator);
+    if (sectionState?.mode && emulator?.canvas) {
+      if (system === 'nds') alignDSScreens(emulator);
+      else align3DSScreens(emulator);
+    }
     if (system === 'psp') alignPSPScreen(window.app?.emulator);
     else alignCenteredScreen(window.app?.emulator);
     const effectiveEnabled = touchEnabled();
@@ -835,6 +973,9 @@
     drawDock();
     $('.kt-edit').disabled = !editing && !gameReady;
     $('.kt-edit').textContent = editing ? 'Continue editing' : 'Edit layout';
+    sectionsToggle.hidden = !['nds','3ds'].includes(system) || !gameReady || editing;
+    sectionsToggle.setAttribute('aria-pressed', String(automaticSections));
+    sectionsToggle.textContent = `Screen sections: ${automaticSections ? 'Auto' : 'Off'}`;
     dsScreens.hidden = system !== 'nds' || !gameReady || editing;
     n3dsScreens.hidden = system !== '3ds' || !gameReady || editing || !window.app?.emulator?.getViews;
     if (system === 'nds') {
@@ -1121,6 +1262,10 @@
   }
   window.addEventListener('wrcad:controls-loaded', refreshPreferences);
   window.addEventListener('storage', e => {
+    if (e.key === SECTIONS_KEY || e.key === null) {
+      try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
+      clear(); layoutStamp = ''; draw();
+    }
     if (e.key === GAMEPAD_TOUCH_KEY || e.key === null) {
       try { gamepadTouch = localStorage.getItem(GAMEPAD_TOUCH_KEY) === 'true'; } catch (_) {}
       updateGamepadPresentation(); draw();

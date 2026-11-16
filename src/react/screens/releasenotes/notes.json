@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.2",
+    "date": "November 16, 2026",
+    "title": "DS and 3DS screen sections",
+    "changes": [
+      "Open iPhone Duo and expanded touch windows give DS and 3DS one screen per section: stacked in portrait, side by side in landscape, with controls along the outer left and right edges.",
+      "Screen sections: Auto in the touch drawer follows rotation and restores your manual view when the window becomes compact or a controller is connected. Picking a manual View turns Auto off on this device.",
+      "Native touchscreen input, screen aspect ratios and saved controller layouts are retained."
+    ]
+  },
+  {
     "version": "3.1.1",
     "date": "November 16, 2026",
     "title": "iPhone Duo and compact game layouts",

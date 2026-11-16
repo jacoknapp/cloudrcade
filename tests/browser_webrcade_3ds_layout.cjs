@@ -19,6 +19,9 @@ const { chromium, webkit } = require('playwright');
         await page.goto('http://controller.test/play/app/retro-' + (system === '3ds' ? 'azahar' : 'melonds') + '/');
         const installFixture = async () => {
           await page.evaluate(() => document.documentElement.setAttribute('data-cr-installed', ''));
+          // This matrix covers manual views. Automatic expanded sections have
+          // their own rotation, preference-restoration and stylus regression.
+          await page.evaluate(() => localStorage.setItem('webrcade.touch.screen-sections.v1', 'false'));
           await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,
             '../deploy/webrcade/touch/assets/viewport.css'), 'utf8') });
           await page.addStyleTag({ content: fs.readFileSync(path.join(__dirname,

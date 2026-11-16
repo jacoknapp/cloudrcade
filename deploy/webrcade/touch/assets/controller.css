@@ -161,6 +161,25 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 }
 @media (min-width: 461px) { #wrcad-touch.kt-n64 .kt-shoulders [data-cid="10"] { position: absolute; left: 25%; } }
 @media (min-width: 600px) { #wrcad-touch .kt-pad { left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); max-width: 1000px; margin: auto; } #wrcad-touch .kt-center { bottom: 14px; } }
+/* Expanded DS/3DS windows keep two native screen sections between 136px
+ * controller rails. The 20px inner gap clears each control's touch margin. */
+#wrcad-touch.kt-sections .kt-pad { top: max(12px, env(safe-area-inset-top)); bottom: max(12px, env(safe-area-inset-bottom)); left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); height: auto; max-width: none; }
+#wrcad-touch.kt-sections .kt-shoulders, #wrcad-touch.kt-sections .kt-center { display: contents; }
+#wrcad-touch.kt-sections .kt-shoulders button { position: absolute; top: 0; width: 54px; }
+#wrcad-touch.kt-sections [data-cid="8"] { left: 0; }
+#wrcad-touch.kt-sections [data-cid="10"] { left: 78px; }
+#wrcad-touch.kt-sections [data-cid="11"] { right: 78px; }
+#wrcad-touch.kt-sections [data-cid="9"] { right: 0; }
+#wrcad-touch.kt-sections .kt-stick, #wrcad-touch.kt-sections .kt-actions { top: calc(50% - 68px); bottom: auto; }
+#wrcad-touch.kt-sections.kt-3ds .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick),
+#wrcad-touch.kt-sections.kt-3ds .kt-actions { top: calc(50% - 148px); }
+#wrcad-touch.kt-sections.kt-3ds .kt-extra-dpad { top: calc(50% + 12px); left: 0; }
+#wrcad-touch.kt-sections.kt-3ds .kt-c-stick { top: calc(50% + 12px); right: 0; left: auto; }
+#wrcad-touch.kt-sections .kt-center button { position: absolute; bottom: 0; width: 58px; }
+#wrcad-touch.kt-sections .kt-center [data-cid="12"] { left: 0; }
+#wrcad-touch.kt-sections .kt-center .kt-menu { right: 78px; }
+#wrcad-touch.kt-sections .kt-center [data-cid="13"] { right: 0; }
+#wrcad-touch .kt-sections-toggle { width: 100%; margin-top: 8px; }
 /* GameCube's own geometry; saved per-system coordinates still override it. */
 #wrcad-touch:is(.kt-gamecube,.kt-wii) .kt-pad { height: 400px; }
 #wrcad-touch:is(.kt-gamecube,.kt-wii) .kt-stick[data-stick-index="0"][data-direction="analog"] { bottom: 176px; }

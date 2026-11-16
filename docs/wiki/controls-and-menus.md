@@ -53,6 +53,18 @@ DS retains native stylus touch on the game screen. Its drawer has **DS screens**
 
 3DS has its own **3DS screens → View** button in the drawer to cycle that app's available screen arrangements. Its saved choice is separate from the DS view.
 
+On an open iPhone Duo or another expanded touch window, DS and 3DS use one game
+screen per section: stacked in portrait and side by side in landscape. Controls
+stay in the outer left and right columns. Both screens keep their aspect ratios,
+and the lower game screen retains its native touchscreen input.
+
+**Screen sections: Auto** in the drawer controls this behavior on this device.
+Turning it off or choosing a manual View returns to normal screen arrangements.
+Closing the phone, entering narrow Split View or connecting a controller restores
+the saved manual view. Automatic rotation does not replace synced screen choices
+or saved button positions; edited buttons are kept within the side columns while
+automatic sections are active.
+
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
 
 ## Wii controls
