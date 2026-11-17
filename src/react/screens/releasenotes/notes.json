@@ -2,10 +2,11 @@
   {
     "version": "3.1.8",
     "date": "November 16, 2026",
-    "title": "Aligned DS and 3DS screens",
+    "title": "Aligned screens and a smaller C-stick",
     "changes": [
       "Portrait DS and 3DS screens share the same horizontal center while retaining the larger lower touchscreen and native aspect ratios.",
-      "Right-side controls sit farther out to stay clear of the centered touchscreen."
+      "Right-side controls sit farther out to stay clear of the centered touchscreen.",
+      "The 3DS C-stick is a small nub with short visual travel and an invisible touch margin."
     ]
   },
   {

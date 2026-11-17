@@ -1228,7 +1228,8 @@
       [...pointers.values()].some(value => value.target === el)));
     for (const element of directions) {
       const index = Number(element.dataset.stickIndex) * 2;
-      element.querySelector('i').style.transform = `translate(${axes[index] * 24}px, ${axes[index + 1] * 24}px)`;
+      const travel = n3ds && element.classList.contains('kt-c-stick') ? 8 : 24;
+      element.querySelector('i').style.transform = `translate(${axes[index] * travel}px, ${axes[index + 1] * travel}px)`;
       element.querySelectorAll('span').forEach((arrow, i) => arrow.classList.toggle('kt-pressed',
         element.dataset.direction === 'digital' && held.has([0, 2, 3, 1][i])));
     }
