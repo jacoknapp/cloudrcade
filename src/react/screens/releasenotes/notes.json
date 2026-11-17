@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.8",
+    "date": "November 16, 2026",
+    "title": "Aligned DS and 3DS screens",
+    "changes": [
+      "Portrait DS and 3DS screens share the same horizontal center while retaining the larger lower touchscreen and native aspect ratios.",
+      "Right-side controls sit farther out to stay clear of the centered touchscreen."
+    ]
+  },
+  {
     "version": "3.1.7",
     "date": "November 16, 2026",
     "title": "Larger lower touchscreen",
