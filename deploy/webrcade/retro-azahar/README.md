@@ -206,13 +206,30 @@ entire old app can leave those records unreadable until the updated app is resto
 
 ## 3DS performance and pacing
 
-The WASM core has no Dynarmic CPU recompiler. Native 1x resolution and the original
-3DS model remain the defaults; game CPU timing is unchanged at 100%. The interpreter
+The WASM core has no Dynarmic CPU recompiler. Native 1x resolution and New 3DS
+mode (for exclusive-title compatibility) remain the defaults; game CPU timing is
+unchanged at 100%. The interpreter
 now retains decoded blocks across thread switches within the same process, sharing
 the existing bounded 125 MiB translation arena across emulated CPU cores. It clears
 all block offsets together on code invalidation, process changes or arena rollover.
 This relies on the core's single-threaded CPU scheduler; filesystem workers do not
 execute guest CPU instructions.
+
+`azahar-speed.patch` adds a 4096-entry direct lookup in front of the decoded-block
+map. Exact ARM/Thumb tags and reset generations prevent stale offsets after code
+invalidation, process changes or arena reuse. The existing arena budget is unchanged.
+Shader prewarming submits at most two programs per frame with eight outstanding
+compilations; completed programs free capacity without waiting for a draw. A required
+shader still finishes before its draw, and demand waits pause prewarming for two
+frames. Failure reporting and the shader-cache format remain unchanged.
+
+Large-ROM sequential reads can prefetch one binary 2 MiB range. Its reservation
+shares the existing eight-chunk/16 MiB budget. Demand misses retain the synchronous
+reader, unrelated seeks cancel speculation, and exit aborts pending work. Invalid
+or failed speculative responses fall back to demand reads. Run
+`node tests/test_webrcade_3ds_prefetch.cjs` for controlled cancellation, range and
+budget checks; `emulator.lazyRom.readAheadStats` exposes demand misses and read-ahead hits.
+These mechanisms require gameplay/device measurements to establish speed gains.
 
 Minimal Asyncify keeps yielding in the RetroArch frontend/audio loop and avoids
 instrumenting the interpreter's indirect calls. Once audio is running, the frontend

@@ -65,7 +65,7 @@ class App extends WebrcadeRetroApp {
           if (module.PThread) module.PThread.terminateAllThreads();
         } catch (e) { /* nothing left to stop */ }
       }
-      if (this.emulator.lazyRom) this.emulator.lazyRom.chunks.clear();
+      if (this.emulator.lazyRom) this.emulator.lazyRom.close();
       if (this.emulator.resumeAudio) {
         for (const event of ['pointerdown', 'touchend', 'keydown']) {
           document.removeEventListener(event, this.emulator.resumeAudio, true);

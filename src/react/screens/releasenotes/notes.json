@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.9",
+    "date": "November 16, 2026",
+    "title": "3DS execution and loading improvements",
+    "changes": [
+      "3DS execution uses a small fast lookup cache for previously decoded CPU blocks.",
+      "Background shader preparation limits outstanding work and gives required shaders priority.",
+      "Large 3DS games read ahead during sequential loading while retaining the existing memory budget."
+    ]
+  },
+  {
     "version": "3.1.8",
     "date": "November 16, 2026",
     "title": "Aligned screens and a smaller C-stick",

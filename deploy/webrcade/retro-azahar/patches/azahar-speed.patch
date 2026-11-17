@@ -1,0 +1,234 @@
+diff --git a/src/core/arm/dyncom/wasm_translation_cache.h b/src/core/arm/dyncom/wasm_translation_cache.h
+--- a/src/core/arm/dyncom/wasm_translation_cache.h
++++ b/src/core/arm/dyncom/wasm_translation_cache.h
+@@ -1,6 +1,7 @@
+ // Shared decoded-block cache for the single-threaded WASM CPU scheduler.
+ #pragma once
+ 
++#include <array>
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
+@@ -18,6 +19,10 @@
+     void Reset() {
+         blocks.clear();
+         arena_top = 0;
++        if (++generation == 0) {
++            for (auto& entry : fast) entry.generation = 0;
++            generation = 1;
++        }
+     }
+ 
+     void SelectPageTable(const std::shared_ptr<Memory::PageTable>& page_table) {
+@@ -33,9 +38,38 @@
+         }
+     }
+ 
+-    std::unordered_map<std::uint32_t, std::size_t>& Blocks() { return blocks; }
++    bool Find(std::uint32_t key, std::size_t& offset) {
++        auto& entry = fast[Index(key)];
++        if (entry.generation == generation && entry.key == key) {
++            offset = entry.offset;
++            return true;
++        }
++        const auto it = blocks.find(key);
++        if (it == blocks.end()) return false;
++        offset = it->second;
++        entry = {key, generation, offset};
++        return true;
++    }
++
++    void Store(std::uint32_t key, std::size_t offset) {
++        blocks[key] = offset;
++        fast[Index(key)] = {key, generation, offset};
++    }
++
++    const std::unordered_map<std::uint32_t, std::size_t>& Blocks() const { return blocks; }
+ 
+ private:
++    static constexpr std::size_t FAST_SIZE = 4096;
++    static std::size_t Index(std::uint32_t key) {
++        return ((key ^ (key >> 16)) * std::uint32_t{0x9e3779b1}) >> 20;
++    }
++    struct Entry {
++        std::uint32_t key = 0;
++        std::uint32_t generation = 0;
++        std::size_t offset = 0;
++    };
++    std::array<Entry, FAST_SIZE> fast{};
++    std::uint32_t generation = 1;
+     std::size_t& arena_top;
+     const std::size_t capacity;
+     std::weak_ptr<Memory::PageTable> resident_page_table;
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -31,11 +31,23 @@
+ }
+ #endif
+ 
+-std::unordered_map<u32, std::size_t>& GetDyncomInstructionCache(ARMul_State* cpu) {
++bool FindDyncomInstructionBlock(ARMul_State* cpu, std::size_t& offset) {
++    const u32 key = GetDyncomInstructionCacheKey(cpu);
+ #ifdef __EMSCRIPTEN__
+-    return wasm_cache.Blocks();
++    return wasm_cache.Find(key, offset);
+ #else
+-    return cpu->instruction_cache;
++    const auto it = cpu->instruction_cache.find(key);
++    if (it == cpu->instruction_cache.end()) return false;
++    offset = it->second;
++    return true;
++#endif
++}
++
++void StoreDyncomInstructionBlock(ARMul_State* cpu, u32 key, std::size_t offset) {
++#ifdef __EMSCRIPTEN__
++    wasm_cache.Store(key, offset);
++#else
++    cpu->instruction_cache[key] = offset;
+ #endif
+ }
+ 
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.h b/src/core/arm/dyncom/arm_dyncom_trans.h
+--- a/src/core/arm/dyncom/arm_dyncom_trans.h
++++ b/src/core/arm/dyncom/arm_dyncom_trans.h
+@@ -500,7 +500,8 @@
+ 
+ // WASM cores share one translation arena. Reuse decoded blocks for the active
+ // process across scheduler/core switches; never retain offsets after resetting it.
+-std::unordered_map<u32, std::size_t>& GetDyncomInstructionCache(ARMul_State* cpu);
++bool FindDyncomInstructionBlock(ARMul_State* cpu, std::size_t& offset);
++void StoreDyncomInstructionBlock(ARMul_State* cpu, u32 key, std::size_t offset);
+ u32 GetDyncomInstructionCacheKey(const ARMul_State* cpu);
+ #ifdef __EMSCRIPTEN__
+ void ResetDyncomTranslationCache();
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -868,7 +868,7 @@
+         ret = inst_base->br;
+     };
+ 
+-    GetDyncomInstructionCache(cpu)[pc_start] = bb_start;
++    StoreDyncomInstructionBlock(cpu, pc_start, bb_start);
+ 
+     return KEEP_GOING;
+ }
+@@ -893,7 +893,7 @@
+         inst_base->br = TransExtData::SINGLE_STEP;
+     }
+ 
+-    GetDyncomInstructionCache(cpu)[pc_start] = bb_start;
++    StoreDyncomInstructionBlock(cpu, pc_start, bb_start);
+ 
+     return KEEP_GOING;
+ }
+@@ -1650,10 +1650,8 @@
+         cpu->Reg[15] &= 0xfffffffc;
+ 
+     // Find the cached instruction cream, otherwise translate it...
+-    auto& instruction_cache = GetDyncomInstructionCache(cpu);
+-    auto itr = instruction_cache.find(GetDyncomInstructionCacheKey(cpu));
+-    if (itr != instruction_cache.end()) {
+-        ptr = itr->second;
++    if (FindDyncomInstructionBlock(cpu, ptr)) {
++        // The shared cache returns only offsets from its current generation.
+     } else if (cpu->NumInstrsToExecute != 1) {
+         if (InterpreterTranslateBlock(cpu, ptr, cpu->Reg[15]) == FETCH_EXCEPTION)
+             goto END;
+diff --git a/src/video_core/renderer_opengl/wasm_prewarm_budget.h b/src/video_core/renderer_opengl/wasm_prewarm_budget.h
+new file mode 100644
+--- /dev/null
++++ b/src/video_core/renderer_opengl/wasm_prewarm_budget.h
+@@ -0,0 +1,29 @@
++// Bound speculative compiler work; demand draws always retain their completion wait.
++#pragma once
++#include <algorithm>
++#include <cstddef>
++#include <vector>
++
++template <typename Handle>
++class WasmPrewarmBudget {
++public:
++    template <typename Ready>
++    bool BeginFrame(Ready ready) {
++        std::erase_if(pending, ready);
++        submitted = 0;
++        if (quiet_frames != 0) {
++            --quiet_frames;
++            return false;
++        }
++        return true;
++    }
++    bool Available() const { return pending.size() < 8 && submitted < 2; }
++    void Submit(Handle handle) { pending.push_back(handle); ++submitted; }
++    void Consume(Handle handle) { std::erase(pending, handle); }
++    void DemandWait() { quiet_frames = 2; }
++    std::size_t Pending() const { return pending.size(); }
++private:
++    std::vector<Handle> pending;
++    unsigned submitted = 0;
++    unsigned quiet_frames = 0;
++};
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -1,3 +1,6 @@
++#if defined(__EMSCRIPTEN__)
++#include "video_core/renderer_opengl/wasm_prewarm_budget.h"
++#endif
+ // Copyright Citra Emulator Project / Azahar Emulator Project
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+@@ -447,6 +450,7 @@
+ std::unordered_set<u64> failed_programs;
+ /// How far the remembered programs have been rebuilt.
+ std::size_t remembered_done = 0;
++WasmPrewarmBudget<GLuint> prewarm_budget;
+ } // namespace
+ #endif
+ 
+@@ -455,11 +459,15 @@
+     if (impl->separable || !ProgramsLinkInBackground()) {
+         return;
+     }
+-    // Some per frame: the browser builds them on its own threads while the
+-    // game runs, in the order they were first needed.
++    // Poll completion without waiting. Completed but not yet drawn programs
++    // remain in linking until ApplyTo validates them; they no longer consume
++    // compiler capacity. Demand waits briefly pause speculative work.
++    if (!prewarm_budget.BeginFrame([](GLuint program) { return IsProgramLinked(program); })) {
++        return;
++    }
+     RememberedPrograms::Entry entry;
+     u64 id = 0;
+-    for (int count = 0; count < 8 && RememberedPrograms::IdAt(remembered_done, id);) {
++    for (; prewarm_budget.Available() && RememberedPrograms::IdAt(remembered_done, id);) {
+         const std::size_t index = remembered_done++;
+         // Fresh game encounters already compiled their shaders. Check their
+         // pair id before At() creates duplicate shader objects from the file.
+@@ -471,9 +479,9 @@
+             continue;
+         }
+         GLuint& program = background_programs[id];
+-        ++count;
+         program = BeginProgram(std::array{entry.vertex, GLuint{0}, entry.fragment});
+         linking.emplace(program, -1.0);
++        prewarm_budget.Submit(program);
+         EM_ASM({ Module.wrcShaders.rebuilt = (Module.wrcShaders.rebuilt || 0) + 1; });
+     }
+ #endif
+@@ -524,10 +532,12 @@
+             }
+             if (const auto it = linking.find(program); it != linking.end()) {
+                 if (!IsProgramLinked(program)) {
++                    prewarm_budget.DemandWait();
+                     EM_ASM({ Module.wrcShaders.waited++; });
+                 }
+                 const bool usable = FinishProgram(program, "");
+                 linking.erase(it);
++                prewarm_budget.Consume(program);
+                 if (!usable) {
+                     failed_programs.insert(unique_identifier);
+                     glDeleteProgram(program);

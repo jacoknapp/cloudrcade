@@ -5,7 +5,7 @@ import {
 } from '@webrcade/app-common';
 
 import { Prefs } from './prefs';
-import { LazyRom } from './lazyrom';
+import { ReadAheadRom } from './read-ahead-rom';
 import { requestGameText } from './textinput';
 import { installSystemKeys } from './systemkeys';
 import { PerfReadout, perfEnabled } from './perf';
@@ -41,7 +41,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = 'iphone-20261009-v18';
+const CORE_REVISION = '3ds-speed-20261117-v19';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -151,7 +151,7 @@ export class Emulator extends RetroAppWrapper {
 
   // Large games are streamed: `romBytes` then only holds the start of the file.
   setLazyRom(url, size) {
-    this.lazyRom = new LazyRom(url, size);
+    this.lazyRom = new ReadAheadRom(url, size);
   }
 
   getRaConfigContents() {
