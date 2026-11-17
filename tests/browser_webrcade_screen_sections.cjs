@@ -74,6 +74,7 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
     if(expanded){
      const side=size.width>size.height,rects=await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.screenRects));
      const fold=await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.foldBounds));
+     if(!side){assert.equal(fold.basis,'duo-viewport');near(fold.center,size.height-951/2,'default Duo physical midpoint without installed flags');}
      assert(Math.abs(rects[0].width/rects[0].height-(system==='3ds'?5/3:4/3))<.005,'upper native aspect ratio');assert(Math.abs(rects[1].width/rects[1].height-4/3)<.005,'lower native aspect ratio');
      assert(side?rects[0].right<=fold.start+.1&&rects[1].left>=fold.end-.1:rects[0].bottom<=fold.start+.1&&rects[1].top>=fold.end-.1,'both pictures avoid entire fold band');
      const colors=await page.evaluate(rects=>rects.map(r=>sample((r.left+r.right)/2,(r.top+r.bottom)/2)),rects);
@@ -118,6 +119,17 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
     for(const c of await page.locator('.kt-pad button:visible,.kt-stick:visible').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().toJSON()))){assert(c.top>=r.fold.end-.1,'all fullscreen controls below physical fold');assert(c.right<=r.rects[1].left+1||c.left>=r.rects[1].right-1||c.bottom<=r.rects[1].top+1||c.top>=r.rects[1].bottom-1,'fullscreen control outside useful touchscreen');assert(c.right<=tab.x-9.9||c.left>=tab.x+tab.width+9.9||c.bottom<=tab.y-9.9||c.top>=tab.y+tab.height+9.9,'edge tab clear of controls')}
     if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-installed-'+height+'-'+fullscreen+'.png')});
    }
+   // The default must work with missing mode hints and stale cover/work-area
+   // Screen values; those values must never replace the known Duo projection.
+   await page.setViewportSize({width:669,height:867});
+   for(const [width,height] of [[382,844],[669,867],[0,0]]){
+    await page.evaluate(({width,height})=>{fixtureFullscreen=false;document.documentElement.removeAttribute('data-cr-installed');document.documentElement.removeAttribute('data-cr-status-top');Object.defineProperty(navigator,'standalone',{value:false,configurable:true});Object.defineProperty(screen,'width',{value:width,configurable:true});Object.defineProperty(screen,'height',{value:height,configurable:true})},{width,height});await page.waitForTimeout(250);
+    const v=await page.locator('#wrcad-touch').evaluate(el=>({fold:JSON.parse(el.dataset.foldBounds),rects:JSON.parse(el.dataset.screenRects),controls:el.dataset.sectionControls}));
+    assert.equal(v.fold.basis,'duo-viewport');near(v.fold.center,391.5,'stale/missing Screen API does not move physical hinge');assert.equal(v.controls,'rails');assert(v.rects[1].width>=300&&v.rects[1].height>=225);assert.deepEqual(await page.evaluate(()=>sample(669/2,391.5)).then(p=>p.slice(0,3)),[0,0,0],'physical hinge pixels clear without display hints');
+   }
+   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>window.copiedLayout=text},configurable:true}));await page.locator('.kt-tab').click();await page.locator('.kt-layout-info').click();
+   const report=JSON.parse(await page.evaluate(()=>copiedLayout));assert.equal(report.fold.basis,'duo-viewport');assert.equal(report.display.width,0);assert.equal(report.display.standalone,false);assert.equal(report.alignment,0);assert(!JSON.stringify(report).includes('sections.test'),'local layout report contains no page URL');await page.locator('.kt-close').click();
+   await page.setViewportSize({width:667,height:864});await page.waitForTimeout(250);near(await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.foldBounds).center),864-667*951/669/2,'small CSS rounding follows Duo display ratio');
    await safeInset.evaluate(el=>el.remove());await page.evaluate(()=>{fixtureFullscreen=false;document.documentElement.removeAttribute('data-cr-installed')});
    // Natural screen orientation can remain wide in a portrait Home Screen app.
    await page.evaluate(()=>{document.documentElement.setAttribute('data-cr-status-top','');Object.defineProperty(navigator,'standalone',{value:true,configurable:true});Object.defineProperty(screen,'width',{get:()=>951,configurable:true});Object.defineProperty(screen,'height',{get:()=>669,configurable:true});const e=new Event('gamepaddisconnected');e.gamepad=pads[0]||{index:0,connected:false};pads=[];dispatchEvent(e)});
@@ -127,6 +139,14 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
    const detected=await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.foldBounds));assert.equal(detected.start,300);assert.equal(detected.end,380);assert.equal(detected.reportedGap,80,'reported gap width used completely');
    const detectedRects=await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.screenRects));assert(detectedRects[0].bottom<=300.1&&detectedRects[1].top>=379.9,'pictures avoid reported folding region');
    assert.equal(await page.evaluate(()=>badOffscreen),0,'core offscreen draws bypass composition');assert.equal(await page.evaluate(()=>badRestore),0,'native GL viewport/scissor/color state restored');assert.deepEqual(await page.evaluate(()=>renderErrors),[]);assert.deepEqual(errors,[]);
+   // Explicit device defaults provide a single recovery action at other zoom
+   // widths and reset only this device's calibration/current console layout.
+   await page.setViewportSize({width:700,height:900});await page.waitForTimeout(250);await page.locator('.kt-tab').click();
+   for(const [selector,value] of [['#kt-fold-gap','120'],['#kt-fold-alignment','10']])await page.locator(selector).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}))},value);
+   await page.locator('.kt-duo-defaults').click();await page.waitForTimeout(200);
+   const reset=await page.locator('#wrcad-touch').evaluate(el=>({fold:JSON.parse(el.dataset.foldBounds),rects:JSON.parse(el.dataset.screenRects)}));assert.equal(reset.fold.basis,'duo-preset');near(reset.fold.center,900-700*951/669/2,'explicit Duo preset ignores conflicting segments center');assert.equal(reset.fold.gap,80,'explicit preset retains reported gap clearance');assert(reset.rects[1].width>=300);
+   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('webrcade.touch.layouts.v1')));for(const [key,value] of Object.entries(JSON.parse(saved[2])))assert.deepEqual(stored[key],value,'Duo default reset preserves phone and earlier layouts');assert.deepEqual(stored[system+':portrait:sections-console'],{});
+   await page.locator('.kt-close').click();await page.reload();await page.waitForTimeout(400);assert.equal(await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.foldBounds).basis),'duo-preset','explicit device choice persists');
    await page.close();console.log('PASS',engine.name(),system,'real WebGL independent scaling/aspects, lower controls, blank fold, native input remapping, state restoration, compact/manual/gamepad/preferences');
   }}finally{await browser.close()}
  }

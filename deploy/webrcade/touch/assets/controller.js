@@ -24,6 +24,9 @@
   try { automaticSections = localStorage.getItem(SECTIONS_KEY) !== 'false'; } catch (_) {}
   const FOLD_KEY = prefix + '.touch.fold-alignment.v1';
   const FOLD_GAP_KEY = prefix + '.touch.fold-gap.v1';
+  const DUO_PROFILE_KEY = prefix + '.touch.duo-display.v1';
+  let forceDuo = false;
+  try { forceDuo = localStorage.getItem(DUO_PROFILE_KEY) === 'true'; } catch (_) {}
   let foldAlignment = {};
   try { foldAlignment = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (_) {}
   let foldGap = 40; // Conservative clearance, not a claimed hardware dimension.
@@ -138,6 +141,8 @@
           <label for="kt-fold-gap">Fold gap</label><output class="kt-fold-gap-value" for="kt-fold-gap">40px</output>
           <input id="kt-fold-gap" type="range" min="16" max="160" step="2" value="40">
           <button class="kt-fold-reset">Reset fold alignment</button>
+          <button class="kt-duo-defaults">Use Duo defaults</button>
+          <button class="kt-layout-info">Copy layout info</button>
         </div>
         <div class="kt-ds-screens" role="group" aria-label="DS screens" hidden>
           <strong>DS screens</strong>
@@ -495,9 +500,22 @@
   foldGapSlider.addEventListener('focus', () => { foldGuide.hidden = false; });
   foldGapSlider.addEventListener('blur', () => { foldGuide.hidden = true; });
   for (const event of ['keydown', 'keyup']) foldGapSlider.addEventListener(event, e => { if (e.key !== 'Escape') e.stopPropagation(); });
+  function duoDisplayHeight(visible) {
+    // Safari's expanded Duo viewports are 669px portrait / 951px landscape.
+    // The Screen API may retain cover/usable-window dimensions after opening.
+    // https://webkit.org/blog/18486/webkit-features-for-safari-27-1/
+    const height = visible.width * 951 / 669;
+    return forceDuo || visible.width >= 665 && visible.width <= 673 && visible.height >= 740 && visible.height <= height + 1 ? height : 0;
+  }
   function sectionFold(visible) {
     const stacked = sectionState.mode === 'stacked';
-    let split = stacked ? visible.top + visible.height / 2 : visible.left + visible.width / 2;
+    const duoHeight = stacked ? duoDisplayHeight(visible) : 0;
+    // The inner display's status/browser controls are above its content. Anchor
+    // the physical midpoint from the visible bottom, independently of display
+    // mode, user-agent flags and window.screen. Reported segments override this.
+    let split = duoHeight ? visible.bottom - duoHeight / 2 :
+      stacked ? visible.top + visible.height / 2 : visible.left + visible.width / 2;
+    let basis = duoHeight ? (forceDuo ? 'duo-preset' : 'duo-viewport') : 'viewport';
     let reportedGap = 0, reportedStart = null, reportedEnd = null;
     // Segment coordinates belong to the outer window, not necessarily this
     // game iframe. Translate them before placing the native screen boundary.
@@ -511,12 +529,18 @@
       const ordered = segments?.length === 2 ? [...segments].sort((a, b) => stacked ? a.top - b.top : a.left - b.left) : [];
       if (ordered.length && (stacked ? ordered[0].bottom <= ordered[1].top : ordered[0].right <= ordered[1].left)) {
         reportedGap = stacked ? ordered[1].top - ordered[0].bottom : ordered[1].left - ordered[0].right;
-        reportedStart = stacked ? ordered[0].bottom - y : ordered[0].right - x;
-        reportedEnd = stacked ? ordered[1].top - y : ordered[1].left - x;
-        split = stacked ? (ordered[0].bottom + ordered[1].top) / 2 - y :
-          (ordered[0].right + ordered[1].left) / 2 - x;
-      } else if (outer.navigator.standalone || outer.document.documentElement.hasAttribute('data-cr-status-top') &&
-          (outer.matchMedia('(display-mode: standalone)').matches || outer.matchMedia('(display-mode: fullscreen)').matches)) {
+        if (forceDuo && duoHeight) {
+          // An explicit device preset owns the center; retain reported clearance.
+          reportedStart = split - reportedGap / 2; reportedEnd = split + reportedGap / 2;
+        } else {
+          basis = 'segments';
+          reportedStart = stacked ? ordered[0].bottom - y : ordered[0].right - x;
+          reportedEnd = stacked ? ordered[1].top - y : ordered[1].left - x;
+          split = stacked ? (ordered[0].bottom + ordered[1].top) / 2 - y :
+            (ordered[0].right + ordered[1].left) / 2 - x;
+        }
+      } else if (!duoHeight && (outer.navigator.standalone || outer.document.documentElement.hasAttribute('data-cr-status-top') &&
+          (outer.matchMedia('(display-mode: standalone)').matches || outer.matchMedia('(display-mode: fullscreen)').matches))) {
         // Fullscreen can retain an opaque installed-app status area outside
         // innerHeight. Center on the physical display even in fullscreen,
         // then translate through the status area and game-frame offset.
@@ -525,15 +549,53 @@
         const physicalHeight = Math.abs(outer.screen.width - outer.innerWidth) < 1 ? outer.screen.height :
           Math.abs(outer.screen.height - outer.innerWidth) < 1 ? outer.screen.width : 0;
         const excluded = physicalHeight - outer.innerHeight;
-        if (stacked && physicalHeight && excluded >= 0)
-          split = physicalHeight / 2 - excluded - y;
+        if (stacked && physicalHeight && excluded >= 0) {
+          split = physicalHeight / 2 - excluded - y; basis = 'screen';
+        }
       }
-    } catch (_) { /* Older/cross-origin browsers retain the visible midpoint. */ }
+    } catch (_) { /* Unavailable ancestors retain the local viewport fallback. */ }
     split += foldOffset(sectionState.mode) / 100 * (stacked ? visible.height : visible.width);
     const start = Math.min(split - foldGap / 2, reportedStart ?? Infinity);
     const end = Math.max(split + foldGap / 2, reportedEnd ?? -Infinity);
-    return {center: split, start, end, gap: end - start, reportedGap};
+    return {center: split, start, end, gap: end - start, reportedGap, basis};
   }
+  function layoutInfo() {
+    const info = {schema: 'cloudrcade.layout.v1', system, mode: sectionState?.mode,
+      viewport: visibleViewport(), fold: sectionState?.presentation?.fold,
+      alignment: sectionState?.mode ? foldOffset(sectionState.mode) : 0, duoPreset: forceDuo,
+      controls: host.dataset.sectionControls, screens: sectionState?.presentation?.destinations};
+    try {
+      let outer = window; const frames = [];
+      while (outer !== outer.top && outer.frameElement) {
+        const frame = outer.frameElement; frames.push(frame.getBoundingClientRect().toJSON()); outer = outer.parent;
+      }
+      const visual = outer.visualViewport;
+      info.display = {width: outer.screen.width, height: outer.screen.height,
+        availWidth: outer.screen.availWidth, availHeight: outer.screen.availHeight,
+        innerWidth: outer.innerWidth, innerHeight: outer.innerHeight, dpr: outer.devicePixelRatio,
+        visual: visual ? {width: visual.width, height: visual.height, top: visual.offsetTop, left: visual.offsetLeft, scale: visual.scale} : null,
+        standalone: Boolean(outer.navigator.standalone), statusColor: outer.document.documentElement.hasAttribute('data-cr-status-top'),
+        standaloneMode: outer.matchMedia('(display-mode: standalone)').matches,
+        fullscreenMode: outer.matchMedia('(display-mode: fullscreen)').matches, fullscreen: Boolean(outer.document.fullscreenElement), frames};
+    } catch (_) { info.outerUnavailable = true; }
+    return info;
+  }
+  $('.kt-duo-defaults').addEventListener('click', () => {
+    if (!sectionState?.mode) return;
+    forceDuo = true; foldGap = 40;
+    foldAlignment = {...foldAlignment, [sectionState.mode]: 0};
+    layouts = {...layouts, [layoutKey()]: {}};
+    try {
+      localStorage.setItem(DUO_PROFILE_KEY, 'true'); localStorage.setItem(FOLD_GAP_KEY, '40');
+      localStorage.setItem(FOLD_KEY, JSON.stringify(foldAlignment)); localStorage.setItem(LAYOUT_KEY, JSON.stringify(layouts));
+    } catch (_) {}
+    clear(); layoutStamp = ''; draw();
+  });
+  $('.kt-layout-info').addEventListener('click', async event => {
+    const text = JSON.stringify(layoutInfo(), null, 2);
+    try { await navigator.clipboard.writeText(text); event.target.textContent = 'Layout info copied'; }
+    catch (_) { window.prompt('Copy layout info', text); }
+  });
   const sectionSplit = visible => sectionFold(visible).center;
   function sectionBounds(origin) {
     const safe = origin.getBoundingClientRect(), visible = visibleViewport();

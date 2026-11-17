@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.6",
+    "date": "November 16, 2026",
+    "title": "Duo display defaults",
+    "changes": [
+      "Expanded Duo-sized portrait windows use the inner display geometry by default, without requiring Screen API or installed-mode hints.",
+      "Use Duo defaults restores the device preset, neutral fold alignment, normal clearance and the current console button arrangement.",
+      "Copy layout info provides local display and layout measurements for troubleshooting without sending them automatically."
+    ]
+  },
+  {
     "version": "3.1.5",
     "date": "November 16, 2026",
     "title": "Installed fullscreen fold and controller fit",

@@ -78,6 +78,14 @@ for Home Screen status space, including fullscreen, and reserves a conservative
 alignment** returns to the reported or inferred boundary. Adjustments stay on
 this device.
 
+Duo-sized portrait windows use the inner display geometry even when the browser's
+Screen API or installed-mode hints are unavailable. **Use Duo defaults** selects
+that device preset, restores neutral alignment and 40px clearance, and resets only
+this orientation's console button placement. A larger reported gap remains
+reserved. **Copy layout info** copies display readings and calculated bounds for
+troubleshooting. It includes no account, game or page URL and sends nothing
+automatically.
+
 3DS text entry uses a browser prompt and the phone keyboard, limited to the game's allowed length. Cancel cancels the game's text request. Browser dialogs and OS input can look different across devices.
 
 ## Wii controls
