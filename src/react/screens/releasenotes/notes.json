@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.5",
+    "date": "November 16, 2026",
+    "title": "Installed fullscreen fold and controller fit",
+    "changes": [
+      "DS and 3DS account for the Home Screen status area in fullscreen, keeping the upper picture clear of the physical fold.",
+      "The lower touchscreen retains its side controls and useful size when a bottom safe area is present.",
+      "The touch settings tab sits flush with the outer edge, with space reserved beside short controller layouts."
+    ]
+  },
+  {
     "version": "3.1.4",
     "date": "November 16, 2026",
     "title": "DS and 3DS console layout",

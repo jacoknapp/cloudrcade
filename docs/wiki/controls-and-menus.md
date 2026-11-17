@@ -59,7 +59,8 @@ picture scales independently to fit its available space and keeps its native
 aspect ratio. The upper display uses its whole section. All controller buttons,
 sticks and the DS microphone button stay in the touchscreen section, beside the
 picture when there is room or below it in a narrower section. Native touchscreen
-input follows the resized picture.
+input follows the resized picture. The closed settings tab stays flush with
+the outer edge of the touchscreen section.
 
 **Screen sections: Auto** in the drawer controls this behavior on this device.
 Turning it off or choosing a manual View returns to normal screen arrangements.
@@ -72,8 +73,8 @@ device-local button layout; editing it leaves earlier layouts intact.
 it. A shaded guide appears while adjusting either slider; cover the physical
 crease with the guide. Reported display-section bounds reserve their entire gap.
 When those bounds are unavailable, the app infers the display center, accounting
-for Home Screen status space, and reserves a conservative 40 CSS pixels. This
-fallback is adjustable clearance, not a measured hinge dimension. **Reset fold
+for Home Screen status space, including fullscreen, and reserves a conservative
+40 CSS pixels. This fallback is adjustable clearance, not a measured hinge dimension. **Reset fold
 alignment** returns to the reported or inferred boundary. Adjustments stay on
 this device.
 

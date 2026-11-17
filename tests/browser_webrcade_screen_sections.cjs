@@ -80,7 +80,7 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
      assert(colors[0][2]>200&&colors[0][0]<50,'top screen pixels painted in primary pane '+JSON.stringify(colors));assert(colors[1][0]>200&&colors[1][2]<140,'touchscreen pixels painted separately '+JSON.stringify(colors));
      const blank=await page.evaluate(({fold,side})=>sample(side?fold.center:innerWidth/2,side?innerHeight/2:fold.center),{fold,side});assert(blank[0]<3&&blank[1]<3&&blank[2]<3,'fold pixels remain black');
      const controls=await page.locator('.kt-pad button:visible,.kt-stick:visible,.kt-tab:visible').evaluateAll(els=>els.map(el=>({...el.getBoundingClientRect().toJSON(),id:el.dataset.layoutId||'tab'})));
-     assert.equal(controls.length,system==='3ds'?15:12,'every control visible');
+     assert.equal(controls.length,system==='3ds'?15:12,'every control visible');near(controls.find(r=>r.id==='tab').right,size.width,'closed settings tab is flush with outer edge');
      for(const r of controls){assert(side?r.x>=fold.end-.1:r.y>=fold.end-.1,'all controls stay in touchscreen pane '+r.id);assert(r.x>=-.1&&r.right<=size.width+.1&&r.bottom<=size.height+.1,'control visible '+r.id);assert(r.right<=rects[1].left+1||r.x>=rects[1].right-1||r.bottom<=rects[1].top+1||r.y>=rects[1].bottom-1,'control outside lower picture '+r.id);}
      if(!side)assert(rects[0].width>rects[1].width*1.5,'upper display uses available full width');
      const r=rects[1];await page.touchscreen.tap((r.left+r.right)/2,(r.top+r.bottom)/2);await page.waitForTimeout(30);
@@ -103,8 +103,24 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
    await page.waitForTimeout(250);
    await page.locator('.kt-sections-toggle').click();assert.equal(await page.locator('.kt-sections').count(),0);await page.locator('.kt-sections-toggle').click();await page.locator('.kt-close').click();
    await page.evaluate(()=>{pads=[{index:0,connected:true}];const e=new Event('gamepadconnected');e.gamepad=pads[0];dispatchEvent(e)});await page.waitForTimeout(250);assert.equal(await page.locator('.kt-sections').count(),0,'gamepad restores native full-area mode');
+   // Installed fullscreen can retain an opaque OS status strip. Use the
+   // physical display midpoint independently of the adapter's reported fold.
+   const safeInset=await page.addStyleTag({content:'.kt-ds-origin,.kt-3ds-origin{bottom:34px}'});
+   await page.locator('#kt-fold-gap').evaluate(el=>{el.value='40';el.dispatchEvent(new Event('input',{bubbles:true}))});
+   await page.evaluate(()=>{document.documentElement.setAttribute('data-cr-status-top','');document.documentElement.setAttribute('data-cr-installed','');Object.defineProperty(navigator,'standalone',{value:true,configurable:true});Object.defineProperty(screen,'width',{get:()=>669,configurable:true});Object.defineProperty(screen,'height',{get:()=>951,configurable:true});Object.defineProperty(document,'fullscreenElement',{get:()=>window.fixtureFullscreen?document.body:null,configurable:true});const e=new Event('gamepaddisconnected');e.gamepad=pads[0]||{index:0,connected:false};pads=[];dispatchEvent(e)});
+   for(const [height,fullscreen,palette=true] of [[867,true],[839,true],[839,false],[951,true],[867,true,false]]){
+    await page.evaluate(({fullscreen,palette})=>{window.fixtureFullscreen=fullscreen;document.documentElement.toggleAttribute('data-cr-status-top',palette)},{fullscreen,palette});await page.setViewportSize({width:669,height});await page.waitForTimeout(350);
+    const r=await page.locator('#wrcad-touch').evaluate(el=>({rects:JSON.parse(el.dataset.screenRects),fold:JSON.parse(el.dataset.foldBounds),layout:el.dataset.sectionControls})),excluded=951-height;
+    near(r.fold.center+excluded,951/2,'fullscreen/status strip keeps fold on physical midpoint');
+    assert(r.rects[0].bottom+excluded<=951/2-19.9,'upper picture stays above physical hinge clearance');assert(r.rects[1].top+excluded>=951/2+19.9,'touchscreen stays below physical hinge clearance');
+    assert.equal(r.layout,'rails','bottom safe area retains controller side rails');assert(r.rects[1].width>=300&&r.rects[1].height>=225,'touchscreen has useful size beside controls');
+    const tab=await page.locator('.kt-tab').boundingBox();near(tab.x+tab.width,669,'fullscreen settings tab touches outer edge');assert(tab.y>=r.fold.end,'tab remains below fold');
+    for(const c of await page.locator('.kt-pad button:visible,.kt-stick:visible').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().toJSON()))){assert(c.top>=r.fold.end-.1,'all fullscreen controls below physical fold');assert(c.right<=r.rects[1].left+1||c.left>=r.rects[1].right-1||c.bottom<=r.rects[1].top+1||c.top>=r.rects[1].bottom-1,'fullscreen control outside useful touchscreen');assert(c.right<=tab.x-9.9||c.left>=tab.x+tab.width+9.9||c.bottom<=tab.y-9.9||c.top>=tab.y+tab.height+9.9,'edge tab clear of controls')}
+    if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-installed-'+height+'-'+fullscreen+'.png')});
+   }
+   await safeInset.evaluate(el=>el.remove());await page.evaluate(()=>{fixtureFullscreen=false;document.documentElement.removeAttribute('data-cr-installed')});
    // Natural screen orientation can remain wide in a portrait Home Screen app.
-   await page.evaluate(()=>{document.documentElement.setAttribute('data-cr-status-top','');Object.defineProperty(navigator,'standalone',{value:true,configurable:true});Object.defineProperty(screen,'width',{get:()=>951,configurable:true});Object.defineProperty(screen,'height',{get:()=>669,configurable:true});const e=new Event('gamepaddisconnected');e.gamepad=pads[0];pads=[];dispatchEvent(e)});
+   await page.evaluate(()=>{document.documentElement.setAttribute('data-cr-status-top','');Object.defineProperty(navigator,'standalone',{value:true,configurable:true});Object.defineProperty(screen,'width',{get:()=>951,configurable:true});Object.defineProperty(screen,'height',{get:()=>669,configurable:true});const e=new Event('gamepaddisconnected');e.gamepad=pads[0]||{index:0,connected:false};pads=[];dispatchEvent(e)});
    await page.setViewportSize({width:669,height:867});await page.waitForTimeout(350);
    near(await page.locator('#wrcad-touch').evaluate(el=>JSON.parse(el.dataset.foldBounds).center),391.5,'natural orientation and opaque status area locate physical hinge');
    await page.evaluate(()=>{window.viewport={segments:[{left:0,right:669,top:0,bottom:300},{left:0,right:669,top:380,bottom:867}]}});await page.waitForTimeout(300);

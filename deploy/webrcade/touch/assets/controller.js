@@ -515,16 +515,17 @@
         reportedEnd = stacked ? ordered[1].top - y : ordered[1].left - x;
         split = stacked ? (ordered[0].bottom + ordered[1].top) / 2 - y :
           (ordered[0].right + ordered[1].left) / 2 - x;
-      } else if (outer.document.documentElement.hasAttribute('data-cr-status-top') &&
-          (outer.navigator.standalone || outer.matchMedia('(display-mode: standalone)').matches) && !outer.document.fullscreenElement) {
-        // Opaque installed-app status areas are outside innerHeight. Center
-        // on the physical display, then translate back into content space.
+      } else if (outer.navigator.standalone || outer.document.documentElement.hasAttribute('data-cr-status-top') &&
+          (outer.matchMedia('(display-mode: standalone)').matches || outer.matchMedia('(display-mode: fullscreen)').matches)) {
+        // Fullscreen can retain an opaque installed-app status area outside
+        // innerHeight. Center on the physical display even in fullscreen,
+        // then translate through the status area and game-frame offset.
         // Screen can retain its natural (wide) orientation while the installed
         // window is portrait. Match its width before using its physical height.
         const physicalHeight = Math.abs(outer.screen.width - outer.innerWidth) < 1 ? outer.screen.height :
           Math.abs(outer.screen.height - outer.innerWidth) < 1 ? outer.screen.width : 0;
         const excluded = physicalHeight - outer.innerHeight;
-        if (stacked && physicalHeight && excluded > 0 && excluded <= 100)
+        if (stacked && physicalHeight && excluded >= 0)
           split = physicalHeight / 2 - excluded - y;
       }
     } catch (_) { /* Older/cross-origin browsers retain the visible midpoint. */ }
@@ -551,7 +552,7 @@
     const rails = lower.width >= 576 && lower.height >= (system === '3ds' ? 386 : 286);
     const wide = lower.width >= 576;
     const controlsHeight = Math.min(lower.height, rails ? lower.height : system === '3ds' && !wide ? 370 : 244);
-    const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - 14, lower.bottom);
+    const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - (rails ? 14 : 42), lower.bottom);
     const picture = rails ? rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64) :
       rectangle(lower.left, lower.top, lower.right, Math.max(lower.top, controls.top - 12));
     const fit = (area, ratio) => {
@@ -1196,9 +1197,10 @@
     const area = sectionState?.presentation?.lower;
     const left = x * innerWidth < (area ? (area.left + area.right) / 2 : innerWidth / 2);
     const dock = $('.kt-dock');
-    const centered = area && !sectionState.presentation.rails && !drawerOpen;
-    dock.style.left = centered ? `${(area.left + area.right) / 2 - controllerBounds.left - 22}px` : area && left ? `${area.left - controllerBounds.left}px` : '';
-    dock.style.right = centered ? 'auto' : area && !left ? `${controllerBounds.right - area.right}px` : '';
+    // Keep the closed handle flush with the outer edge. Short layouts
+    // reserve a gutter beside the controls instead of centering the handle.
+    dock.style.left = area && left ? `${sectionState.mode === 'stacked' ? 0 : area.left - controllerBounds.left}px` : '';
+    dock.style.right = area && !left ? '0px' : '';
     drawer.style.maxHeight = area ? `${Math.max(44, area.height - 16)}px` : '';
     drawer.style.maxWidth = area ? `${area.width}px` : '';
     const editor = $('.kt-editor');
@@ -1322,7 +1324,8 @@
   tab.addEventListener('pointermove', e => {
     if (editDrag?.id !== 'dock' || editDrag.pointer !== e.pointerId) return;
     const d = editDrag;
-    layouts[d.key].dock = [d.cx + e.clientX - d.x < innerWidth / 2 ? 0 : 1,
+    const area = sectionState?.presentation?.lower;
+    layouts[d.key].dock = [d.cx + e.clientX - d.x < (area ? (area.left + area.right) / 2 : innerWidth / 2) ? 0 : 1,
       Math.max(0, Math.min(1, (d.cy + e.clientY - d.y) / innerHeight))];
     dragged = true; draw();
   });
@@ -1331,7 +1334,7 @@
       if (editDrag?.id === 'dock' && editDrag.pointer === e.pointerId) editDrag = null;
       dragged = true;
     } else if (pullStart !== null && Math.abs(e.clientX - pullStart) > 24) {
-      dragged = true; setDrawer(dockPosition()[0] < .5 ? e.clientX > pullStart : e.clientX < pullStart);
+      dragged = true; setDrawer(host.classList.contains('kt-dock-left') ? e.clientX > pullStart : e.clientX < pullStart);
     }
     pullStart = null;
   });
