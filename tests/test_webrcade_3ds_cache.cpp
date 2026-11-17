@@ -46,7 +46,7 @@ int main() {
     for (unsigned i = 0; i < 30000; ++i) {
         assert(cache.Find(i, offset) && offset == i * 7);
     }
-    // Warm fast entries must not survive any arena/process invalidation.
+    // Decoded entries must not survive any arena/process invalidation.
     cache.Reset(); assert(!cache.Find(29999, offset));
     cache.Store(0x1000, 0); top = 769; cache.ReserveBlock(256);
     assert(!cache.Find(0x1000, offset));
@@ -73,6 +73,6 @@ int main() {
     assert(!budget.BeginFrame([](unsigned) { return false; }));
     assert(budget.BeginFrame([](unsigned) { return true; }));
     assert(budget.Pending() == 0 && budget.Available());
-    std::cout << "PASS direct cache collision/replacement/reset and bounded compiler completion/demand priority\n";
+    std::cout << "PASS flat cache collision/replacement/reset and bounded compiler completion/demand priority\n";
     std::cout << "PASS process reuse, shared CPU invalidation, ARM/Thumb identities, lifetime and bounded arena rollover\n";
 }

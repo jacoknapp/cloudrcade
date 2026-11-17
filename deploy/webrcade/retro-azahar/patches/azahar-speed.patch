@@ -1,65 +1,49 @@
 diff --git a/src/core/arm/dyncom/wasm_translation_cache.h b/src/core/arm/dyncom/wasm_translation_cache.h
 --- a/src/core/arm/dyncom/wasm_translation_cache.h
 +++ b/src/core/arm/dyncom/wasm_translation_cache.h
-@@ -1,6 +1,7 @@
- // Shared decoded-block cache for the single-threaded WASM CPU scheduler.
- #pragma once
- 
-+#include <array>
+@@ -4,7 +4,7 @@
  #include <cstddef>
  #include <cstdint>
  #include <memory>
-@@ -18,6 +19,10 @@
+-#include <unordered_map>
++#include <tsl/robin_map.h>
+ 
+ namespace Memory {
+ struct PageTable;
+@@ -13,7 +13,7 @@
+ class WasmTranslationCache {
+ public:
+     WasmTranslationCache(std::size_t& arena_top_, std::size_t capacity_)
+-        : arena_top(arena_top_), capacity(capacity_) {}
++        : arena_top(arena_top_), capacity(capacity_) { blocks.max_load_factor(0.75f); }
+ 
      void Reset() {
          blocks.clear();
-         arena_top = 0;
-+        if (++generation == 0) {
-+            for (auto& entry : fast) entry.generation = 0;
-+            generation = 1;
-+        }
-     }
- 
-     void SelectPageTable(const std::shared_ptr<Memory::PageTable>& page_table) {
-@@ -33,9 +38,38 @@
+@@ -33,11 +33,22 @@
          }
      }
  
 -    std::unordered_map<std::uint32_t, std::size_t>& Blocks() { return blocks; }
 +    bool Find(std::uint32_t key, std::size_t& offset) {
-+        auto& entry = fast[Index(key)];
-+        if (entry.generation == generation && entry.key == key) {
-+            offset = entry.offset;
-+            return true;
-+        }
 +        const auto it = blocks.find(key);
 +        if (it == blocks.end()) return false;
 +        offset = it->second;
-+        entry = {key, generation, offset};
 +        return true;
 +    }
 +
 +    void Store(std::uint32_t key, std::size_t offset) {
 +        blocks[key] = offset;
-+        fast[Index(key)] = {key, generation, offset};
 +    }
 +
-+    const std::unordered_map<std::uint32_t, std::size_t>& Blocks() const { return blocks; }
++    const tsl::robin_pg_map<std::uint32_t, std::size_t>& Blocks() const { return blocks; }
  
  private:
-+    static constexpr std::size_t FAST_SIZE = 4096;
-+    static std::size_t Index(std::uint32_t key) {
-+        return ((key ^ (key >> 16)) * std::uint32_t{0x9e3779b1}) >> 20;
-+    }
-+    struct Entry {
-+        std::uint32_t key = 0;
-+        std::uint32_t generation = 0;
-+        std::size_t offset = 0;
-+    };
-+    std::array<Entry, FAST_SIZE> fast{};
-+    std::uint32_t generation = 1;
      std::size_t& arena_top;
      const std::size_t capacity;
      std::weak_ptr<Memory::PageTable> resident_page_table;
+-    std::unordered_map<std::uint32_t, std::size_t> blocks;
++    tsl::robin_pg_map<std::uint32_t, std::size_t> blocks;
+ };
 diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
 --- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
 +++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
@@ -133,7 +117,7 @@ diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dynco
 -    if (itr != instruction_cache.end()) {
 -        ptr = itr->second;
 +    if (FindDyncomInstructionBlock(cpu, ptr)) {
-+        // The shared cache returns only offsets from its current generation.
++        // The shared cache returns only offsets from its current arena.
      } else if (cpu->NumInstrsToExecute != 1) {
          if (InterpreterTranslateBlock(cpu, ptr, cpu->Reg[15]) == FETCH_EXCEPTION)
              goto END;
@@ -232,3 +216,16 @@ diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_co
                  if (!usable) {
                      failed_programs.insert(unique_identifier);
                      glDeleteProgram(program);
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -539,6 +539,9 @@
+ # The WASM link mixes LLVM bitcode and native objects. Keep the virtual save
+ # directory callbacks at their declared ABI instead of ThinLTO argument promotion.
+ if (EMSCRIPTEN)
++    # Reuse Dynarmic's pinned header-only map for the browser interpreter too.
++    set_property(SOURCE arm/dyncom/arm_dyncom_trans.cpp APPEND PROPERTY INCLUDE_DIRECTORIES
++        "${PROJECT_SOURCE_DIR}/externals/dynarmic/externals/robin-map/include")
+     set_source_files_properties(file_sys/savedata_archive.cpp
+         PROPERTIES COMPILE_OPTIONS "-fno-lto")
+ endif()

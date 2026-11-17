@@ -7,6 +7,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'webrcade-cache-test-'));
 try {
   const binary = path.join(output, 'cache-test');
   execFileSync(process.env.CXX || 'c++', ['-std=c++20', '-Wall', '-Wextra', '-Werror',
-    '-I' + path.join(root, 'azahar/src'), path.join(__dirname, 'test_webrcade_3ds_cache.cpp'), '-o', binary], {stdio:'inherit'});
+    '-I' + path.join(root, 'azahar/src'),
+    '-I' + path.join(root, 'azahar/externals/dynarmic/externals/robin-map/include'), path.join(__dirname, 'test_webrcade_3ds_cache.cpp'), '-o', binary], {stdio:'inherit'});
   execFileSync(binary, [], {stdio:'inherit'});
 } finally { fs.rmSync(output, {recursive:true, force:true}); }

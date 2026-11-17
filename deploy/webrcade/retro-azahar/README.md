@@ -215,9 +215,10 @@ all block offsets together on code invalidation, process changes or arena rollov
 This relies on the core's single-threaded CPU scheduler; filesystem workers do not
 execute guest CPU instructions.
 
-`azahar-speed.patch` adds a 4096-entry direct lookup in front of the decoded-block
-map. Exact ARM/Thumb tags and reset generations prevent stale offsets after code
-invalidation, process changes or arena reuse. The existing arena budget is unchanged.
+`azahar-speed.patch` uses the pinned core's Robin Hood flat hash table for
+browser decoded-block lookup, with prime growth for aligned guest addresses.
+ARM/Thumb keys and shared invalidation on code/process/arena changes remain.
+The existing arena budget is unchanged.
 Shader prewarming submits at most two programs per frame with eight outstanding
 compilations; completed programs free capacity without waiting for a draw. A required
 shader still finishes before its draw, and demand waits pause prewarming for two
