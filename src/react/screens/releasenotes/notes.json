@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.7",
+    "date": "November 16, 2026",
+    "title": "Larger lower touchscreen",
+    "changes": [
+      "Expanded portrait DS and 3DS layouts give the lower touchscreen more space while keeping its original aspect ratio.",
+      "Controls stay at the outer edges and clear of the picture, with shoulder buttons above and the footer below."
+    ]
+  },
+  {
     "version": "3.1.6",
     "date": "November 16, 2026",
     "title": "Duo display defaults",

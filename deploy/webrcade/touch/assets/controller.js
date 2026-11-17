@@ -615,7 +615,10 @@
     const wide = lower.width >= 576;
     const controlsHeight = Math.min(lower.height, rails ? lower.height : system === '3ds' && !wide ? 370 : 244);
     const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - (rails ? 14 : 42), lower.bottom);
-    const picture = rails ? rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64) :
+    // In portrait, use the space between the outer sticks/face buttons and
+    // between the shoulder/footer rows. Keep the original touchscreen aspect.
+    const picture = rails ? (stacked ? rectangle(lower.left + 120, lower.top + 68, lower.right - 148, lower.bottom - 64) :
+      rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64)) :
       rectangle(lower.left, lower.top, lower.right, Math.max(lower.top, controls.top - 12));
     const fit = (area, ratio) => {
       const width = Math.min(area.width, area.height * ratio), height = width / ratio;
@@ -995,6 +998,9 @@
     if (pad.hidden) return;
     const saved = currentLayout();
     const obstacles = [tab.getBoundingClientRect()];
+    // Wider portrait pictures also exclude restored coordinates and live drags.
+    if (sectionState?.mode === 'stacked' && sectionState.presentation?.rails)
+      obstacles.push(sectionState.presentation.destinations[1]);
     if (!dsCycle.hidden) obstacles.push(dsCycle.getBoundingClientRect());
     if (editing) obstacles.push($('.kt-editor').getBoundingClientRect());
     if (sectionState?.mode === 'stacked') {

@@ -83,7 +83,7 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
      const controls=await page.locator('.kt-pad button:visible,.kt-stick:visible,.kt-tab:visible').evaluateAll(els=>els.map(el=>({...el.getBoundingClientRect().toJSON(),id:el.dataset.layoutId||'tab'})));
      assert.equal(controls.length,system==='3ds'?15:12,'every control visible');near(controls.find(r=>r.id==='tab').right,size.width,'closed settings tab is flush with outer edge');
      for(const r of controls){assert(side?r.x>=fold.end-.1:r.y>=fold.end-.1,'all controls stay in touchscreen pane '+r.id);assert(r.x>=-.1&&r.right<=size.width+.1&&r.bottom<=size.height+.1,'control visible '+r.id);assert(r.right<=rects[1].left+1||r.x>=rects[1].right-1||r.bottom<=rects[1].top+1||r.y>=rects[1].bottom-1,'control outside lower picture '+r.id);}
-     if(!side)assert(rects[0].width>rects[1].width*1.5,'upper display uses available full width');
+     if(!side){near(rects[0].width,Math.min(size.width-24,(fold.start-12)*(system==='3ds'?5/3:4/3)),'upper display still fits its full pane');assert(rects[1].width>=360&&rects[1].height>=270,'portrait touchscreen uses available lower space');}
      const r=rects[1];await page.touchscreen.tap((r.left+r.right)/2,(r.top+r.bottom)/2);await page.waitForTimeout(30);
      const point=await page.evaluate(()=>system==='3ds'?nativeTouch.at(-1):nativeMouse.at(-1));const canvas=await page.locator('canvas').boundingBox();
      const nx=system==='3ds'?(side?(400+160)/720:.5):(side?.75:.5);const ny=side?.5:system==='3ds'?.75:(224+96)/416;
@@ -114,7 +114,7 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
     const r=await page.locator('#wrcad-touch').evaluate(el=>({rects:JSON.parse(el.dataset.screenRects),fold:JSON.parse(el.dataset.foldBounds),layout:el.dataset.sectionControls})),excluded=951-height;
     near(r.fold.center+excluded,951/2,'fullscreen/status strip keeps fold on physical midpoint');
     assert(r.rects[0].bottom+excluded<=951/2-19.9,'upper picture stays above physical hinge clearance');assert(r.rects[1].top+excluded>=951/2+19.9,'touchscreen stays below physical hinge clearance');
-    assert.equal(r.layout,'rails','bottom safe area retains controller side rails');assert(r.rects[1].width>=300&&r.rects[1].height>=225,'touchscreen has useful size beside controls');
+    assert.equal(r.layout,'rails','bottom safe area retains controller side rails');assert(r.rects[1].width>=360&&r.rects[1].height>=270,'larger touchscreen fits beside full-size controls and above footer');
     const tab=await page.locator('.kt-tab').boundingBox();near(tab.x+tab.width,669,'fullscreen settings tab touches outer edge');assert(tab.y>=r.fold.end,'tab remains below fold');
     for(const c of await page.locator('.kt-pad button:visible,.kt-stick:visible').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().toJSON()))){assert(c.top>=r.fold.end-.1,'all fullscreen controls below physical fold');assert(c.right<=r.rects[1].left+1||c.left>=r.rects[1].right-1||c.bottom<=r.rects[1].top+1||c.top>=r.rects[1].bottom-1,'fullscreen control outside useful touchscreen');assert(c.right<=tab.x-9.9||c.left>=tab.x+tab.width+9.9||c.bottom<=tab.y-9.9||c.top>=tab.y+tab.height+9.9,'edge tab clear of controls')}
     if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-installed-'+height+'-'+fullscreen+'.png')});
