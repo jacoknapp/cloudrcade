@@ -1,0 +1,64 @@
+--- a/src/video_core/renderer_opengl/gl_rasterizer.h
++++ b/src/video_core/renderer_opengl/gl_rasterizer.h
+@@ -96,6 +96,9 @@
+     void SetupVertexArray(u8* array_ptr, GLintptr buffer_offset, GLuint vs_input_index_min,
+                           GLuint vs_input_index_max);
+ 
++    void SetHardwareVertexPointer(GLuint slot, GLint size, GLenum type, GLsizei stride,
++                                  GLintptr offset);
++
+     /// Setup vertex shader for AccelerateDrawBatch
+     bool SetupVertexShader();
+ 
+@@ -114,6 +117,19 @@
+     OGLVertexArray sw_vao; // VAO for software shader draw
+     OGLVertexArray hw_vao; // VAO for hardware shader / accelerate draw
+     std::array<bool, 16> hw_vao_enabled_attributes{};
++#if defined(__EMSCRIPTEN__)
++    // Only SetupVertexArray writes pointers on hw_vao. Its cache has the same lifetime.
++    struct VertexPointer {
++        GLuint buffer;
++        GLint size;
++        GLenum type;
++        GLsizei stride;
++        GLintptr offset;
++
++        bool operator==(const VertexPointer&) const = default;
++    };
++    std::array<VertexPointer, 16> hw_vertex_pointers{};
++#endif
+ 
+     OGLStreamBuffer vertex_buffer;
+ #if !defined(__EMSCRIPTEN__)
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -464,6 +464,19 @@
+                                  : GL_FALSE;
+ }
+ 
++void RasterizerOpenGL::SetHardwareVertexPointer(GLuint slot, GLint size, GLenum type,
++                                                GLsizei stride, GLintptr offset) {
++#if defined(__EMSCRIPTEN__)
++    const VertexPointer next{state.draw.vertex_buffer, size, type, stride, offset};
++    auto& previous = hw_vertex_pointers[slot];
++    if (previous == next) {
++        return;
++    }
++    previous = next;
++#endif
++    glVertexAttribPointer(slot, size, type, GL_FALSE, stride, reinterpret_cast<GLvoid*>(offset));
++}
++
+ void RasterizerOpenGL::SetupVertexArray(u8* array_ptr, GLintptr buffer_offset,
+                                         GLuint vs_input_index_min, GLuint vs_input_index_max) {
+     MICROPROFILE_SCOPE(OpenGL_VAO);
+@@ -493,8 +506,7 @@
+                     GLint size = vertex_attributes.GetNumElements(attribute_index);
+                     GLenum type = MakeAttributeType(vertex_attributes.GetFormat(attribute_index));
+                     GLsizei stride = loader.byte_count;
+-                    glVertexAttribPointer(input_reg, size, type, GL_FALSE, stride,
+-                                          reinterpret_cast<GLvoid*>(buffer_offset + offset));
++                    SetHardwareVertexPointer(input_reg, size, type, stride, buffer_offset + offset);
+                     enable_attributes[input_reg] = true;
+ 
+                     offset += vertex_attributes.GetStride(attribute_index);
