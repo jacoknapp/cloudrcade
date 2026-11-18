@@ -25,7 +25,8 @@ ENV PHP_VERSION=8.3.36 \
     PHP_SHA256=dd54693aa334c5c4d72e9aee96b082c2473750a18a6c1d105789c93a3b1692fd
 COPY docker/build-php-runtime.sh /usr/local/bin/build-php-runtime
 RUN sh /usr/local/bin/build-php-runtime && rm /usr/local/bin/build-php-runtime
-RUN apt-get update && apt-get install -y --no-install-recommends python3 mame-tools nodejs npm openssl \
+RUN apt-get update && apt-get upgrade -y \
+ && apt-get install -y --no-install-recommends python3 mame-tools nodejs npm openssl \
  && npm install -g miniflare@2.12.1 \
  && a2dismod php mpm_prefork \
  && a2enmod mpm_event headers proxy_http proxy_fcgi setenvif ssl http2 \
