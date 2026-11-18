@@ -219,6 +219,14 @@ execute guest CPU instructions.
 browser decoded-block lookup, with prime growth for aligned guest addresses.
 ARM/Thumb keys and shared invalidation on code/process/arena changes remain.
 The existing arena budget is unchanged.
+
+`azahar-interpreter.patch` adds a 4,096-entry lookup table in front of the
+decoded-block map. Each hit checks the full address and ARM/Thumb mode. A
+collision falls back to the map, and both tables reset together. The Wasm
+interpreter also calls the existing handlers directly for immediate and plain
+register operands and common immediate-offset loads and stores. Other operands
+and addressing modes still use their decoded handlers.
+
 Shader prewarming submits at most two programs per frame with eight outstanding
 compilations; completed programs free capacity without waiting for a draw. A required
 shader still finishes before its draw, and demand waits pause prewarming for two

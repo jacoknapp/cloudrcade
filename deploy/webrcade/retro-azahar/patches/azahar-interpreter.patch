@@ -1,0 +1,146 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -923,6 +923,26 @@
+     return n;
+ }
+ 
++#ifdef __EMSCRIPTEN__
++// Give Wasm direct calls for the common operands. The existing handlers retain
++// the carry and PC semantics, including the pipelined PC value in ARM/Thumb.
++static inline u32 GetWasmShifterOperand(ARMul_State* cpu, shtop_fp_t shift, u32 operand) {
++    if (shift == DPO(Immediate))
++        return DPO(Immediate)(cpu, operand);
++    if (shift == DPO(Register))
++        return DPO(Register)(cpu, operand);
++    return shift(cpu, operand);
++}
++
++static inline void GetWasmTransferAddress(ARMul_State* cpu, const ldst_inst* transfer,
++                                          unsigned int& addr) {
++    if (transfer->get_addr == LnSWoUB(ImmediateOffset))
++        LnSWoUB(ImmediateOffset)(cpu, transfer->inst, addr);
++    else
++        transfer->get_addr(cpu, transfer->inst, addr);
++}
++#endif
++
+ MICROPROFILE_DEFINE(DynCom_Execute, "DynCom", "Execute", MP_RGB(255, 0, 0));
+ 
+ unsigned InterpreterMainLoop(ARMul_State* cpu) {
+@@ -948,7 +968,13 @@
+ #define RDLO cpu->Reg[inst_cream->RdLo]
+ #define LINK_RTN_ADDR (cpu->Reg[14] = cpu->Reg[15] + 4)
+ #define SET_PC (cpu->Reg[15] = cpu->Reg[15] + 8 + inst_cream->signed_immed_24)
++#ifdef __EMSCRIPTEN__
++#define SHIFTER_OPERAND GetWasmShifterOperand(cpu, inst_cream->shtop_func, inst_cream->shifter_operand)
++#define TRANSFER_ADDRESS GetWasmTransferAddress(cpu, inst_cream, addr)
++#else
+ #define SHIFTER_OPERAND inst_cream->shtop_func(cpu, inst_cream->shifter_operand)
++#define TRANSFER_ADDRESS inst_cream->get_addr(cpu, inst_cream->inst, addr)
++#endif
+ 
+ #define FETCH_INST                                                                                 \
+     if (inst_base->br != TransExtData::NON_BRANCH)                                                 \
+@@ -2128,7 +2154,7 @@
+ }
+ LDR_INST: {
+     ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-    inst_cream->get_addr(cpu, inst_cream->inst, addr);
++    TRANSFER_ADDRESS;
+ 
+     unsigned int value = cpu->ReadMemory32(addr);
+     cpu->Reg[BITS(inst_cream->inst, 12, 15)] = value;
+@@ -2149,7 +2175,7 @@
+ LDRCOND_INST: {
+     if (CondPassed(cpu, inst_base->cond)) {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-        inst_cream->get_addr(cpu, inst_cream->inst, addr);
++        TRANSFER_ADDRESS;
+ 
+         unsigned int value = cpu->ReadMemory32(addr);
+         cpu->Reg[BITS(inst_cream->inst, 12, 15)] = value;
+@@ -2192,7 +2218,7 @@
+ LDRB_INST: {
+     if (inst_base->cond == ConditionCode::AL || CondPassed(cpu, inst_base->cond)) {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-        inst_cream->get_addr(cpu, inst_cream->inst, addr);
++        TRANSFER_ADDRESS;
+ 
+         cpu->Reg[BITS(inst_cream->inst, 12, 15)] = cpu->ReadMemory8(addr);
+     }
+@@ -3638,7 +3664,7 @@
+ STR_INST: {
+     if (inst_base->cond == ConditionCode::AL || CondPassed(cpu, inst_base->cond)) {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-        inst_cream->get_addr(cpu, inst_cream->inst, addr);
++        TRANSFER_ADDRESS;
+ 
+         unsigned int reg = BITS(inst_cream->inst, 12, 15);
+         unsigned int value = cpu->Reg[reg];
+@@ -3678,7 +3704,7 @@
+ STRB_INST: {
+     if (inst_base->cond == ConditionCode::AL || CondPassed(cpu, inst_base->cond)) {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-        inst_cream->get_addr(cpu, inst_cream->inst, addr);
++        TRANSFER_ADDRESS;
+         unsigned int value = cpu->Reg[BITS(inst_cream->inst, 12, 15)] & 0xff;
+         cpu->WriteMemory8(addr, value);
+     }
+diff --git a/src/core/arm/dyncom/wasm_translation_cache.h b/src/core/arm/dyncom/wasm_translation_cache.h
+--- a/src/core/arm/dyncom/wasm_translation_cache.h
++++ b/src/core/arm/dyncom/wasm_translation_cache.h
+@@ -1,6 +1,7 @@
+ // Shared decoded-block cache for the single-threaded WASM CPU scheduler.
+ #pragma once
+ 
++#include <array>
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
+@@ -17,6 +18,7 @@
+ 
+     void Reset() {
+         blocks.clear();
++        recent.fill({});
+         arena_top = 0;
+     }
+ 
+@@ -34,19 +36,37 @@
+     }
+ 
+     bool Find(std::uint32_t key, std::size_t& offset) {
++        auto& slot = RecentSlot(key);
++        if (slot.offset_plus_one && slot.key == key) {
++            offset = slot.offset_plus_one - 1;
++            return true;
++        }
+         const auto it = blocks.find(key);
+         if (it == blocks.end()) return false;
+         offset = it->second;
++        slot = {key, offset + 1};
+         return true;
+     }
+ 
+     void Store(std::uint32_t key, std::size_t offset) {
+         blocks[key] = offset;
++        RecentSlot(key) = {key, offset + 1};
+     }
+ 
+     const tsl::robin_pg_map<std::uint32_t, std::size_t>& Blocks() const { return blocks; }
+ 
+ private:
++    // Colliding addresses or execution modes always fall back to the complete map.
++    struct Entry {
++        std::uint32_t key;
++        std::size_t offset_plus_one; // Offset plus one so zero represents an empty slot.
++    };
++
++    Entry& RecentSlot(std::uint32_t key) {
++        return recent[(key >> 1) & (recent.size() - 1)];
++    }
++
++    std::array<Entry, 4096> recent{};
+     std::size_t& arena_top;
+     const std::size_t capacity;
+     std::weak_ptr<Memory::PageTable> resident_page_table;
