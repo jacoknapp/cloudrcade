@@ -1,13 +1,17 @@
-// Compile the actual core cache header and exercise process identity, code invalidation,
-// cross-CPU aliases and bounded arena reuse. Requires c++ and a patched build.sh WORK tree.
+// Compile the native cache and ARM instruction regressions against the patched headers. Requires c++ and a patched build.sh WORK tree.
 const fs = require('fs'), os = require('os'), path = require('path');
 const {execFileSync} = require('child_process');
 const root = process.env.WEBRCADE_BUILD_ROOT || '/tmp/retro-azahar-build';
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'webrcade-cache-test-'));
 try {
-  const binary = path.join(output, 'cache-test');
-  execFileSync(process.env.CXX || 'c++', ['-std=c++20', '-Wall', '-Wextra', '-Werror',
-    '-I' + path.join(root, 'azahar/src'),
-    '-I' + path.join(root, 'azahar/externals/dynarmic/externals/robin-map/include'), path.join(__dirname, 'test_webrcade_3ds_cache.cpp'), '-o', binary], {stdio:'inherit'});
-  execFileSync(binary, [], {stdio:'inherit'});
+  for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops']) {
+    const binary = path.join(output, test);
+    execFileSync(process.env.CXX || 'c++', [
+      '-std=c++20', '-Wall', '-Wextra', '-Werror',
+      '-I' + path.join(root, 'azahar/src'),
+      '-I' + path.join(root, 'azahar/externals/dynarmic/externals/robin-map/include'),
+      path.join(__dirname, test + '.cpp'), '-o', binary,
+    ], {stdio: 'inherit'});
+    execFileSync(binary, [], {stdio: 'inherit'});
+  }
 } finally { fs.rmSync(output, {recursive:true, force:true}); }

@@ -1,0 +1,180 @@
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.h b/src/video_core/renderer_opengl/gl_shader_util.h
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -46,6 +46,7 @@
+     GLuint fragment;
+ };
+ void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source);
++u64 CanonicalProgramId(u64 id, GLuint vertex, GLuint fragment);
+ void NoteProgram(u64 id, GLuint vertex, GLuint fragment);
+ /// False past the end of the list. `entry.vertex` is 0 for a record that cannot be rebuilt.
+ /// Reads only the pair identifier, without compiling duplicate shader objects.
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -123,9 +123,12 @@
+ // Files written by core revision v15, which stamped them with its build time.
+ constexpr char LEGACY_STAMP[27] = "WRCP1 Oct  9 2026 03:03:23";
+ 
++// References to elements of an unordered_map survive rehashing. Keep one
++// immutable copy of each full GLSL string for recorded and live shaders.
++using ShaderTexts = std::unordered_map<std::string, u32>;
+ struct Source {
+     GLenum type;
+-    std::string text;
++    const ShaderTexts::value_type* text;
+ };
+ struct Record {
+     u64 id, vertex, fragment;
+@@ -134,11 +137,24 @@
+     std::FILE* file = nullptr;
+     std::unordered_map<u64, Source> sources;   ///< from the file, not compiled yet
+     std::unordered_map<u64, GLuint> compiled;  ///< shaders rebuilt from the file
+-    std::unordered_map<GLuint, u64> hashes;    ///< shaders the game compiled this session
++    ShaderTexts texts;
++    std::unordered_map<u64, u64> first_program;
++    struct Identity { u64 hash; u32 text; };
++    std::unordered_map<GLuint, Identity> hashes;    ///< shaders the game compiled this session
+     std::unordered_set<u64> shaders_on_file;
+     std::unordered_set<u64> programs_on_file;
+     std::vector<Record> records;
+ };
++
++const ShaderTexts::value_type* Intern(State& state, std::string text) {
++    const auto id = static_cast<u32>(state.texts.size());
++    return &*state.texts.try_emplace(std::move(text), id).first;
++}
++
++u64 ProgramId(State& state, u64 id, u32 vertex, u32 fragment) {
++    const u64 pair = (static_cast<u64>(vertex) << 32) | fragment;
++    return state.first_program.try_emplace(pair, id).first->second;
++}
+ 
+ template <typename T>
+ bool Read(std::FILE* file, T& value) {
+@@ -175,7 +191,7 @@
+                 if (std::fread(text.data(), 1, length, file) != length) {
+                     break;
+                 }
+-                state.sources[hash] = Source{static_cast<GLenum>(type), std::move(text)};
++                state.sources[hash] = Source{static_cast<GLenum>(type), Intern(state, std::move(text))};
+                 state.shaders_on_file.insert(hash);
+             } else if (kind == 'P') {
+                 Record record;
+@@ -192,6 +208,14 @@
+         }
+         std::fclose(file);
+     }
++    // Earlier files may contain several configuration IDs for the same
++    // shader text pair. Rebuild the first usable program for each pair.
++    std::erase_if(state.records, [&](const Record& record) {
++        const auto vs = state.sources.find(record.vertex);
++        const auto fs = state.sources.find(record.fragment);
++        if (vs == state.sources.end() || fs == state.sources.end()) return false;
++        return ProgramId(state, record.id, vs->second.text->second, fs->second.text->second) != record.id;
++    });
+     // No usable file: start a new one. An older stamp: write its contents out
+     // again under the current one. Otherwise add to it.
+     state.file = std::fopen(FILE_PATH, valid && !legacy ? "ab" : "wb");
+@@ -201,8 +225,8 @@
+             Write(state.file, u8{'S'});
+             Write(state.file, hash);
+             Write(state.file, static_cast<u32>(source.type));
+-            Write(state.file, static_cast<u32>(source.text.size()));
+-            std::fwrite(source.text.data(), 1, source.text.size(), state.file);
++            Write(state.file, static_cast<u32>(source.text->first.size()));
++            std::fwrite(source.text->first.data(), 1, source.text->first.size(), state.file);
+         }
+         for (const Record& record : state.records) {
+             Write(state.file, u8{'P'});
+@@ -226,8 +250,8 @@
+         return 0;
+     }
+     const GLuint shader = glCreateShader(it->second.type);
+-    const GLchar* text = it->second.text.data();
+-    const GLint length = static_cast<GLint>(it->second.text.size());
++    const GLchar* text = it->second.text->first.data();
++    const GLint length = static_cast<GLint>(it->second.text->first.size());
+     glShaderSource(shader, 1, &text, &length);
+     glCompileShader(shader); // not waited for: the link reports a failure
+     state.compiled.emplace(hash, shader);
+@@ -241,19 +265,28 @@
+     std::string text{preamble};
+     text += source;
+     const u64 hash = Common::ComputeHash64(text.data(), text.size());
+-    state.hashes[shader] = hash;
++    const auto* interned = Intern(state, std::move(text));
++    state.hashes[shader] = {hash, interned->second};
+     if (!state.file || !state.shaders_on_file.insert(hash).second) {
+         return;
+     }
+     // Kept as well: the game's own shader objects go when a save state is
+     // loaded, and the programs are then rebuilt from this text.
+-    state.sources[hash] = Source{type, text};
++    state.sources[hash] = Source{type, interned};
+     Write(state.file, u8{'S'});
+     Write(state.file, hash);
+     Write(state.file, static_cast<u32>(type));
+-    Write(state.file, static_cast<u32>(text.size()));
+-    std::fwrite(text.data(), 1, text.size(), state.file);
++    Write(state.file, static_cast<u32>(interned->first.size()));
++    std::fwrite(interned->first.data(), 1, interned->first.size(), state.file);
+     std::fflush(state.file);
++}
++
++u64 CanonicalProgramId(u64 id, GLuint vertex, GLuint fragment) {
++    State& state = Get();
++    const auto vs = state.hashes.find(vertex);
++    const auto fs = state.hashes.find(fragment);
++    if (vs == state.hashes.end() || fs == state.hashes.end()) return id;
++    return ProgramId(state, id, vs->second.text, fs->second.text);
+ }
+ 
+ void NoteProgram(u64 id, GLuint vertex, GLuint fragment) {
+@@ -266,10 +299,10 @@
+     }
+     Write(state.file, u8{'P'});
+     Write(state.file, id);
+-    Write(state.file, vs->second);
+-    Write(state.file, fs->second);
++    Write(state.file, vs->second.hash);
++    Write(state.file, fs->second.hash);
+     std::fflush(state.file);
+-    state.records.push_back(Record{id, vs->second, fs->second});
++    state.records.push_back(Record{id, vs->second.hash, fs->second.hash});
+ }
+ 
+ bool IdAt(std::size_t index, u64& id) {
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -319,6 +319,9 @@
+         }
+     };
+ 
++#ifdef __EMSCRIPTEN__
++    std::unordered_map<u64, u64> program_aliases;
++#endif
+     static_assert(offsetof(ShaderTuple, vs_hash) == 0, "ShaderTuple layout changed!");
+     static_assert(offsetof(ShaderTuple, fs_hash) == sizeof(std::size_t) * 2,
+                   "ShaderTuple layout changed!");
+@@ -501,8 +504,18 @@
+         state.draw.shader_program = 0;
+         state.draw.program_pipeline = impl->pipeline.handle;
+     } else {
+-        const u64 unique_identifier = impl->current.GetConfigHash();
++        u64 unique_identifier = impl->current.GetConfigHash();
+ #if defined(__EMSCRIPTEN__)
++        // Configurations can generate identical GLSL. Resolve each config once
++        // per manager and use the same linked program for the exact source pair.
++        if (impl->current.gs == 0) {
++            auto [entry, fresh] = impl->program_aliases.try_emplace(unique_identifier, unique_identifier);
++            if (fresh) {
++                entry->second = RememberedPrograms::CanonicalProgramId(
++                    unique_identifier, impl->current.vs, impl->current.fs);
++            }
++            unique_identifier = entry->second;
++        }
+         if (failed_programs.contains(unique_identifier)) {
+             return false;
+         }

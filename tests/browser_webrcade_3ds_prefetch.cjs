@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {chromium,webkit}=require('playwright');
 const root=path.join(__dirname,'../deploy/webrcade/retro-azahar/app/src/emulator');
-const chunk=2*1024*1024,size=chunk*20+17,requests=[];
+const chunk=256*1024,size=chunk*20+17,requests=[];
 const server=http.createServer((req,res)=>{
  if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Range fixture</title>');return;}
  if(req.url==='/reader.js'){res.setHeader('Content-Type','application/javascript');res.end(fs.readFileSync(path.join(root,'lazyrom.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'read-ahead-rom.js'),'utf8').replace(/^import .*?;\n/,''));return;}

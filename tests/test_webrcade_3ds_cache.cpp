@@ -37,6 +37,18 @@ int main() {
     std::size_t offset = 999;
     cache.Reset();
     assert(!cache.Find(0x1000, offset));
+    // Also exercise a valid arena offset of zero, a different ARM block in
+    // the same slot, and the Thumb translation of the original address.
+    cache.Store(0x1000, 0);
+    assert(cache.Find(0x1000, offset) && offset == 0);
+    assert(!cache.Find(0x3000, offset));
+    cache.Store(0x3000, 96);
+    cache.Store(0x1001, 128);
+    assert(cache.Find(0x3000, offset) && offset == 96);
+    assert(cache.Find(0x1000, offset) && offset == 0);
+    assert(cache.Find(0x1001, offset) && offset == 128);
+    cache.Reset();
+    assert(!cache.Find(0x1001, offset) && !cache.Find(0x3000, offset));
     cache.Store(0x1000, 16); cache.Store(0x1001, 32);
     assert(cache.Find(0x1000, offset) && offset == 16);
     assert(cache.Find(0x1001, offset) && offset == 32);

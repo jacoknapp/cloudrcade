@@ -8,7 +8,7 @@ const path = require('node:path');
   source += fs.readFileSync(path.join(__dirname,
     '../deploy/webrcade/retro-azahar/app/src/emulator/read-ahead-rom.js'), 'utf8')
     .replace(/^import .*?;\n/, '');
-  const { ReadAheadRom: LazyRom, CHUNK_SIZE, MAX_CHUNKS } = await import(
+  const { ReadAheadRom: LazyRom, PAGE_SIZE: CHUNK_SIZE, MAX_PAGES: MAX_CHUNKS } = await import(
     'data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const requests = [];
   global.fetch = (url, options) => new Promise((resolve, reject) => {
@@ -16,7 +16,7 @@ const path = require('node:path');
   });
   const flush = () => new Promise(resolve => setImmediate(resolve));
   const make = () => {
-    const rom = new LazyRom('https://example.invalid/game.cia', CHUNK_SIZE * 24 + 17);
+    const rom = new LazyRom('https://example.invalid/game.cia', CHUNK_SIZE * (MAX_CHUNKS * 2) + 17);
     rom.fetchChunk = index => new Uint8Array(Math.min(CHUNK_SIZE,
       rom.size - index * CHUNK_SIZE)).fill(index);
     return rom;
@@ -76,7 +76,7 @@ const path = require('node:path');
   const rom = make(), buffer = new Uint8Array(8);
   rom.read(buffer, 0, 8, 0);
   rom.read(buffer, 0, 8, 8);
-  const nearEnd = CHUNK_SIZE - 256 * 1024;
+  const nearEnd = CHUNK_SIZE - CHUNK_SIZE / 8;
   rom.read(buffer, 0, 8, nearEnd);
   rom.read(buffer, 0, 8, nearEnd);
   rom.read(buffer, 0, 8, nearEnd - 8);
@@ -85,9 +85,9 @@ const path = require('node:path');
   assert.equal(requests.length, 1, 'sequential progress near the boundary starts prefetch');
   const first = requests.at(-1);
   assert.equal(first.options.headers.Range, `bytes=${CHUNK_SIZE}-${2 * CHUNK_SIZE - 1}`);
-  for (let i = 2; i < 14; i++) rom.getChunk(i);
+  for (let i = 2; i < MAX_CHUNKS + 6; i++) rom.getChunk(i);
   assert.equal(rom.chunks.size + Number(!!rom.pending), MAX_CHUNKS,
-    'in-flight data occupies one of the original eight cache slots');
+    'in-flight data occupies one page of the 16 MiB cache');
   answer(first, rom, 1); await flush();
   assert.equal(rom.chunks.size, MAX_CHUNKS);
   const misses = rom.readAheadStats.misses;
@@ -123,16 +123,42 @@ const path = require('node:path');
     assert.equal(invalid.getChunk(1)[0], 1, 'demand fallback remains available');
     invalid.close();
   }
-  const partial = make(); partial.prefetch(24);
-  answer(requests.at(-1), partial, 24); await flush();
-  assert.equal(partial.getChunk(24).length, 17);
-  const count = requests.length; partial.prefetch(25);
+  const partial = make(); partial.prefetch(MAX_CHUNKS * 2);
+  answer(requests.at(-1), partial, MAX_CHUNKS * 2); await flush();
+  assert.equal(partial.getChunk(MAX_CHUNKS * 2).length, 17);
+  const count = requests.length; partial.prefetch(MAX_CHUNKS * 2 + 1);
   assert.equal(requests.length, count, 'no request after EOF');
   const seek = make(); seek.read(buffer, 0, 8, nearEnd); seek.read(buffer, 0, 8, nearEnd + 8);
   const abandoned = requests.at(-1); seek.read(buffer, 0, 8, 10 * CHUNK_SIZE);
   assert(abandoned.options.signal.aborted, 'unrelated seeks cancel read-ahead');
   abandoned.reject(new Error('cancelled')); await flush();
   assert.equal(seek.failedPrefetch, -1, 'cancellation does not poison future reads');
+  // Large contiguous reads coalesce missing pages, even at a partial EOF.
+  const bulk = new LazyRom('/bulk', 20 * CHUNK_SIZE + 17);
+  const ranges = [];
+  bulk.fetchBytes = (first, last) => {
+    ranges.push([first, last]);
+    const data = new Uint8Array(last - first + 1);
+    for (let i = 0; i < data.length; i++) data[i] = Math.floor((first + i) / CHUNK_SIZE);
+    return data;
+  };
+  bulk.getChunk(4);
+  ranges.length = 0;
+  bulk.prefetch(7);
+  const overlapping = requests.at(-1);
+  const all = new Uint8Array(bulk.size + 10).fill(255);
+  assert.equal(bulk.read(all, 2, all.length - 2, 0), bulk.size);
+  assert.deepEqual(ranges, [[0, 4 * CHUNK_SIZE - 1], [5 * CHUNK_SIZE, 13 * CHUNK_SIZE - 1], [13 * CHUNK_SIZE, bulk.size - 1]]);
+  assert(overlapping.options.signal.aborted, 'a grouped demand takes over the pending page');
+  answer(overlapping, bulk, 7); await flush();
+  assert(!bulk.prefetched.has(7));
+  for (let i = 0; i < bulk.size; i += CHUNK_SIZE) assert.equal(all[i + 2], i / CHUNK_SIZE);
+  assert.equal(all[bulk.size + 1], 20);
+  assert.equal(all[bulk.size + 2], 255);
+  assert.notEqual(bulk.chunks.get(1).buffer, bulk.chunks.get(2).buffer);
+  assert.equal(bulk.read(all, 2, bulk.size, 0), bulk.size);
+  assert.equal(ranges.length, 3, 'rereading the same pages needs no new ranges');
+  bulk.close();
   const lru = make();
   for (let i = 0; i < MAX_CHUNKS - 1; i++) lru.getChunk(i);
   lru.prefetch(MAX_CHUNKS - 1);
