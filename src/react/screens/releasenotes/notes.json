@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.10",
+    "date": "November 17, 2026",
+    "title": "Lighter 3DS rendering and fewer game reads",
+    "changes": [
+      "The 3DS renderer sends only changed shader settings to the graphics driver and collects draw statistics inside the core.",
+      "Large 3DS games reuse their opening download for the first game reads while keeping the same save identity.",
+      "The 3DS reader starts background downloads near the next chunk and skips redundant cache updates on repeated reads."
+    ]
+  },
+  {
     "version": "3.1.9",
     "date": "November 16, 2026",
     "title": "3DS execution and loading improvements",
