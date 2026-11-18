@@ -224,7 +224,7 @@ compilations; completed programs free capacity without waiting for a draw. A req
 shader still finishes before its draw, and demand waits pause prewarming for two
 frames. Failure reporting and the shader-cache format remain unchanged.
 
-Large-ROM sequential reads can prefetch one binary 2 MiB range. Its reservation
+Forward reads near a chunk boundary can prefetch one binary 2 MiB range. Its reservation
 shares the existing eight-chunk/16 MiB budget. Demand misses retain the synchronous
 reader, unrelated seeks cancel speculation, and exit aborts pending work. Invalid
 or failed speculative responses fall back to demand reads. Run
@@ -321,7 +321,8 @@ geometry shader stay on the CPU; failed GPU programs can fall back as described
 below. **Settings → Core Settings → 3DS lighting on CPU (slower)** restores CPU
 processing for lit draws for device comparisons. Indices are rebased because
 WebGL2 has no base-vertex draws. `Module.nativeVertexStats` counts draws by path
-(`gpu`, `lit`, `geometry`, `failed`).
+(`gpu`, `lit`, `geometry`, `failed`). The counters stay in WebAssembly and
+JavaScript takes a snapshot only when the property is read.
 
 `patches/azahar-webgl-formats.patch` reinterprets D24S8 as RGBA8 and RGBA4 as RGB5A1 with
 WebGL2-compatible passes (`webgl_formats.h`; WebGL2 cannot sample stencil), checked by
@@ -341,9 +342,11 @@ Measured on an iPhone with the readout below: emulating a frame took 2–5 ms of
 the game ran at 4 fps, because each draw call cost about 7 ms in Safari's GPU process. The core
 updates part of a 16 MiB vertex and an 8 MiB uniform stream buffer before every draw; Safari's
 Metal backend replaces the whole buffer each time. The patch gives the WebGL build 256 KiB
-vertex and 64 KiB index/uniform stream buffers (they grow when one request needs more) and
+vertex and 64 KiB index stream buffers (they grow when one request needs more) and
 fresh storage on wrap. Desktop browsers do not show the cost, so it cannot be reproduced on
-the build host.
+the build host. The browser build now uses separate buffers for the vertex,
+fragment and PICA uniform blocks. It replaces only dirty blocks with fresh
+storage and binds each indexed slot on its first upload.
 
 ## Shader failure handling and reports
 

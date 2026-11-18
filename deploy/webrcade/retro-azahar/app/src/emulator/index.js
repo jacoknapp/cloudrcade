@@ -41,7 +41,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-speed-20261117-v20';
+const CORE_REVISION = '3ds-speed-20261117-v21';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -574,6 +574,16 @@ export class Emulator extends RetroAppWrapper {
           this.captureStateFrame();
         };
         window.EJS_Runtime(options).then((module) => {
+          // Keep the diagnostic interface, but only cross into Wasm when read.
+          if (module._wrc_vertex_draw_stats) {
+            Object.defineProperty(module, 'nativeVertexStats', {
+              get() {
+                const ptr = module._wrc_vertex_draw_stats();
+                const [gpu, lit, geometry, failed] = new Uint32Array(module.HEAPU8.buffer, ptr, 4);
+                return { gpu, lit, geometry, failed };
+              },
+            });
+          }
           window.Module = module;
           window.FS = module.FS;
           module.callbacks.setupCoreSettingFile = (path) => {

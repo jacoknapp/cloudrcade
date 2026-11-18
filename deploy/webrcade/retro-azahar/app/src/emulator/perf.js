@@ -248,7 +248,7 @@ export class PerfReadout {
       frames = count; last = now;
       const per = value => (made ? value / made : 0);
       const stats = module.nativeVertexStats || {};
-      const delta = name => (stats[name] || 0) - (vertex[name] || 0);
+      const delta = name => ((stats[name] || 0) - (vertex[name] || 0)) >>> 0;
       const lines = [
         `3DS ${(made / seconds).toFixed(1)} fps ${Math.round(made / seconds / 59.83 * 100)}%  ${this.revision}`,
         `loops ${Math.round(this.iterations / seconds)}/s  frame ${per(this.busy).toFixed(1)} ms  worst ${this.longest.toFixed(0)}  busy ${Math.round(this.busy / seconds / 10)}%`,

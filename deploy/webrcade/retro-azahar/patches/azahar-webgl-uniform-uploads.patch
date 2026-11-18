@@ -1,0 +1,219 @@
+diff --git a/src/video_core/rasterizer_accelerated.cpp b/src/video_core/rasterizer_accelerated.cpp
+index d7f0184..b7a52c5 100644
+--- a/src/video_core/rasterizer_accelerated.cpp
++++ b/src/video_core/rasterizer_accelerated.cpp
+@@ -143,7 +143,7 @@ void RasterizerAccelerated::SyncDrawUniforms() {
+     // that we don't depend on. So avoid the dirty table and check manually
+     const bool is_flipped = regs.framebuffer.framebuffer.IsFlipped();
+     const bool prev_flipped = std::exchange(vs_data.flip_viewport, is_flipped);
+-    vs_data_dirty = is_flipped != prev_flipped;
++    vs_data_dirty |= is_flipped != prev_flipped;
+ 
+     // Sync clip plane uniforms
+     if (dirty.CheckClipping()) {
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index d99cb78..a9062ec 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -41,7 +41,6 @@ using namespace Pica::Shader::Generator;
+ // stream buffer grows when a single request needs more.
+ constexpr std::size_t VERTEX_BUFFER_SIZE = 256_KiB;
+ constexpr std::size_t INDEX_BUFFER_SIZE = 64_KiB;
+-constexpr std::size_t UNIFORM_BUFFER_SIZE = 64_KiB;
+ #else
+ constexpr std::size_t VERTEX_BUFFER_SIZE = 16_MiB;
+ constexpr std::size_t INDEX_BUFFER_SIZE = 2_MiB;
+@@ -82,6 +81,33 @@ GLenum MakeAttributeType(Pica::PipelineRegs::VertexAttributeFormat format) {
+ }
+ 
+ #if defined(__EMSCRIPTEN__)
++// Keep diagnostic updates inside Wasm while drawing. Only the readout or tests
++// read them, via a snapshot of these four counters.
++struct VertexDrawStats {
++    u32 gpu{};
++    u32 lit{};
++    u32 geometry{};
++    u32 failed{};
++};
++VertexDrawStats vertex_draw_stats;
++
++template <typename Uniforms>
++void UpdateUniformBlock(OpenGLState& state, OGLBuffer& buffer, UniformBindings binding,
++                        const Uniforms& uniforms) {
++    const bool first_upload = buffer.handle == 0;
++    if (first_upload) {
++        buffer.Create();
++    }
++    state.draw.uniform_buffer = buffer.handle;
++    OpenGLState::BindUniformBuffer(buffer.handle);
++    // Replace only the changed block. Fresh storage avoids updating bytes that
++    // queued draws may still reference in Safari's GPU process.
++    glBufferData(GL_UNIFORM_BUFFER, sizeof(uniforms), &uniforms, GL_STREAM_DRAW);
++    if (first_upload) {
++        glBindBufferBase(GL_UNIFORM_BUFFER, binding, buffer.handle);
++    }
++}
++
+ // WebGL2 has no texture buffers. The lookup tables (lighting, fog, procedural
+ // textures) are kept in 2D textures of LUT_ROW_TEXELS columns instead, which the
+ // fragment shaders index as (i % LUT_ROW_TEXELS, i / LUT_ROW_TEXELS).
+@@ -127,6 +153,12 @@ void UploadLutRows(GLenum unit, GLuint texture, const u8* base, GLintptr offset,
+ 
+ } // Anonymous namespace
+ 
++#if defined(__EMSCRIPTEN__)
++extern "C" EMSCRIPTEN_KEEPALIVE const VertexDrawStats* wrc_vertex_draw_stats() {
++    return &vertex_draw_stats;
++}
++#endif
++
+ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore& pica,
+                                    VideoCore::CustomTexManager& custom_tex_manager,
+                                    VideoCore::RendererBase& renderer, Driver& driver_)
+@@ -134,7 +166,9 @@ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore&
+       render_window{renderer.GetRenderWindow()}, runtime{driver, renderer},
+       res_cache{memory, custom_tex_manager, runtime, regs, renderer},
+       vertex_buffer{driver, GL_ARRAY_BUFFER, VERTEX_BUFFER_SIZE},
++#if !defined(__EMSCRIPTEN__)
+       uniform_buffer{driver, GL_UNIFORM_BUFFER, UNIFORM_BUFFER_SIZE},
++#endif
+       index_buffer{driver, GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE},
+       texture_buffer{driver, GL_TEXTURE_BUFFER, TextureBufferSize(driver, false)},
+       texture_lf_buffer{driver, GL_TEXTURE_BUFFER, TextureBufferSize(driver, true)} {
+@@ -146,6 +180,7 @@ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore&
+     sw_vao.Create();
+     hw_vao.Create();
+ 
++#if !defined(__EMSCRIPTEN__)
+     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniform_buffer_alignment);
+     uniform_size_aligned_vs_pica =
+         Common::AlignUp<std::size_t>(sizeof(VSPicaUniformData), uniform_buffer_alignment);
+@@ -153,6 +188,7 @@ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore&
+         Common::AlignUp<std::size_t>(sizeof(VSUniformData), uniform_buffer_alignment);
+     uniform_size_aligned_fs =
+         Common::AlignUp<std::size_t>(sizeof(FSUniformData), uniform_buffer_alignment);
++#endif
+ 
+     // Set vertex attributes for software shader path
+     state.draw.vertex_array = sw_vao.handle;
+@@ -543,15 +579,12 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+     // Module.wrcLitOnCpu (set by the frontend before start) restores the former
+     // behaviour of running lit draws on the CPU, for comparison on a device.
+     static const bool lit_on_cpu = EM_ASM_INT({ return Module.wrcLitOnCpu ? 1 : 0; }) != 0;
+-    const bool needs_cpu = regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No ||
+-                           (lit_on_cpu && !regs.lighting.disable);
+-    // Diagnostics only: Module.nativeVertexStats = {gpu, lit, geometry, failed}
+-    EM_ASM({
+-        var stats = Module.nativeVertexStats ||
+-            (Module.nativeVertexStats = {gpu: 0, lit: 0, geometry: 0, failed: 0});
+-        if ($0) stats.geometry++; else if ($1) stats.lit++; else stats.gpu++;
+-    }, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No, lit_on_cpu && !regs.lighting.disable);
+-    if (needs_cpu) {
++    if (regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
++        ++vertex_draw_stats.geometry;
++        return false;
++    }
++    if (lit_on_cpu && !regs.lighting.disable) {
++        ++vertex_draw_stats.lit;
+         return false;
+     }
+ #else
+@@ -567,15 +600,17 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+ 
+     if (!SetupVertexShader() || !SetupGeometryShader()) {
+ #if defined(__EMSCRIPTEN__)
+-        EM_ASM({ Module.nativeVertexStats.gpu--; Module.nativeVertexStats.failed++; });
++        ++vertex_draw_stats.failed;
+ #endif
+         return false;
+     }
+ 
+     const bool drawn = Draw(true, is_indexed);
+ #if defined(__EMSCRIPTEN__)
+-    if (!drawn) {
+-        EM_ASM({ Module.nativeVertexStats.gpu--; Module.nativeVertexStats.failed++; });
++    if (drawn) {
++        ++vertex_draw_stats.gpu;
++    } else {
++        ++vertex_draw_stats.failed;
+     }
+ #endif
+     return drawn;
+@@ -1180,6 +1215,22 @@ void RasterizerOpenGL::SyncAndUploadLUTs() {
+ }
+ 
+ void RasterizerOpenGL::UploadUniforms(bool accelerate_draw) {
++#if defined(__EMSCRIPTEN__)
++    if (vs_data_dirty || !vs_uniform_buffer.handle) {
++        UpdateUniformBlock(state, vs_uniform_buffer, UniformBindings::VSData, vs_data);
++        vs_data_dirty = false;
++    }
++    if (fs_data_dirty || !fs_uniform_buffer.handle) {
++        UpdateUniformBlock(state, fs_uniform_buffer, UniformBindings::FSData, fs_data);
++        fs_data_dirty = false;
++    }
++    if (accelerate_draw && (pica.vs_setup.uniforms_dirty || !pica_uniform_buffer.handle)) {
++        VSPicaUniformData uniforms;
++        uniforms.SetFromRegs(pica.vs_setup);
++        UpdateUniformBlock(state, pica_uniform_buffer, UniformBindings::VSPicaData, uniforms);
++        pica.vs_setup.uniforms_dirty = false;
++    }
++#else
+     // glBindBufferRange also changes the generic buffer binding point, so we sync the state first.
+     state.draw.uniform_buffer = uniform_buffer.GetHandle();
+     state.Apply();
+@@ -1223,6 +1274,7 @@ void RasterizerOpenGL::UploadUniforms(bool accelerate_draw) {
+     }
+ 
+     uniform_buffer.Unmap(used_bytes);
++#endif
+ }
+ 
+ } // namespace OpenGL
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.h b/src/video_core/renderer_opengl/gl_rasterizer.h
+index 424904e..ffd21de 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.h
++++ b/src/video_core/renderer_opengl/gl_rasterizer.h
+@@ -116,14 +116,22 @@ private:
+     std::array<bool, 16> hw_vao_enabled_attributes{};
+ 
+     OGLStreamBuffer vertex_buffer;
++#if !defined(__EMSCRIPTEN__)
+     OGLStreamBuffer uniform_buffer;
++#endif
+     OGLStreamBuffer index_buffer;
+     OGLStreamBuffer texture_buffer;
+     OGLStreamBuffer texture_lf_buffer;
++#if defined(__EMSCRIPTEN__)
++    OGLBuffer vs_uniform_buffer;
++    OGLBuffer fs_uniform_buffer;
++    OGLBuffer pica_uniform_buffer;
++#else
+     GLint uniform_buffer_alignment;
+     std::size_t uniform_size_aligned_vs_pica;
+     std::size_t uniform_size_aligned_vs;
+     std::size_t uniform_size_aligned_fs;
++#endif
+ 
+     OGLTexture texture_buffer_lut_lf;
+     OGLTexture texture_buffer_lut_rg;
+diff --git a/src/video_core/renderer_opengl/gl_state.h b/src/video_core/renderer_opengl/gl_state.h
+index 21766db..207b642 100644
+--- a/src/video_core/renderer_opengl/gl_state.h
++++ b/src/video_core/renderer_opengl/gl_state.h
+@@ -165,6 +165,15 @@ public:
+         return cur_state;
+     }
+ 
++#if defined(__EMSCRIPTEN__)
++    static void BindUniformBuffer(GLuint buffer) {
++        if (cur_state.draw.uniform_buffer != buffer) {
++            glBindBuffer(GL_UNIFORM_BUFFER, buffer);
++            cur_state.draw.uniform_buffer = buffer;
++        }
++    }
++#endif
++
+     bool EmulateColorBlend() const {
+         return blend.rgb_equation == GL_MIN || blend.rgb_equation == GL_MAX;
+     }

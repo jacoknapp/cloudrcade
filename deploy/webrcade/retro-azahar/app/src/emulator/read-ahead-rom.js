@@ -1,11 +1,15 @@
 import { LazyRom, CHUNK_SIZE, MAX_CHUNKS } from './lazyrom';
 
 // Speculative binary reads are scoped to 3DS; other cores keep the demand reader.
+const READ_AHEAD_DISTANCE = CHUNK_SIZE / 4;
+const MAX_FORWARD_GAP = 64 * 1024;
+
 export class ReadAheadRom extends LazyRom {
   constructor(url, size) {
     super(url, size);
     this.pending = null;
-    this.lastReadChunk = -2;
+    this.previousReadStart = -1;
+    this.previousReadEnd = -1;
     this.failedPrefetch = -1;
     this.closed = false;
     this.prefetched = new Set();
@@ -99,14 +103,16 @@ export class ReadAheadRom extends LazyRom {
       done += count;
     }
     if (total > 0) {
-      const first = Math.floor(position / CHUNK_SIZE);
-      const last = Math.floor((position + total - 1) / CHUNK_SIZE);
-      if (first === this.lastReadChunk || first === this.lastReadChunk + 1 || last > first) {
-        this.prefetch(last + 1);
-      } else if (this.pending && this.pending.index !== last + 1) {
-        this.cancelPrefetch();
+      const end = position + total;
+      const nextChunk = Math.ceil(end / CHUNK_SIZE);
+      const forward = this.previousReadStart >= 0 && position >= this.previousReadStart &&
+        position <= this.previousReadEnd + MAX_FORWARD_GAP && end > this.previousReadEnd;
+      if (this.pending && this.pending.index !== nextChunk) this.cancelPrefetch();
+      if (forward && nextChunk * CHUNK_SIZE - end <= READ_AHEAD_DISTANCE) {
+        this.prefetch(nextChunk);
       }
-      this.lastReadChunk = last;
+      this.previousReadStart = position;
+      this.previousReadEnd = end;
     }
     return total;
   }
