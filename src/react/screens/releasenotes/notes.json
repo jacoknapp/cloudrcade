@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.1.11",
+    "date": "November 18, 2026",
+    "title": "Fewer graphics calls in 3DS games",
+    "changes": [
+      "The 3DS renderer reuses matching vertex layouts to reduce graphics setup work at the same resolution and screen sizes."
+    ]
+  },
+  {
     "version": "3.1.10",
     "date": "November 17, 2026",
     "title": "Lighter 3DS rendering and fewer game reads",
