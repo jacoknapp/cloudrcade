@@ -1,7 +1,10 @@
-import { LazyRom, CHUNK_SIZE, MAX_CHUNKS } from './lazyrom';
+import { LazyRom } from './lazyrom';
 
 // Speculative binary reads are scoped to 3DS; other cores keep the demand reader.
-const READ_AHEAD_DISTANCE = CHUNK_SIZE / 4;
+export const PAGE_SIZE = 256 * 1024;
+export const MAX_PAGES = (16 * 1024 * 1024) / PAGE_SIZE;
+const MAX_REQUEST_PAGES = (2 * 1024 * 1024) / PAGE_SIZE;
+const READ_AHEAD_DISTANCE = PAGE_SIZE / 4;
 const MAX_FORWARD_GAP = 64 * 1024;
 const GAME_ID_BYTES = 64 * 1024;
 
@@ -36,7 +39,7 @@ export class ReadAheadRom extends LazyRom {
   // The launcher hashes just the original 64 KiB to locate the game's saves.
   async readHeader() {
     if (this.closed) throw new Error('Game data is closed');
-    const initialSize = Math.min(this.size, CHUNK_SIZE);
+    const initialSize = Math.min(this.size, PAGE_SIZE);
     const idSize = Math.min(this.size, GAME_ID_BYTES);
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     this.headerController = controller;
@@ -75,13 +78,13 @@ export class ReadAheadRom extends LazyRom {
 
   prefetch(index) {
     if (this.closed || typeof fetch !== 'function' || typeof AbortController !== 'function' ||
-        index * CHUNK_SIZE >= this.size || this.chunks.has(index) ||
+        index * PAGE_SIZE >= this.size || this.chunks.has(index) ||
         index === this.failedPrefetch || this.pending) return;
-    const first = index * CHUNK_SIZE;
-    const last = Math.min(first + CHUNK_SIZE, this.size) - 1;
+    const first = index * PAGE_SIZE;
+    const last = Math.min(first + PAGE_SIZE, this.size) - 1;
     const pending = { index, controller: new AbortController() };
-    // Reserve the in-flight chunk inside the same eight-chunk memory budget.
-    this.trim(MAX_CHUNKS - 1);
+    // Reserve the in-flight chunk inside the same 16 MiB memory budget.
+    this.trim(MAX_PAGES - 1);
     this.pending = pending;
     fetchRange(this.url, this.size, first, last, pending.controller.signal).then((bytes) => {
       if (this.pending !== pending || this.closed) return;
@@ -108,7 +111,12 @@ export class ReadAheadRom extends LazyRom {
     this.prefetched.clear();
   }
 
-  getChunk(index) {
+  fetchChunk(index) {
+    const first = index * PAGE_SIZE;
+    return this.fetchBytes(first, Math.min(first + PAGE_SIZE, this.size) - 1);
+  }
+
+  getChunk(index, lastNeeded = index) {
     if (this.closed) throw new Error('Game data is closed');
     let chunk = this.chunks.get(index);
     if (chunk) {
@@ -118,11 +126,28 @@ export class ReadAheadRom extends LazyRom {
     } else {
       // A demand read must not wait for an asynchronous request. Reclaim its
       // reservation before using the existing synchronous fallback.
-      if (this.pending && this.pending.index === index) this.cancelPrefetch();
-      // Evict before fetching so a miss does not temporarily exceed the budget.
-      this.trim(MAX_CHUNKS - (this.pending ? 1 : 0) - 1);
+      // Sparse reads fetch one page. A large read can demand up to 2 MiB
+      // in one round trip. Stop at a cached page to avoid fetching it twice.
+      const limit = Math.min(lastNeeded, index + MAX_REQUEST_PAGES - 1);
+      let last = index;
+      while (last < limit && !this.chunks.has(last + 1)) last++;
+      if (this.pending && this.pending.index >= index && this.pending.index <= last) {
+        this.cancelPrefetch();
+      }
+      this.trim(MAX_PAGES - (this.pending ? 1 : 0) - (last - index + 1));
       this.readAheadStats.misses++;
-      chunk = this.fetchChunk(index);
+      if (last === index) {
+        chunk = this.fetchChunk(index);
+      } else {
+        const firstByte = index * PAGE_SIZE;
+        const bytes = this.fetchBytes(firstByte, Math.min((last + 1) * PAGE_SIZE, this.size) - 1);
+        // Separate backing stores let eviction reclaim each page independently.
+        chunk = bytes.slice(0, PAGE_SIZE);
+        for (let next = index + 1; next <= last; next++) {
+          const offset = (next - index) * PAGE_SIZE;
+          this.chunks.set(next, bytes.slice(offset, offset + PAGE_SIZE));
+        }
+      }
     }
     this.chunks.set(index, chunk);
     this.lastDemandIndex = index;
@@ -132,23 +157,24 @@ export class ReadAheadRom extends LazyRom {
   read(buffer, offset, length, position) {
     if (position >= this.size) return 0;
     const total = Math.min(length, this.size - position);
+    const lastNeeded = Math.floor((position + total - 1) / PAGE_SIZE);
     let done = 0;
     while (done < total) {
       const at = position + done;
-      const index = Math.floor(at / CHUNK_SIZE);
-      const within = at - index * CHUNK_SIZE;
-      const chunk = this.getChunk(index);
+      const index = Math.floor(at / PAGE_SIZE);
+      const within = at - index * PAGE_SIZE;
+      const chunk = this.getChunk(index, lastNeeded);
       const count = Math.min(total - done, chunk.length - within);
       buffer.set(chunk.subarray(within, within + count), offset + done);
       done += count;
     }
     if (total > 0) {
       const end = position + total;
-      const nextChunk = Math.ceil(end / CHUNK_SIZE);
+      const nextChunk = Math.ceil(end / PAGE_SIZE);
       const forward = this.previousReadStart >= 0 && position >= this.previousReadStart &&
         position <= this.previousReadEnd + MAX_FORWARD_GAP && end > this.previousReadEnd;
       if (this.pending && this.pending.index !== nextChunk) this.cancelPrefetch();
-      if (forward && nextChunk * CHUNK_SIZE - end <= READ_AHEAD_DISTANCE) {
+      if (forward && nextChunk * PAGE_SIZE - end <= READ_AHEAD_DISTANCE) {
         this.prefetch(nextChunk);
       }
       this.previousReadStart = position;

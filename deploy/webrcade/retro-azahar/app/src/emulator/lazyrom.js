@@ -36,6 +36,10 @@ export class LazyRom {
   fetchChunk(index) {
     const first = index * CHUNK_SIZE;
     const last = Math.min(first + CHUNK_SIZE, this.size) - 1;
+    return this.fetchBytes(first, last);
+  }
+
+  fetchBytes(first, last) {
     // A response that happens to start with a byte-order mark (FE FF, FF FE,
     // EF BB BF) is decoded as Unicode whatever charset was asked for, and comes
     // back with the wrong length. Start such a chunk a few bytes early instead.

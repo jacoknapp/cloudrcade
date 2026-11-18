@@ -233,17 +233,22 @@ Each record consumes one guest instruction and calls the normal memory accessors
 Conditional execution, PC operands, shifted registers, address writeback and
 Thumb instructions continue through the existing handlers.
 
+The WebGL renderer shares a linked program across configurations that generate
+the same complete vertex and fragment shader text. Older shader caches can contain
+several IDs for one pair. The first ID is used when prewarming those records.
+
 Shader prewarming submits at most two programs per frame with eight outstanding
 compilations; completed programs free capacity without waiting for a draw. A required
 shader still finishes before its draw, and demand waits pause prewarming for two
 frames. Failure reporting and the shader-cache format remain unchanged.
 
-Forward reads near a chunk boundary can prefetch one binary 2 MiB range. Its reservation
-shares the existing eight-chunk/16 MiB budget. Demand misses retain the synchronous
-reader, unrelated seeks cancel speculation, and exit aborts pending work. Invalid
-or failed speculative responses fall back to demand reads. Run
-`node tests/test_webrcade_3ds_prefetch.cjs` for controlled cancellation, range and
-budget checks; `emulator.lazyRom.readAheadStats` exposes demand misses and read-ahead hits.
+The 3DS reader caches up to 64 pages of 256 KiB. Sparse misses fetch one page.
+When the game requests consecutive bytes, the reader groups missing pages into
+requests of up to 2 MiB and reuses any pages already in memory. A forward read
+near a page boundary can prefetch one page within the same 16 MiB cache budget.
+Seeks and overlapping demand reads cancel pending prefetches. Run
+`node tests/test_webrcade_3ds_prefetch.cjs` for cancellation, grouped reads and
+cache-budget checks. `emulator.lazyRom.readAheadStats` reports misses and prefetch hits.
 These mechanisms require gameplay/device measurements to establish speed gains.
 
 Minimal Asyncify keeps yielding in the RetroArch frontend/audio loop and avoids
