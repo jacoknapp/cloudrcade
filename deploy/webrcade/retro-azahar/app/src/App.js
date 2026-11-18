@@ -10,7 +10,6 @@ import { EmulatorPauseScreen } from './pause';
 import './App.scss';
 
 const STREAMING_THRESHOLD = 512 * 1024 * 1024;
-const STREAMING_ID_BYTES = 64 * 1024;
 
 class App extends WebrcadeRetroApp {
   createEmulator(app, isDebug) {
@@ -37,12 +36,7 @@ class App extends WebrcadeRetroApp {
 
     const url = response.url;
     try { await response.body.cancel(); } catch (e) { /* already closed */ }
-    const head = await fetch(url, { headers: { Range: `bytes=0-${STREAMING_ID_BYTES - 1}` } });
-    if (head.status !== 206) {
-      throw new Error('The server does not support partial downloads of this game.');
-    }
-    this.emulator.setLazyRom(url, length);
-    return new Uint8Array(await head.arrayBuffer());
+    return this.emulator.setLazyRom(url, length).readHeader();
   }
 
   async onPreExit() {

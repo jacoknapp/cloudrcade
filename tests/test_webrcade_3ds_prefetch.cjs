@@ -28,6 +28,51 @@ const path = require('node:path');
       rom.size - index * CHUNK_SIZE)).fill(index).buffer,
     ...changes,
   });
+  const idSize = 64 * 1024;
+  const startup = make();
+  const loading = startup.readHeader();
+  const initial = new Uint8Array(CHUNK_SIZE);
+  for (let i = 0; i < initial.length; i++) initial[i] = i % 251;
+  answer(requests.at(-1), startup, 0, { arrayBuffer: async () => initial.buffer });
+  const id = await loading;
+  assert.deepEqual(id, initial.slice(0, idSize), 'existing saves use exactly the original header');
+  id.fill(0);
+  const sample = new Uint8Array(8);
+  startup.read(sample, 0, 8, idSize - 2);
+  assert.deepEqual(sample, initial.slice(idSize - 2, idSize + 6));
+  assert.equal(startup.readAheadStats.misses, 0);
+  assert.notEqual(id.buffer, startup.getChunk(0).buffer, 'the ID cannot pin or overwrite the chunk');
+  startup.close();
+
+  const limited = make(), fallback = limited.readHeader();
+  let discarded = false;
+  answer(requests.at(-1), limited, 0, { headers: { get: () => null },
+    body: { cancel() { discarded = true; } }, arrayBuffer() { assert.fail('invalid full chunk'); } });
+  await flush();
+  assert(discarded);
+  assert.equal(requests.at(-1).options.headers.Range, `bytes=0-${idSize - 1}`);
+  answer(requests.at(-1), limited, 0, { headers: { get: () => null },
+    arrayBuffer: async () => initial.slice(0, idSize).buffer });
+  assert.deepEqual(await fallback, initial.slice(0, idSize));
+  assert.equal(limited.chunks.size, 0, 'short fallback is never installed as a full chunk');
+  limited.close();
+
+  const malformed = make(), rejected = malformed.readHeader();
+  answer(requests.at(-1), malformed, 0, { arrayBuffer: async () => new Uint8Array(3).buffer });
+  await flush();
+  answer(requests.at(-1), malformed, 0, { headers: { get: () => `bytes 1-${idSize}/${malformed.size}` } });
+  await assert.rejects(rejected, /requested range/);
+  assert.equal(malformed.chunks.size, 0);
+  malformed.close();
+
+  const interrupted = make(), interruptedHeader = interrupted.readHeader();
+  const interruptedRequest = requests.at(-1);
+  interrupted.close();
+  assert(interruptedRequest.options.signal.aborted);
+  answer(interruptedRequest, interrupted, 0);
+  await assert.rejects(interruptedHeader, /closed/);
+  assert.equal(interrupted.chunks.size, 0);
+  requests.length = 0;
   const rom = make(), buffer = new Uint8Array(8);
   rom.read(buffer, 0, 8, 0);
   rom.read(buffer, 0, 8, 8);
@@ -88,6 +133,17 @@ const path = require('node:path');
   assert(abandoned.options.signal.aborted, 'unrelated seeks cancel read-ahead');
   abandoned.reject(new Error('cancelled')); await flush();
   assert.equal(seek.failedPrefetch, -1, 'cancellation does not poison future reads');
+  const lru = make();
+  for (let i = 0; i < MAX_CHUNKS - 1; i++) lru.getChunk(i);
+  lru.prefetch(MAX_CHUNKS - 1);
+  answer(requests.at(-1), lru, MAX_CHUNKS - 1); await flush();
+  // The previous demand chunk must move behind the newly completed prefetch.
+  lru.getChunk(MAX_CHUNKS - 2);
+  assert.deepEqual([...lru.chunks.keys()].slice(-2), [MAX_CHUNKS - 1, MAX_CHUNKS - 2]);
+  for (let i = MAX_CHUNKS; i < 2 * MAX_CHUNKS - 1; i++) lru.getChunk(i);
+  assert(lru.chunks.has(MAX_CHUNKS - 2));
+  assert(!lru.chunks.has(MAX_CHUNKS - 1));
+  lru.close();
   rom.close(); partial.close(); seek.close();
-  console.log('PASS read-ahead hit, shared 16 MiB budget, demand/exit/seek races, range rejection and EOF');
+  console.log('PASS startup chunk reuse, game ID, short fallback, LRU order, shared 16 MiB budget, demand/exit/seek races and EOF');
 })().catch(error => { console.error(error); process.exitCode = 1; });

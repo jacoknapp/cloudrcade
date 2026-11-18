@@ -151,7 +151,9 @@ export class Emulator extends RetroAppWrapper {
 
   // Large games are streamed: `romBytes` then only holds the start of the file.
   setLazyRom(url, size) {
+    if (this.lazyRom) this.lazyRom.close();
     this.lazyRom = new ReadAheadRom(url, size);
+    return this.lazyRom;
   }
 
   getRaConfigContents() {
