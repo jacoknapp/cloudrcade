@@ -13,7 +13,24 @@ const c=await b.newContext({...devices['iPhone 13'],viewport:{width:402,height:8
 await p.goto(origin+'/play/?feed='+encodeURIComponent(origin+'/content/feeds/combined.json'));await p.waitForTimeout(2500);const ok=p.getByRole('button',{name:'OK',exact:true});if(await ok.count())await ok.first().click().catch(()=>{});await p.waitForFunction(()=>document.body.innerText.includes('Nintendo 3DS'));assert.equal(await p.locator('#wrcad-touch').count(),0);
 await p.evaluate(title=>{function f(n){if(!n)return null;if(n.stateNode?.browseScreenRef)return n.stateNode;return f(n.child)||f(n.sibling)}const l=f(document.getElementById('root')._reactRootContainer._internalRoot.current);const it=l.state.feed.getUniqueCategories().flatMap(c=>c.items).find(i=>i.title.includes(title));if(!it)throw Error('Missing game');l.browseScreenRef.current.props.onAppSelected(it);},title);
 const iframe=await p.waitForSelector('#webrcade-app-iframe'),frame=await iframe.contentFrame();await frame.waitForFunction(()=>window.emulator?.mainStarted&&window.Module?._get_current_frame_count()>150,null,{timeout:120000});await frame.locator('.kt-pad').waitFor({state:'visible'});assert.equal(await p.locator('#wrcad-touch').count(),0,'parent library must not add a second controller');
-let state=await frame.evaluate(()=>({heap:Module.HEAPU8.byteLength,frames:Module._get_current_frame_count(),cache:emulator.lazyRom?.chunks.size,workers:Module.PThread.runningWorkers.length+Module.PThread.unusedWorkers.length,hardwareConcurrency:navigator.hardwareConcurrency,audio:Module.RWA.context.state,uid:emulator.uid}));assert(state.heap<1024*1024*1024);assert(!state.cache||state.cache<=8);console.log('resource state',JSON.stringify(state));assert(state.workers<=6,'the core starts four workers and may add one or two, not one per CPU: '+state.workers);console.log('PASS',name,title,'native library Play -> iframe, bounded memory/cache/workers',JSON.stringify(state));
+const state = await frame.evaluate(() => {
+  const reader = emulator.lazyRom;
+  const pages = reader ? Array.from(reader.chunks.values()) : [];
+  return {
+    heap: Module.HEAPU8.byteLength,
+    frames: Module._get_current_frame_count(),
+    cacheBytes: pages.reduce((total, page) => total + page.byteLength, 0),
+    reservedPages: pages.length + Number(!!reader?.pending),
+    workers: Module.PThread.runningWorkers.length + Module.PThread.unusedWorkers.length,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    audio: Module.RWA.context.state,
+    uid: emulator.uid,
+  };
+});
+assert(state.heap < 1024 * 1024 * 1024);
+assert(state.cacheBytes <= 16 * 1024 * 1024 && state.reservedPages <= 64,
+  'the 3DS reader must stay within the 16 MiB page budget');
+console.log('resource state',JSON.stringify(state));assert(state.workers<=6,'the core starts four workers and may add one or two, not one per CPU: '+state.workers);console.log('PASS',name,title,'native library Play -> iframe, bounded memory/cache/workers',JSON.stringify(state));
 // Finish the native release screen before checking the wrapper's frame pacing.
 // Core startup can already advance frames while this screen awaits a gesture.
 const initialRelease=frame.locator('.release-screen-content');if(await initialRelease.isVisible())await initialRelease.tap();else await frame.locator('.kt-actions button').filter({hasText:/^A$/}).tap();
