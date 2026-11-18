@@ -227,6 +227,12 @@ interpreter also calls the existing handlers directly for immediate and plain
 register operands and common immediate-offset loads and stores. Other operands
 and addressing modes still use their decoded handlers.
 
+The browser interpreter predecodes common unconditional ARM adds, subtracts,
+compares, moves and immediate-offset memory transfers into compact records.
+Each record consumes one guest instruction and calls the normal memory accessors.
+Conditional execution, PC operands, shifted registers, address writeback and
+Thumb instructions continue through the existing handlers.
+
 Shader prewarming submits at most two programs per frame with eight outstanding
 compilations; completed programs free capacity without waiting for a draw. A required
 shader still finishes before its draw, and demand waits pause prewarming for two

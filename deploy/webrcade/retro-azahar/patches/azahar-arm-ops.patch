@@ -1,0 +1,229 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -14,6 +14,9 @@
+ #include "core/arm/dyncom/arm_dyncom_run.h"
+ #include "core/arm/dyncom/arm_dyncom_thumb.h"
+ #include "core/arm/dyncom/arm_dyncom_trans.h"
++#ifdef __EMSCRIPTEN__
++#include "core/arm/dyncom/wasm_arm_ops.h"
++#endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+ #include "core/arm/skyeye_common/vfp/vfp.h"
+@@ -834,6 +837,14 @@
+                   cpu->Reg[15]);
+         CITRA_IGNORE_EXIT(-1);
+     }
++#ifdef __EMSCRIPTEN__
++    if (!cpu->TFlag) {
++        if (auto* simple = TranslateWasmArmInstruction(inst)) {
++            inst_base = simple;
++            return inst_size;
++        }
++    }
++#endif
+     inst_base = arm_instruction_trans[idx](inst, idx);
+ 
+     return inst_size;
+@@ -1004,11 +1015,13 @@
+ // GCC and Clang have a C++ extension to support a lookup table of labels. Otherwise, fallback to a
+ // clunky switch statement.
+ #if defined __GNUC__ || (defined __clang__ && !defined _MSC_VER)
+-#define GOTO_NEXT_INST                                                                             \
++#define BEGIN_INSTRUCTION                                                                             \
+     GDB_BP_CHECK;                                                                                  \
+     if (num_instrs >= cpu->NumInstrsToExecute)                                                     \
+         goto END;                                                                                  \
+-    num_instrs++;                                                                                  \
++    num_instrs++
++#define GOTO_NEXT_INST \
++    BEGIN_INSTRUCTION; \
+     goto* InstLabel[inst_base->idx]
+ #else
+ #define GOTO_NEXT_INST                                                                             \
+@@ -1654,7 +1667,14 @@
+                          &&BLX_1_THUMB,
+                          &&DISPATCH,
+                          &&INIT_INST_LENGTH,
+-                         &&END};
++                         &&END,
++#ifdef __EMSCRIPTEN__
++                         &&WASM_ARM_INST,
++#endif
++    };
++#ifdef __EMSCRIPTEN__
++    static_assert(sizeof(InstLabel) / sizeof(InstLabel[0]) == WasmArm::DispatchIndex + 1);
++#endif
+ #endif
+     arm_inst* inst_base;
+     unsigned int addr;
+@@ -1697,6 +1717,19 @@
+     inst_base = (arm_inst*)&trans_cache_buf[ptr];
+     GOTO_NEXT_INST;
+ }
++#ifdef __EMSCRIPTEN__
++WASM_ARM_INST: {
++    const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
++    WasmArm::Execute(*cpu, inst);
++    cpu->Reg[15] += 4;
++    INC_PC(sizeof(WasmArm::Instruction));
++    FETCH_INST;
++    BEGIN_INSTRUCTION;
++    if (inst_base->idx == WasmArm::DispatchIndex)
++        goto WASM_ARM_INST;
++    goto* InstLabel[inst_base->idx];
++}
++#endif
+ ADC_INST: {
+     if (inst_base->cond == ConditionCode::AL || CondPassed(cpu, inst_base->cond)) {
+         adc_inst* const inst_cream = (adc_inst*)inst_base->component;
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -4,6 +4,7 @@
+ #include "core/arm/dyncom/arm_dyncom_trans.h"
+ #ifdef __EMSCRIPTEN__
+ #include "core/arm/dyncom/wasm_translation_cache.h"
++#include "core/arm/dyncom/wasm_arm_ops.h"
+ #endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+@@ -66,6 +67,20 @@
+     ASSERT_MSG(trans_cache_buf_top <= TRANS_CACHE_SIZE, "Translation cache is full!");
+     return static_cast<void*>(&trans_cache_buf[start]);
+ }
++
++#ifdef __EMSCRIPTEN__
++arm_inst* TranslateWasmArmInstruction(u32 word) {
++    WasmArm::Instruction instruction;
++    if (!WasmArm::Decode(word, instruction))
++        return nullptr;
++    auto* entry = static_cast<arm_inst*>(AllocBuffer(sizeof(arm_inst) + sizeof(instruction)));
++    entry->idx = WasmArm::DispatchIndex;
++    entry->cond = ConditionCode::AL;
++    entry->br = TransExtData::NON_BRANCH;
++    *reinterpret_cast<WasmArm::Instruction*>(entry->component) = instruction;
++    return entry;
++}
++#endif
+ 
+ #define glue(x, y) x##y
+ #define INTERPRETER_TRANSLATE(s) glue(InterpreterTranslate_, s)
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.h b/src/core/arm/dyncom/arm_dyncom_trans.h
+--- a/src/core/arm/dyncom/arm_dyncom_trans.h
++++ b/src/core/arm/dyncom/arm_dyncom_trans.h
+@@ -504,6 +504,7 @@
+ void StoreDyncomInstructionBlock(ARMul_State* cpu, u32 key, std::size_t offset);
+ u32 GetDyncomInstructionCacheKey(const ARMul_State* cpu);
+ #ifdef __EMSCRIPTEN__
++arm_inst* TranslateWasmArmInstruction(u32 word);
+ void ResetDyncomTranslationCache();
+ void ReserveDyncomTranslationBlock();
+ void PrepareDyncomTranslationCache(ARMul_State* cpu);
+diff --git a/src/core/arm/dyncom/wasm_arm_ops.h b/src/core/arm/dyncom/wasm_arm_ops.h
+new file mode 100644
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_arm_ops.h
+@@ -0,0 +1,101 @@
++// Compact decoded forms for common, unconditional ARM instructions in the Wasm interpreter.
++#pragma once
++
++#include <bit>
++#include <cstdint>
++
++namespace WasmArm {
++
++enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte };
++
++struct Instruction {
++    std::uint32_t immediate;
++    Operation operation;
++    std::uint8_t rd;
++    std::uint8_t rn;
++    std::uint8_t operand;
++};
++
++// An operand below 16 selects a register. A rotated immediate also supplies
++// the shifter carry from bit 31. An unrotated immediate preserves the input carry.
++constexpr std::uint8_t Immediate = 16;
++constexpr std::uint8_t RotatedImmediate = 17;
++constexpr unsigned DispatchIndex = 205;
++
++inline bool Decode(std::uint32_t word, Instruction& out) {
++    if ((word >> 28) != 14)
++        return false;
++
++    const auto rn = static_cast<std::uint8_t>((word >> 16) & 15);
++    const auto rd = static_cast<std::uint8_t>((word >> 12) & 15);
++    if (rn == 15 || rd == 15)
++        return false;
++
++    // Immediate displacement, pre-indexed, without writeback.
++    if ((word & 0x0f200000) == 0x05000000) {
++        const bool load = word & (1u << 20);
++        const bool byte = word & (1u << 22);
++        const auto displacement = word & 0xfff;
++        const Operation op = load ? (byte ? Operation::LoadByte : Operation::LoadWord)
++                                  : (byte ? Operation::StoreByte : Operation::StoreWord);
++        out = {(word & (1u << 23)) ? displacement : 0u - displacement, op, rd, rn, Immediate};
++        return true;
++    }
++
++    if ((word & 0x0c000000) != 0)
++        return false;
++    Operation op;
++    switch ((word >> 20) & 31) { // Four-bit ALU opcode and the S bit.
++    case 4: op = Operation::Sub; break;
++    case 8: op = Operation::Add; break;
++    case 21:
++        if (rd != 0) return false;
++        op = Operation::Compare;
++        break;
++    case 26:
++        if (rn != 0) return false;
++        op = Operation::Move;
++        break;
++    default: return false;
++    }
++
++    if (word & (1u << 25)) {
++        const int rotation = static_cast<int>((word >> 8) & 15) * 2;
++        out = {std::rotr(word & 255u, rotation), op, rd, rn, rotation ? RotatedImmediate : Immediate};
++    } else {
++        const auto rm = static_cast<std::uint8_t>(word & 15);
++        if ((word & 0xff0) || rm == 15) return false;
++        out = {0, op, rd, rn, rm};
++    }
++    return true;
++}
++
++template<class Cpu>
++inline void Execute(Cpu& cpu, const Instruction& inst) {
++    const std::uint32_t lhs = cpu.Reg[inst.rn];
++    switch (inst.operation) {
++    case Operation::LoadWord: cpu.Reg[inst.rd] = cpu.ReadMemory32(lhs + inst.immediate); return;
++    case Operation::LoadByte: cpu.Reg[inst.rd] = cpu.ReadMemory8(lhs + inst.immediate); return;
++    case Operation::StoreWord: cpu.WriteMemory32(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
++    case Operation::StoreByte: cpu.WriteMemory8(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
++    default: break;
++    }
++
++    const std::uint32_t rhs = inst.operand < Immediate ? cpu.Reg[inst.operand] : inst.immediate;
++    cpu.shifter_carry_out = inst.operand == RotatedImmediate ? rhs >> 31 : cpu.CFlag;
++    switch (inst.operation) {
++    case Operation::Add: cpu.Reg[inst.rd] = lhs + rhs; break;
++    case Operation::Sub: cpu.Reg[inst.rd] = lhs - rhs; break;
++    case Operation::Move: cpu.Reg[inst.rd] = rhs; break;
++    case Operation::Compare: {
++        const std::uint32_t result = lhs - rhs;
++        cpu.NFlag = result >> 31;
++        cpu.ZFlag = result == 0;
++        cpu.CFlag = lhs >= rhs;
++        cpu.VFlag = ((lhs ^ rhs) & (lhs ^ result)) >> 31;
++        break;
++    }
++    default: break; // Memory operations returned above.
++    }
++}
++} // namespace WasmArm
