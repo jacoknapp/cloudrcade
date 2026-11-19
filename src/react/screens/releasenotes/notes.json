@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.15",
+    "date": "November 19, 2026",
+    "title": "Smoother 3DS trainer battle transitions",
+    "changes": [
+      "On hardware graphics, the 3DS core queues draws in order while the browser prepares new shaders. This shortens emulation and audio stalls when a trainer battle begins with an empty shader cache.",
+      "The 3DS core reduces repeated CPU and vertex shader work. Software renderers use specialized fragment shaders from the first draw. Both screens render at the selected layout and resolution."
+    ]
+  },
+  {
     "version": "3.1.14",
     "date": "November 18, 2026",
     "title": "Shared shaders for 3DS battle transitions",
