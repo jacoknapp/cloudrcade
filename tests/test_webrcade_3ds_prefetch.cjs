@@ -2,36 +2,57 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+let finished = false;
+process.on('beforeExit', () => {
+  if (!finished && !process.exitCode) {
+    console.error('Unresolved range response in 3DS reader test');
+    process.exitCode = 1;
+  }
+});
 (async () => {
   let source = fs.readFileSync(path.join(__dirname,
     '../deploy/webrcade/retro-azahar/app/src/emulator/lazyrom.js'), 'utf8');
   source += fs.readFileSync(path.join(__dirname,
     '../deploy/webrcade/retro-azahar/app/src/emulator/read-ahead-rom.js'), 'utf8')
     .replace(/^import .*?;\n/, '');
-  const { ReadAheadRom: LazyRom, PAGE_SIZE: CHUNK_SIZE, MAX_PAGES: MAX_CHUNKS } = await import(
+  const { ReadAheadRom: LazyRom, PAGE_SIZE: CHUNK_SIZE, MAX_PAGES: MAX_CHUNKS, STREAM_SIZE } = await import(
     'data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const requests = [];
   global.fetch = (url, options) => new Promise((resolve, reject) => {
     requests.push({ url, options, resolve, reject });
   });
   const flush = () => new Promise(resolve => setImmediate(resolve));
+  const streamPages = STREAM_SIZE / CHUNK_SIZE;
+  const bytesFor = (first, last) => {
+    const data = new Uint8Array(last - first + 1);
+    for (let at = first; at <= last;) {
+      const page = Math.floor(at / CHUNK_SIZE);
+      const end = Math.min(last + 1, (page + 1) * CHUNK_SIZE);
+      data.fill(page & 255, at - first, end - first);
+      at = end;
+    }
+    return data;
+  };
   const make = () => {
     const rom = new LazyRom('https://example.invalid/game.cia', CHUNK_SIZE * (MAX_CHUNKS * 2) + 17);
-    rom.fetchChunk = index => new Uint8Array(Math.min(CHUNK_SIZE,
-      rom.size - index * CHUNK_SIZE)).fill(index);
+    rom.fetchBytes = bytesFor;
     return rom;
   };
-  const answer = (request, rom, index, changes = {}) => request.resolve({
-    status: 206,
-    headers: { get: () => `bytes ${index * CHUNK_SIZE}-${Math.min((index + 1) * CHUNK_SIZE, rom.size) - 1}/${rom.size}` },
-    arrayBuffer: async () => new Uint8Array(Math.min(CHUNK_SIZE,
-      rom.size - index * CHUNK_SIZE)).fill(index).buffer,
-    ...changes,
-  });
+  const answer = (request, rom, index, changes = {}) => {
+    const [, start, end] = /^bytes=(\d+)-(\d+)$/.exec(request.options.headers.Range);
+    const first = Number(start), last = Number(end);
+    assert.equal(first, index * CHUNK_SIZE);
+    request.resolve({
+      status: 206,
+      headers: { get: () => `bytes ${first}-${last}/${rom.size}` },
+      arrayBuffer: async () => bytesFor(first, last).buffer,
+      ...changes,
+    });
+  };
   const idSize = 64 * 1024;
   const startup = make();
   const loading = startup.readHeader();
-  const initial = new Uint8Array(CHUNK_SIZE);
+  const initial = new Uint8Array(STREAM_SIZE);
   for (let i = 0; i < initial.length; i++) initial[i] = i % 251;
   answer(requests.at(-1), startup, 0, { arrayBuffer: async () => initial.buffer });
   const id = await loading;
@@ -76,7 +97,7 @@ const path = require('node:path');
   const rom = make(), buffer = new Uint8Array(8);
   rom.read(buffer, 0, 8, 0);
   rom.read(buffer, 0, 8, 8);
-  const nearEnd = CHUNK_SIZE - CHUNK_SIZE / 8;
+  const nearEnd = STREAM_SIZE - CHUNK_SIZE / 8;
   rom.read(buffer, 0, 8, nearEnd);
   rom.read(buffer, 0, 8, nearEnd);
   rom.read(buffer, 0, 8, nearEnd - 8);
@@ -84,24 +105,25 @@ const path = require('node:path');
   rom.read(buffer, 0, 8, nearEnd);
   assert.equal(requests.length, 1, 'sequential progress near the boundary starts prefetch');
   const first = requests.at(-1);
-  assert.equal(first.options.headers.Range, `bytes=${CHUNK_SIZE}-${2 * CHUNK_SIZE - 1}`);
-  for (let i = 2; i < MAX_CHUNKS + 6; i++) rom.getChunk(i);
-  assert.equal(rom.chunks.size + Number(!!rom.pending), MAX_CHUNKS,
-    'in-flight data occupies one page of the 16 MiB cache');
-  answer(first, rom, 1); await flush();
+  assert.equal(first.options.headers.Range, `bytes=${STREAM_SIZE}-${2 * STREAM_SIZE - 1}`);
+  for (let i = 2 * streamPages; i < MAX_CHUNKS + 2 * streamPages; i++) rom.getChunk(i);
+  assert.equal(rom.chunks.size + rom.pending.lastPage - rom.pending.index + 1, MAX_CHUNKS,
+    'the complete in-flight response occupies space in the 16 MiB cache');
+  answer(first, rom, streamPages); await flush();
   assert.equal(rom.chunks.size, MAX_CHUNKS);
   const misses = rom.readAheadStats.misses;
-  rom.read(buffer, 0, 8, CHUNK_SIZE);
-  assert.deepEqual([...buffer], Array(8).fill(1));
+  rom.read(buffer, 0, 8, STREAM_SIZE);
+  assert.deepEqual([...buffer], Array(8).fill(streamPages));
   assert.equal(rom.readAheadStats.misses, misses, 'binary read-ahead avoids a synchronous miss');
   assert.equal(rom.readAheadStats.prefetchHits, 1);
-  rom.read(buffer, 0, 8, CHUNK_SIZE + nearEnd);
-  rom.read(buffer, 0, 8, CHUNK_SIZE + nearEnd + 8);
+  const racing = make();
+  racing.prefetch(streamPages);
   const pending = requests.at(-1);
-  rom.getChunk(2);
-  assert(pending.options.signal.aborted, 'demand wins over pending speculation');
-  answer(pending, rom, 2); await flush();
-  assert(!rom.prefetched.has(2), 'late cancelled bytes cannot replace demand data');
+  racing.getChunk(streamPages + 1);
+  assert(pending.options.signal.aborted, 'overlapping a later page cancels the whole prefetch');
+  answer(pending, racing, streamPages); await flush();
+  assert.equal(racing.prefetched.size, 0, 'late cancelled bytes cannot replace demand data');
+  racing.close();
 
   const closed = make(); closed.prefetch(1);
   const stale = requests.at(-1); closed.close(); answer(stale, closed, 1); await flush();
@@ -134,7 +156,8 @@ const path = require('node:path');
   abandoned.reject(new Error('cancelled')); await flush();
   assert.equal(seek.failedPrefetch, -1, 'cancellation does not poison future reads');
   // Large contiguous reads coalesce missing pages, even at a partial EOF.
-  const bulk = new LazyRom('/bulk', 20 * CHUNK_SIZE + 17);
+  const groupSize = 2 * 1024 * 1024;
+  const bulk = new LazyRom('/bulk', 5 * CHUNK_SIZE + groupSize + CHUNK_SIZE + 17);
   const ranges = [];
   bulk.fetchBytes = (first, last) => {
     ranges.push([first, last]);
@@ -148,28 +171,52 @@ const path = require('node:path');
   const overlapping = requests.at(-1);
   const all = new Uint8Array(bulk.size + 10).fill(255);
   assert.equal(bulk.read(all, 2, all.length - 2, 0), bulk.size);
-  assert.deepEqual(ranges, [[0, 4 * CHUNK_SIZE - 1], [5 * CHUNK_SIZE, 13 * CHUNK_SIZE - 1], [13 * CHUNK_SIZE, bulk.size - 1]]);
+  assert.deepEqual(ranges, [[0, 4 * CHUNK_SIZE - 1], [5 * CHUNK_SIZE, 5 * CHUNK_SIZE + groupSize - 1],
+    [5 * CHUNK_SIZE + groupSize, bulk.size - 1]]);
   assert(overlapping.options.signal.aborted, 'a grouped demand takes over the pending page');
   answer(overlapping, bulk, 7); await flush();
   assert(!bulk.prefetched.has(7));
   for (let i = 0; i < bulk.size; i += CHUNK_SIZE) assert.equal(all[i + 2], i / CHUNK_SIZE);
-  assert.equal(all[bulk.size + 1], 20);
+  assert.equal(all[bulk.size + 1], Math.floor((bulk.size - 1) / CHUNK_SIZE));
   assert.equal(all[bulk.size + 2], 255);
   assert.notEqual(bulk.chunks.get(1).buffer, bulk.chunks.get(2).buffer);
   assert.equal(bulk.read(all, 2, bulk.size, 0), bulk.size);
   assert.equal(ranges.length, 3, 'rereading the same pages needs no new ranges');
   bulk.close();
+  // Cold random reads must be small, including a guest access that straddles
+  // a 256 KiB streaming boundary. A confirmed sequential miss then reads ahead.
+  const sparse = make();
+  const sparseRanges = [];
+  sparse.fetchBytes = (first, last) => {
+    sparseRanges.push([first, last]);
+    return bytesFor(first, last);
+  };
+  sparse.read(buffer, 0, 8, STREAM_SIZE - 3);
+  assert.deepEqual([...buffer], [streamPages - 1, streamPages - 1, streamPages - 1,
+    streamPages, streamPages, streamPages, streamPages, streamPages]);
+  sparse.read(buffer, 0, 8, 11 * CHUNK_SIZE + 17);
+  sparse.read(buffer, 0, 8, 44 * CHUNK_SIZE - 8);
+  sparse.read(buffer, 0, 8, 44 * CHUNK_SIZE);
+  assert.deepEqual(sparseRanges, [
+    [STREAM_SIZE - CHUNK_SIZE, STREAM_SIZE + CHUNK_SIZE - 1],
+    [11 * CHUNK_SIZE, 12 * CHUNK_SIZE - 1],
+    [43 * CHUNK_SIZE, 44 * CHUNK_SIZE - 1],
+    [44 * CHUNK_SIZE, 44 * CHUNK_SIZE + STREAM_SIZE - 1],
+  ]);
+  sparse.close();
   const lru = make();
-  for (let i = 0; i < MAX_CHUNKS - 1; i++) lru.getChunk(i);
-  lru.prefetch(MAX_CHUNKS - 1);
-  answer(requests.at(-1), lru, MAX_CHUNKS - 1); await flush();
-  // The previous demand chunk must move behind the newly completed prefetch.
-  lru.getChunk(MAX_CHUNKS - 2);
-  assert.deepEqual([...lru.chunks.keys()].slice(-2), [MAX_CHUNKS - 1, MAX_CHUNKS - 2]);
+  for (let i = 0; i < MAX_CHUNKS - streamPages; i++) lru.getChunk(i);
+  const firstPrefetched = MAX_CHUNKS - streamPages;
+  lru.prefetch(firstPrefetched);
+  answer(requests.at(-1), lru, firstPrefetched); await flush();
+  const previousDemand = firstPrefetched - 1;
+  lru.getChunk(previousDemand);
+  assert.deepEqual([...lru.chunks.keys()].slice(-2), [MAX_CHUNKS - 1, previousDemand]);
   for (let i = MAX_CHUNKS; i < 2 * MAX_CHUNKS - 1; i++) lru.getChunk(i);
-  assert(lru.chunks.has(MAX_CHUNKS - 2));
-  assert(!lru.chunks.has(MAX_CHUNKS - 1));
+  assert(lru.chunks.has(previousDemand));
+  assert(!lru.chunks.has(firstPrefetched));
   lru.close();
   rom.close(); partial.close(); seek.close();
+  finished = true;
   console.log('PASS startup chunk reuse, game ID, short fallback, LRU order, shared 16 MiB budget, demand/exit/seek races and EOF');
 })().catch(error => { console.error(error); process.exitCode = 1; });

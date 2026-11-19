@@ -258,10 +258,11 @@ To exercise a restored cache in the native browser regression, set
 `WEBRCADE_TEST_SYNC_SHADERS=1` to exercise the path without the parallel
 compile extension.
 
-The 3DS reader caches up to 64 pages of 256 KiB. Sparse misses fetch one page.
-When the game requests consecutive bytes, the reader groups missing pages into
-requests of up to 2 MiB and reuses any pages already in memory. A forward read
-near a page boundary can prefetch one page within the same 16 MiB cache budget.
+The 3DS reader holds up to 256 pages of 64 KiB. A scattered read fetches
+only the pages it touches. Consecutive reads can fill up to 256 KiB on a miss,
+and larger requests can group up to 2 MiB. Cached pages break a group.
+A forward read near a 256 KiB boundary can prefetch up to 256 KiB. The cache
+reserves room for the whole pending range inside its 16 MiB budget.
 Seeks and overlapping demand reads cancel pending prefetches. Run
 `node tests/test_webrcade_3ds_prefetch.cjs` for cancellation, grouped reads and
 cache-budget checks. `emulator.lazyRom.readAheadStats` reports misses and prefetch hits.
