@@ -42,7 +42,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-move-save-v32';
+const CORE_REVISION = '3ds-shader-popin-v33';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -538,6 +538,7 @@ export class Emulator extends RetroAppWrapper {
           locateFile: (name) => this.coreBase + name,
           getSavExt: () => '.srm',
           getInputText: requestGameText,
+          wrcShaderPopIn: false,
         };
         // Audio paces the game at the console's rate. Without running audio the
         // loop follows the display, which is 120 Hz on some phones: hold it to
@@ -550,9 +551,10 @@ export class Emulator extends RetroAppWrapper {
           this.nextFrameAt = Math.max((this.nextFrameAt || now) + FRAME_MS, now);
           return undefined;
         };
-        // Comparison switch from the library's Experimental Settings: run lit
+        // Comparison switch from the library's Core Settings: run lit
         // draws' vertex programs on the CPU, as before core v12.
         try {
+          options.wrcShaderPopIn = localStorage.getItem('wrcad.3ds.shaderpopin.v1') === '1';
           options.wrcLitOnCpu = localStorage.getItem('wrcad.3ds.litcpu.v1') === '1';
           // Test aid: pretend every program takes this many ms to build.
           options.wrcLinkDelay = Number(localStorage.getItem('wrcad.3ds.linkdelay.v1')) || 0;

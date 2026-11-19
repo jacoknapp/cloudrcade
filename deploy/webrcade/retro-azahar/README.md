@@ -369,6 +369,14 @@ phone measurements showed vertex work was never the limit (history: docker-ext 2
 It was opt-in behind an Experimental Settings switch until 2026-10-07, while it ran at a few
 frames per second on phones (see WebGL stream buffers below).
 
+**Settings → Core Settings → 3DS shader pop-in** starts off. The library saves
+the choice when you select **OK**, and the 3DS app passes it to the core on the
+next launch. When enabled, the renderer can omit draws for objects or effects
+while their shaders compile. With a completion query, the renderer can skip
+pending draws until the link completes. Without one, it skips the submission
+frame and validates the program the next time a draw needs it, which can still
+hitch.
+
 ## WebGL stream buffers (`patches/azahar-webgl-stream.patch`)
 
 Measured on an iPhone with the readout below: emulating a frame took 2–5 ms of page code, yet

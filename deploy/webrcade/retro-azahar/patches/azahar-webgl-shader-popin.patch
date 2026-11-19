@@ -1,0 +1,419 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 8245911..1dd3dae 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -617,30 +617,23 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+         return false;
+     }
+ 
+-    const bool drawn = Draw(true, is_indexed);
+-#if defined(__EMSCRIPTEN__)
+-    if (drawn) {
+-        ++vertex_draw_stats.gpu;
+-    } else {
+-        ++vertex_draw_stats.failed;
+-    }
+-#endif
+-    return drawn;
++    return Draw(true, is_indexed);
+ }
+ 
+-bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
++ProgramStatus RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+     const GLenum primitive_mode = MakePrimitiveMode(regs.pipeline.triangle_topology);
+     auto [vs_input_index_min, vs_input_index_max, vs_input_size] = AnalyzeVertexArray(is_indexed);
+ 
+     if (vs_input_size > MAX_VERTEX_INPUT_SIZE) {
+         LOG_WARNING(Render_OpenGL, "Too large vertex input size {}", vs_input_size);
+-        return false;
++        return ProgramStatus::Failed;
+     }
+ 
+     // A failed GPU vertex program falls back to the CPU vertex path through
+     // AccelerateDrawBatch's false result. Check before uploading GPU vertices.
+-    if (!curr_shader_manager->ApplyTo(state, accurate_mul)) {
+-        return false;
++    const auto status = curr_shader_manager->ApplyTo(state, accurate_mul);
++    if (status != ProgramStatus::Ready) {
++        return status;
+     }
+     state.draw.vertex_buffer = vertex_buffer.GetHandle();
+     state.Apply();
+@@ -662,7 +655,7 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+ 
+         if (index_buffer_size > MAX_INDEX_INPUT_SIZE) {
+             LOG_WARNING(Render_OpenGL, "Too large index input size {}", index_buffer_size);
+-            return false;
++            return ProgramStatus::Failed;
+         }
+ 
+         const u8* index_data =
+@@ -701,7 +694,7 @@ bool RasterizerOpenGL::AccelerateDrawBatchInternal(bool is_indexed) {
+     } else {
+         glDrawArrays(primitive_mode, 0, regs.pipeline.num_vertices);
+     }
+-    return true;
++    return ProgramStatus::Ready;
+ }
+ 
+ void RasterizerOpenGL::DrawTriangles() {
+@@ -828,7 +821,13 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+     // Draw the vertex batch
+     bool succeeded = true;
+     if (accelerate) {
+-        succeeded = AccelerateDrawBatchInternal(is_indexed);
++        const auto status = AccelerateDrawBatchInternal(is_indexed);
++        // Consume a pending draw so the core does not replay it with CPU vertices.
++        succeeded = status != ProgramStatus::Failed;
++#ifdef __EMSCRIPTEN__
++        if (status == ProgramStatus::Ready) ++vertex_draw_stats.gpu;
++        if (status == ProgramStatus::Failed) ++vertex_draw_stats.failed;
++#endif
+     } else {
+         state.draw.vertex_array = sw_vao.handle;
+         state.draw.vertex_buffer = vertex_buffer.GetHandle();
+@@ -836,7 +835,7 @@ bool RasterizerOpenGL::Draw(bool accelerate, bool is_indexed) {
+         curr_shader_manager->UseTrivialGeometryShader();
+         // A failed fragment program cannot draw; never bind it or use the
+         // previous draw's program with unrelated uniforms.
+-        const bool program_ready = curr_shader_manager->ApplyTo(state, accurate_mul);
++        const bool program_ready = curr_shader_manager->ApplyTo(state, accurate_mul) == ProgramStatus::Ready;
+         if (program_ready) {
+             state.Apply();
+ #ifdef __EMSCRIPTEN__
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.h b/src/video_core/renderer_opengl/gl_rasterizer.h
+index 16f3249..7a9c094 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.h
++++ b/src/video_core/renderer_opengl/gl_rasterizer.h
+@@ -90,7 +90,7 @@ private:
+     bool Draw(bool accelerate, bool is_indexed);
+ 
+     /// Internal implementation for AccelerateDrawBatch
+-    bool AccelerateDrawBatchInternal(bool is_indexed);
++    ProgramStatus AccelerateDrawBatchInternal(bool is_indexed);
+ 
+     /// Setup vertex array for AccelerateDrawBatch
+     void SetupVertexArray(u8* array_ptr, GLintptr buffer_offset, GLuint vs_input_index_min,
+diff --git a/src/video_core/renderer_opengl/gl_resource_manager.cpp b/src/video_core/renderer_opengl/gl_resource_manager.cpp
+index 0cbc737..d4cf26d 100644
+--- a/src/video_core/renderer_opengl/gl_resource_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_resource_manager.cpp
+@@ -103,14 +103,15 @@ void OGLSampler::Release() {
+     handle = 0;
+ }
+ 
+-void OGLShader::Create(std::string_view source, GLenum type, std::string_view cache_source) {
++void OGLShader::Create(std::string_view source, GLenum type, std::string_view cache_source,
++                       bool defer_status) {
+     if (handle != 0)
+         return;
+     if (source.empty())
+         return;
+ 
+     MICROPROFILE_SCOPE(OpenGL_ResourceCreation);
+-    handle = LoadShader(source, type, debug_name, false, cache_source);
++    handle = LoadShader(source, type, debug_name, defer_status, cache_source);
+ }
+ 
+ void OGLShader::Release() {
+diff --git a/src/video_core/renderer_opengl/gl_resource_manager.h b/src/video_core/renderer_opengl/gl_resource_manager.h
+index f93ea34..649a23d 100644
+--- a/src/video_core/renderer_opengl/gl_resource_manager.h
++++ b/src/video_core/renderer_opengl/gl_resource_manager.h
+@@ -108,7 +108,8 @@ public:
+         return *this;
+     }
+ 
+-    void Create(std::string_view source, GLenum type, std::string_view cache_source = {});
++    void Create(std::string_view source, GLenum type, std::string_view cache_source = {},
++                bool defer_status = false);
+ 
+     void Release();
+ 
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 30d5dcf..805707a 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -104,6 +104,18 @@ static std::tuple<PicaVSConfig, Pica::ShaderSetup> BuildVSConfigFromRaw(
+     return {PicaVSConfig{raw.GetRawShaderConfig(), setup}, setup};
+ }
+ 
++// Latched when the 3DS app starts, alongside the other renderer settings.
++static bool ShaderPopInEnabled() {
++#ifdef __EMSCRIPTEN__
++    static const bool enabled = EM_ASM_INT({
++        return Module.wrcShaderPopIn && !Module.wrcShaderWait ? 1 : 0;
++    }) != 0;
++    return enabled;
++#else
++    return false;
++#endif
++}
++
+ /**
+  * An object representing a shader program staging. It can be either a shader object or a program
+  * object, depending on whether separable program is used.
+@@ -120,7 +132,7 @@ public:
+ 
+     void Create(const char* source, GLenum type, std::string_view cache_source = {}) {
+         if (shader_or_program.index() == 0) {
+-            std::get<OGLShader>(shader_or_program).Create(source, type, cache_source);
++            std::get<OGLShader>(shader_or_program).Create(source, type, cache_source, ShaderPopInEnabled());
+         } else {
+             OGLShader shader;
+             shader.Create(source, type);
+@@ -393,7 +405,7 @@ Material& GetMaterial(const FSConfig& config, const Pica::Shader::UserConfig& us
+         material.specialized.handle = RememberedPrograms::RebuiltFragment(material.specialized_source);
+         material.restored = material.specialized.handle != 0;
+     }
+-    if (material.restored && !material.family && !ProgramsLinkInBackground() &&
++    if (material.restored && !material.family && (ShaderPopInEnabled() || !ProgramsLinkInBackground()) &&
+         material.checked_families != shared_stages.size()) {
+         // A restored fragment can still be waiting on its first program link.
+         // Only consider shared code already present in this context.
+@@ -411,7 +423,7 @@ Material& GetMaterial(const FSConfig& config, const Pica::Shader::UserConfig& us
+         material.family = &it->second;
+         if (new_stage) {
+             it->second.id = Common::ComputeHash64(it->first.data(), it->first.size());
+-            it->second.shader.Create(it->first, GL_FRAGMENT_SHADER);
++            it->second.shader.Create(it->first, GL_FRAGMENT_SHADER, {}, ShaderPopInEnabled());
+         }
+     }
+     EM_ASM({
+@@ -478,7 +490,7 @@ public:
+ #ifdef __EMSCRIPTEN__
+     const bool use_shared_combiners = UseSharedCombiners() != 0;
+     const u32 shared_context =
+-        use_shared_combiners && !ProgramsLinkInBackground() ? SharedProgramContext() : 0;
++        use_shared_combiners && (ShaderPopInEnabled() || !ProgramsLinkInBackground()) ? SharedProgramContext() : 0;
+     std::unordered_map<u64, u64> program_aliases;
+     Material* material = nullptr;
+     const Material* upload = nullptr;
+@@ -627,7 +639,12 @@ namespace {
+ // without) every program it had already built once more.
+ std::unordered_map<u64, GLuint> background_programs;
+ // A remembered link must match both live shader sources before its first draw.
+-struct ProgramStages { GLuint vertex, fragment; };
++struct ProgramStages {
++    GLuint vertex, fragment;
++    u32 submitted_frame;
++};
++// Pending links survive manager replacement on save restore. Their frame clock does too.
++u32 link_frame = 0;
+ std::unordered_map<GLuint, ProgramStages> linking;
+ /// Failed pairs are not tried again during this session, including state loads.
+ std::unordered_set<u64> failed_programs;
+@@ -648,6 +665,7 @@ void ShaderProgramManager::RebuildRemembered() {
+         return;
+     }
+     ++impl->frame;
++    ++link_frame;
+     // Specialize a frequently drawn material only after new materials stop arriving.
+     // Keep drawing with the shared program throughout compilation and link validation.
+     if (impl->pending.handle) {
+@@ -733,7 +751,7 @@ void ShaderProgramManager::RebuildRemembered() {
+             background_programs.erase(id);
+             continue;
+         }
+-        linking.emplace(program, ProgramStages{entry.vertex, entry.fragment});
++        linking.emplace(program, ProgramStages{entry.vertex, entry.fragment, link_frame});
+         if (parallel) {
+             prewarm_budget.Submit(program);
+         }
+@@ -756,7 +774,7 @@ void ShaderProgramManager::RebuildRemembered() {
+ #endif
+ }
+ 
+-bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
++ProgramStatus ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+ #ifdef __EMSCRIPTEN__
+     impl->upload = nullptr;
+     if (Material* material = impl->material) {
+@@ -766,7 +784,7 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+         auto& variant = material->vertices[vertex_id];
+         if (variant.ready.handle && vertex_id) {
+             state.draw.shader_program = variant.ready.handle;
+-            return true;
++            return ProgramStatus::Ready;
+         }
+         if (material->restored && material->family && vertex_id && impl->shared_context &&
+             !variant.used_specialized) {
+@@ -787,13 +805,15 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+             if (variant.reused_shared) {
+                 impl->upload = material;
+                 state.draw.shader_program = variant.reused_shared->handle;
+-                return true;
++                return ProgramStatus::Ready;
+             }
+         }
+         if (!material->restored && !variant.shared_failed && material->family->shader.handle) {
+             impl->current.fs = material->family->shader.handle;
+             impl->current.fs_hash = material->family->id;
+-            if (ApplyStages(state, accurate_mul)) {
++            const auto status = ApplyStages(state, accurate_mul);
++            if (status == ProgramStatus::Pending) return status;
++            if (status == ProgramStatus::Ready) {
+                 impl->upload = material;
+                 if (variant.draws < 32) ++variant.draws;
+                 // A speculative replacement can wait for a driver compile even many
+@@ -804,17 +824,19 @@ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
+                     !impl->candidate.material && !impl->pending.handle) {
+                     impl->candidate = {material, &variant, impl->current.vs, specific_id};
+                 }
+-                return true;
++                return ProgramStatus::Ready;
+             }
+             // A driver can reject the general shader. Try the original exact material.
+             variant.shared_failed = true;
+         }
+         if (!material->specialized.handle)
+-            material->specialized.handle = LoadShader(material->specialized_source, GL_FRAGMENT_SHADER, "");
++            material->specialized.handle = LoadShader(material->specialized_source, GL_FRAGMENT_SHADER, "",
++                                                       ShaderPopInEnabled());
+         impl->current.fs = material->specialized.handle;
+         impl->current.fs_hash = material->id;
+-        variant.used_specialized = ApplyStages(state, accurate_mul);
+-        return variant.used_specialized;
++        const auto status = ApplyStages(state, accurate_mul);
++        variant.used_specialized = status == ProgramStatus::Ready;
++        return status;
+     }
+ #endif
+     return ApplyStages(state, accurate_mul);
+@@ -836,7 +858,7 @@ void ShaderProgramManager::UploadCombiner(GLuint program) {
+ }
+ #endif
+ 
+-bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
++ProgramStatus ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+     if (impl->separable) {
+         if (driver.HasBug(DriverBug::ShaderStageChangeFreeze)) {
+             glUseProgramStages(
+@@ -863,13 +885,9 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+             unique_identifier = entry->second;
+         }
+         if (failed_programs.contains(unique_identifier)) {
+-            return false;
++            return ProgramStatus::Failed;
+         }
+-        // A new program takes the browser tens of milliseconds to build. Nothing
+-        // is drawn without its program: the first time a game needs one, the
+-        // game waits for it. Every program is remembered (RememberedPrograms)
+-        // and linked in the background at the start of later sessions, so that
+-        // this wait happens once per program and device, not every time.
++        // Keep one link per program, including while its draws are omitted.
+         {
+             GLuint& program = background_programs[unique_identifier];
+             auto pending = linking.find(program);
+@@ -888,16 +906,17 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+             const bool needs_validation = first_use || pending != linking.end();
+             if (first_use) {
+                 const auto shaders = std::array{impl->current.vs, impl->current.gs, impl->current.fs};
+-                if (ProgramsLinkInBackground()) {
++                if (ProgramsLinkInBackground() || ShaderPopInEnabled()) {
+                     program = BeginProgram(shaders);
++                    if (!program) return ProgramStatus::Failed;
+                     pending = linking.emplace(program, ProgramStages{impl->current.vs,
+-                                                                     impl->current.fs}).first;
++                                                                     impl->current.fs, link_frame}).first;
+                 } else {
+                     program = LoadProgram(false, shaders, "");
+                     if (program == 0) {
+                         failed_programs.insert(unique_identifier);
+                         background_programs.erase(unique_identifier);
+-                        return false;
++                        return ProgramStatus::Failed;
+                     }
+                 }
+                 RememberedPrograms::NoteProgram(unique_identifier, impl->current.vs,
+@@ -905,7 +924,16 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+                 EM_ASM({ (Module.wrcShaders || (Module.wrcShaders = {built: 0, skipped: 0, waited: 0})).built++; });
+             }
+             if (pending != linking.end()) {
+-                if (ProgramsLinkInBackground() && !IsProgramLinked(program)) {
++                const bool can_poll = ProgramsLinkInBackground();
++                const bool unfinished = can_poll && !IsProgramLinked(program);
++                // Without KHR there is no reliable readiness query. Give a new
++                // link its submission frame before validating it on later demand.
++                if (ShaderPopInEnabled() &&
++                    (unfinished || (!can_poll && pending->second.submitted_frame == link_frame))) {
++                    EM_ASM({ Module.wrcShaders.skipped++; });
++                    return ProgramStatus::Pending;
++                }
++                if (unfinished) {
+                     prewarm_budget.DemandWait();
+                     EM_ASM({ Module.wrcShaders.waited++; });
+                 }
+@@ -916,7 +944,7 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+                     failed_programs.insert(unique_identifier);
+                     glDeleteProgram(program);
+                     background_programs.erase(unique_identifier);
+-                    return false;
++                    return ProgramStatus::Failed;
+                 }
+             }
+             // Trust a handle for shared-material reuse only after this context
+@@ -940,7 +968,7 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+                 });
+             }
+             state.draw.shader_program = program;
+-            return true;
++            return ProgramStatus::Ready;
+         }
+ #endif
+         OGLProgram& cached_program = impl->program_cache[unique_identifier];
+@@ -952,7 +980,7 @@ bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+         }
+         state.draw.shader_program = cached_program.handle;
+     }
+-    return true;
++    return ProgramStatus::Ready;
+ }
+ 
+ u64 ShaderProgramManager::GetProgramID() const {
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.h b/src/video_core/renderer_opengl/gl_shader_manager.h
+index c2afafd..8dcd43b 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -25,6 +25,8 @@ namespace OpenGL {
+ class Driver;
+ class OpenGLState;
+ 
++enum class ProgramStatus { Ready, Pending, Failed };
++
+ enum UniformBindings {
+     VSPicaData = 0,
+     VSData = 1,
+@@ -52,9 +54,8 @@ public:
+ 
+     void UseFragmentShader(const Pica::RegsInternal& config, const Pica::Shader::UserConfig& user);
+ 
+-    /// Waits for the current program. Returns false on link failure so the
+-    /// accelerated caller can retry the draw with CPU-transformed vertices.
+-    bool ApplyTo(OpenGLState& state, bool accurate_mul);
++    /// Pending draws can be omitted. Only a failed link needs vertex fallback.
++    ProgramStatus ApplyTo(OpenGLState& state, bool accurate_mul);
+ 
+     /// Rebuilds a few of the programs remembered from earlier sessions.
+     void RebuildRemembered();
+@@ -65,7 +66,7 @@ public:
+     u64 GetProgramID() const;
+ 
+ private:
+-    bool ApplyStages(OpenGLState& state, bool accurate_mul);
++    ProgramStatus ApplyStages(OpenGLState& state, bool accurate_mul);
+     Frontend::EmuWindow& emu_window;
+     const Driver& driver;
+     bool strict_context_required;
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index 45e4174..f4b86f9 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -417,6 +417,7 @@ bool ProgramsLinkInBackground() {
+ 
+ GLuint BeginProgram(std::span<const GLuint> shaders) {
+     const GLuint program_id = glCreateProgram();
++    if (!program_id) return 0;
+     for (GLuint shader : shaders) {
+         if (shader != 0) {
+             glAttachShader(program_id, shader);

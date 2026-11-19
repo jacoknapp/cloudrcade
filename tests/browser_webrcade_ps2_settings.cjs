@@ -55,6 +55,7 @@ const hasPSP=types=>types.some(type=>type==='psp'||type==='retro-ppsspp');
    await page.goto(origin+'/play/');let current=await types(page);
    assert(hasPS2(current),'PS2 is available by default, including old opt-outs');assert(current.includes('nes')&&hasPSP(current),JSON.stringify(current));
    await settings(page);
+   assert.equal(await page.getByText('3DS shader pop-in',{exact:true}).count(),enable3DS?1:0);
    assert(!await checkbox(page,'PS2 performance readout').isChecked());
    await checkbox(page,'PS2 performance readout').locator('..').click();
    await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.reload();assert(hasPS2(await types(page)),'Cancel cannot hide PS2');

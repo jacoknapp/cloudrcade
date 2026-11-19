@@ -302,8 +302,9 @@ export class PerfReadout {
     const now = module.wrcShaders || { built: 0, skipped: 0, waited: 0 };
     const was = this.lastShaders || { built: 0, skipped: 0, waited: 0 };
     this.lastShaders = { ...now };
+    const popIn = module.wrcShaderPopIn ? `  skipped draws ${now.skipped - was.skipped}` : '';
     // `ready` = programs remembered from earlier sessions and rebuilt so far.
-    return `programs +${now.built - was.built} (${now.built})  waited ${now.waited - was.waited}` +
+    return `programs +${now.built - was.built} (${now.built})  waited ${now.waited - was.waited}` + popIn +
       `  ready ${now.rebuilt || 0}/${now.remembered || 0}` +
       `  failed ${(module.wrcShaderFailures || []).length}`;
   }

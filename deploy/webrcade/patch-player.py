@@ -67,12 +67,15 @@ def patch_bundle(raw):
  perf=b'(function(){try{return localStorage.getItem("wrcad.3ds.perf.v1")==="1"}catch(e){return!1}})()'
  # A second switch runs lit 3DS draws on the CPU again, to compare speed on a device.
  litcpu=b'(function(){try{return localStorage.getItem("wrcad.3ds.litcpu.v1")==="1"}catch(e){return!1}})()'
+ shader_popin=b'(function(){try{return localStorage.getItem("wrcad.3ds.shaderpopin.v1")==="1"}catch(e){return!1}})()'
+ n3ds_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.enable3DS)'
  gcperf=b'(function(){try{return localStorage.getItem("wrcad.gamecube.perf.v1")==="1"}catch(e){return!1}})()'
  gc_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)'
  ps2_perf=b'(function(){try{return localStorage.getItem("wrcad.ps2.perf.v1")==="1"}catch(e){return!1}})()'
  ps2_available=b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url)'
  page=(b'var WrcadCoreSettings=function(e){function t(){var t;return(t=e.call(this)||this).perfRef=i.a.createRef(),'
-  b't.litRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.ps2PerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
+  b't.litRef=i.a.createRef(),t.shaderPopInRef=i.a.createRef(),t.gcPerfRef=i.a.createRef(),t.ps2PerfRef=i.a.createRef(),t.gridComps=[[t.perfRef],[t.litRef],'
+  b'...('+n3ds_available+b'?[[t.shaderPopInRef]]:[]),'
   b'...((window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl)?[[t.gcPerfRef]]:[]),'
   b'...('+ps2_available+b'?[[t.ps2PerfRef]]:[])],t}C(t,e);var n=t.prototype;return n.componentDidUpdate=function(e,t){'
   b'var n=this.gridComps,a=this.props.setFocusGridComps,i=this.props.isActive;i&&i!==e.isActive&&a(n)},'
@@ -85,6 +88,9 @@ def patch_bundle(raw):
   b'i.a.createElement(Va,{ref:l,onPad:function(e){return t.moveFocus(e.type,l)},onChange:function(e){'
   b'try{e.target.checked?localStorage.setItem("wrcad.3ds.litcpu.v1","1"):localStorage.removeItem("wrcad.3ds.litcpu.v1")}catch(x){}'
   b'n.forceUpdate()},checked:'+litcpu+b'}))),'
+  +n3ds_available+b'?i.a.createElement(ka,null,i.a.createElement(Ta,null,"3DS shader pop-in"),i.a.createElement(La,null,'
+  b'i.a.createElement(Va,{ref:n.shaderPopInRef,onPad:function(e){return t.moveFocus(e.type,n.shaderPopInRef)},'
+  b'onChange:function(e){u(j({},c,{shaderPopIn:e.target.checked}))},checked:c.shaderPopIn}))):null,'
   b'window.WrcadCloudConfig&&window.WrcadCloudConfig.gamecubeUrl?'
   b'i.a.createElement(ka,null,i.a.createElement(Ta,null,"GameCube performance readout"),i.a.createElement(La,null,'
   b'i.a.createElement(Va,{ref:g,onPad:function(e){return t.moveFocus(e.type,g)},onChange:function(e){'
@@ -107,11 +113,17 @@ def patch_bundle(raw):
   last_tab,last_tab[:-len(b']})')]+tab+b']})')
  patched=patched.replace(psp_type,psp_type+b'...('+ps2_available+b'?['+ps2_type.rstrip(b',')+b'] : []),').replace(
   b'st(rt,"psp","retro-ppsspp"),',b'st(rt,"psp","retro-ppsspp"),'+ps2_available+b'&&st(rt,"ps2","play-ps2"),')
+ # Save the 3DS preference on OK, before the native settings decide whether to reload.
+ ok=b'onOk:function(){c.cloudStorage&&!c.dbLinked'
+ assert patched.count(ok)==1,'Unexpected settings confirmation'
+ patched=patched.replace(ok,b'onOk:function(){if('+n3ds_available+b'&&s.shaderPopIn!==c.shaderPopIn){'
+  b'try{localStorage.setItem("wrcad.3ds.shaderpopin.v1",c.shaderPopIn?"1":"0")}catch(e){}}'
+  b'c.cloudStorage&&!c.dbLinked')
  # Native OK applies the optional performance readout. Cancel discards edits.
  values=b'expApps:Yt.isExpAppsEnabled(),vsync:'
  save=b's.expApps!==c.expApps?n.showAlertScreen'
  assert patched.count(values)==patched.count(save)==1,'Unexpected settings save'
- patched=patched.replace(values,b'ps2Perf:'+ps2_perf+b','+values).replace(save,
+ patched=patched.replace(values,b'shaderPopIn:'+shader_popin+b',ps2Perf:'+ps2_perf+b','+values).replace(save,
   b'(window.WrcadCloudConfig&&window.WrcadCloudConfig.ps2Url&&s.ps2Perf!==c.ps2Perf)?'
   b'(function(){try{localStorage.setItem("wrcad.ps2.perf.v1",c.ps2Perf?"1":"0")}catch(e){}'
   b'return Yt.save().finally((function(){window.location.reload()}))})():'+save)

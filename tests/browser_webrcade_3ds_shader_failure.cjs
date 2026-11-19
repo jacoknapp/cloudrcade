@@ -1,6 +1,9 @@
 // Real compiled core: reject programmable vertex shaders and verify CPU fallback.
 // Requires Playwright and a staged 3DS app/feed. Optional WEBRCADE_TEST_STATE is
 // a read-only scene state; saves/cloud uploads stay in a disposable profile.
+// WEBRCADE_TEST_SHADER_POP_IN=default|0|1 exercises the packaged preference.
+// On a KHR driver, WEBRCADE_TEST_HOLD_PROGRAM_FRAMES delays positive completion
+// reports for game programs while the browser compiles and links real shaders.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,6 +18,10 @@ fs.mkdirSync(output, { recursive: true });
   const engine = process.argv[2] || 'webkit';
   const fail = process.env.WEBRCADE_TEST_REJECT_SHADERS !== '0';
   const synchronous = process.env.WEBRCADE_TEST_SYNC_SHADERS === '1';
+  const popIn = process.env.WEBRCADE_TEST_SHADER_POP_IN;
+  const holdFrames = Number(process.env.WEBRCADE_TEST_HOLD_PROGRAM_FRAMES || 0);
+  assert(popIn === undefined || ['default', '0', '1'].includes(popIn));
+  assert(Number.isSafeInteger(holdFrames) && holdFrames >= 0);
   const hardware = process.env.WEBRCADE_TEST_HARDWARE_GPU === '1';
   const browser = await (engine === 'webkit' ? webkit : chromium).launch({
     headless: true,
@@ -37,9 +44,10 @@ fs.mkdirSync(output, { recursive: true });
         headers: { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' },
       }));
     }
-    await context.addInitScript(({ fail, synchronous }) => {
+    await context.addInitScript(({ fail, synchronous, holdFrames }) => {
       const probe = window.shaderFailureProbe = {
         sharedStages: 0, specializedStages: 0, rejected: 0, invalidUses: 0, links: 0, gameLinks: 0, rejectedRelinks: 0, liveRelinks: 0,
+        pendingReports: 0, earlyValidations: 0, unvalidatedBinds: 0, deferredProgramsUsed: 0,
       };
       const statuses = new WeakMap();
       const sources = new WeakMap();
@@ -68,11 +76,23 @@ fs.mkdirSync(output, { recursive: true });
         return shaderSource.call(this, shader, source);
       };
       proto.getProgramParameter = function (program, name) {
+        const observed = programs.get(program);
+        if (observed && name === 0x91B1) { // COMPLETION_STATUS_KHR
+          const frames = window.Module?._get_current_frame_count?.() || 0;
+          const ready = frames - observed.linkFrame >= holdFrames &&
+            getProgramParameter.call(this, program, name);
+          observed.pending = !ready;
+          if (!ready) {
+            observed.wasPending = true;
+            probe.pendingReports++;
+          }
+          return ready;
+        }
         const result = getProgramParameter.call(this, program, name);
         if (name === this.LINK_STATUS) {
           statuses.set(program, result);
-          const observed = programs.get(program);
           if (observed) {
+            if (observed.pending) probe.earlyValidations++;
             const { state, key } = observed;
             if (result) {
               if (!state.accepted.has(key)) state.accepted.set(key, new Set());
@@ -86,6 +106,11 @@ fs.mkdirSync(output, { recursive: true });
       };
       proto.useProgram = function (program) {
         const observed = programs.get(program);
+        if (observed && statuses.get(program) !== true) probe.unvalidatedBinds++;
+        if (observed?.wasPending && !observed.used && statuses.get(program) === true) {
+          observed.used = true;
+          probe.deferredProgramsUsed++;
+        }
         if (statuses.get(program) === false || observed?.state.rejected.has(observed.key))
           probe.invalidUses++;
         return useProgram.call(this, program);
@@ -116,7 +141,7 @@ fs.mkdirSync(output, { recursive: true });
             if (state.rejected.has(key)) probe.rejectedRelinks++;
             if (state.accepted.has(key)) probe.liveRelinks++;
             forgetProgram(program);
-            programs.set(program, { state, key });
+            programs.set(program, { state, key, linkFrame: window.Module?._get_current_frame_count?.() || 0 });
           }
         }
         statuses.delete(program);
@@ -134,7 +159,7 @@ fs.mkdirSync(output, { recursive: true });
         manager.isCloudEnabled = async () => false;
         clearInterval(timer);
       }, 10);
-    }, { fail, synchronous });
+    }, { fail, synchronous, holdFrames });
 
     const feed = await (await context.request.get(origin + '/content/feeds/combined.json')).json();
     const item = feed.categories.find((category) => category.title === 'Nintendo 3DS').items
@@ -145,6 +170,22 @@ fs.mkdirSync(output, { recursive: true });
     }))).toString('base64');
     const appURL = origin + '/play/app/retro-azahar/?ctx=standalone&props=' + encodeURIComponent(props);
     const page = await context.newPage();
+    if (popIn === '0' || popIn === '1') {
+      // Prepared pages read their deployment's namespace from a synchronous
+      // config script. Let that same script finish before seeding the preference.
+      const html = await (await context.request.get(appURL)).text();
+      const prepared = /<script\b[^>]*\bsrc=["']\/cloud-saves\/config\.php["']/i.test(html);
+      const setup = origin + '/__shader_preference_test__';
+      await page.route(setup, (route) => route.fulfill({
+        contentType: 'text/html',
+        body: prepared ? '<script src="/cloud-saves/config.php"></script>' : '<!doctype html>',
+      }));
+      await page.goto(setup);
+      await page.evaluate(({ prepared, value }) => {
+        const prefix = prepared ? window.WrcadCloudConfig?.storagePrefix || 'webrcade' : 'wrcad';
+        localStorage.setItem(prefix + '.3ds.shaderpopin.v1', value);
+      }, { prepared, value: popIn });
+    }
     const errors = [];
     page.on('pageerror', (error) => { errors.push(error.message); console.log('PAGEERROR', error.message); });
     await page.goto(appURL);
@@ -167,6 +208,7 @@ fs.mkdirSync(output, { recursive: true });
       shaders: Module.wrcShaders,
       hybrid: Module.wrcHybrid,
       sharedEnabled: Module.wrcSharedCombiner,
+      shaderPopIn: Module.wrcShaderPopIn,
       parallelCompiler: !!Module.ctx.getExtension('KHR_parallel_shader_compile'),
     }));
 
@@ -210,6 +252,23 @@ fs.mkdirSync(output, { recursive: true });
     const settled = await snapshot();
     console.log('SETTLED', JSON.stringify(settled));
     assert.equal(settled.invalidUses, 0, 'no failed program is ever bound');
+    if (popIn !== undefined) {
+      assert.equal(settled.shaderPopIn, popIn === '1', 'packaged app initialized the requested preference');
+      assert.equal(settled.unvalidatedBinds, 0, 'a game program must pass link validation before binding');
+      if (popIn !== '1') {
+        assert.equal(settled.shaders.skipped, 0, 'ordinary compilation renders every draw');
+      } else {
+        assert.equal(settled.earlyValidations, 0, 'pending completion never triggers blocking link validation');
+        const cold = settled.shaders.remembered === 0;
+        if (cold && (!settled.parallelCompiler || holdFrames)) {
+          assert(settled.shaders.skipped > 0, 'new programs omit draws while unavailable');
+        }
+        if (cold && holdFrames && settled.parallelCompiler && !fail) {
+          assert(settled.pendingReports > 0 && settled.deferredProgramsUsed > 0,
+            'a real pending program eventually validates and renders');
+        }
+      }
+    }
     if (settled.sharedEnabled && !settled.parallelCompiler) {
       assert.equal(settled.hybrid?.promotions || 0, 0,
         'a driver without a completion query keeps the working shared program');

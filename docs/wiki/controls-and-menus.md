@@ -111,7 +111,9 @@ The inherited **Experimental apps** preference is enabled once when the fork's m
 
 PSP is available by default without an Experimental Settings toggle or Docker enable setting. PSP uses an independent analog stick and D-pad, cross/circle/square/triangle, L/R, Select and Start. HTTPS, cross-origin isolation and WebGL2 are required. Compatibility and speed vary by browser and device.
 
-The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. There is no separate “Link 3DS” operation. **Settings → Core Settings** contains **3DS performance readout** and **3DS lighting on CPU (slower)**; both are off by default and read when a game launches. Leave them off for normal play unless diagnosing performance. PSP remains available by default.
+The root deployment enables 3DS with `WEBRCADE_ENABLE_3DS=true`. This operator setting registers its app and permits scanner entries. In **Settings → Core Settings**, **3DS shader pop-in** starts off. Turn it on to let the renderer skip draws for objects or effects while their shaders compile. Choose **OK** to save the setting for your next 3DS launch. **Cancel** discards the edit.
+
+**3DS performance readout** and **3DS lighting on CPU (slower)** also start off and take effect when a game launches. Leave them off for normal play unless diagnosing performance. PSP remains available by default.
 
 GameCube is available when its core is packaged, without a player enable switch. Its **GameCube performance readout** is in **Core Settings**. Keyboard, gamepad and touch input include separate sticks and its own button layout. It requires device WebGPU; see [device requirements](streaming-offline-and-3ds.md#gamecube-and-the-ps2-beta).
 

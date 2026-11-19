@@ -35,6 +35,45 @@ async function settings(page, enable3DS) {
   await page.waitForFunction(()=>{const e=document.querySelector('._1OdS7');return !e || +getComputedStyle(e).opacity>.95;});
 }
 const hasPSP = types => types.some(type => type === 'psp' || type === 'retro-ppsspp');
+const shaderPopInLabel = '3DS shader pop-in';
+const shaderPopInPreference = page => page.evaluate(() => localStorage.getItem('psp_test.3ds.shaderpopin.v1'));
+async function checkShaderPopIn(page) {
+  const row = page.getByText(shaderPopInLabel, {exact:true}).locator('..');
+  const toggle = row.locator('label');
+  const checkbox = row.locator('input');
+  const ok = page.getByRole('button', {name:'OK', exact:true});
+  const cancel = page.getByRole('button', {name:'Cancel', exact:true});
+  assert.equal(await checkbox.isChecked(), false);
+  assert.equal(await shaderPopInPreference(page), null);
+  await toggle.click();
+  assert.equal(await checkbox.isChecked(), true);
+  assert.equal(await shaderPopInPreference(page), null);
+  await cancel.click();
+  await settings(page, true);
+  assert.equal(await checkbox.isChecked(), false);
+  await toggle.click();
+  await ok.click();
+  await checkbox.waitFor({state:'hidden'});
+  assert.equal(await shaderPopInPreference(page), '1');
+  await page.reload();
+  await libraryTypes(page);
+  await settings(page, true);
+  assert.equal(await checkbox.isChecked(), true);
+  await toggle.click();
+  await cancel.click();
+  await settings(page, true);
+  assert.equal(await checkbox.isChecked(), true);
+  await toggle.click();
+  await ok.click();
+  await checkbox.waitFor({state:'hidden'});
+  assert.equal(await shaderPopInPreference(page), '0');
+  await page.reload();
+  await libraryTypes(page);
+  await settings(page, true);
+  assert.equal(await checkbox.isChecked(), false);
+  await cancel.click();
+  console.log('PASS 3DS shader pop-in default, OK/Cancel and persisted changes in both directions');
+}
 (async () => {
   for (const engine of [chromium,webkit]) {
     const browser = await engine.launch({headless:true,
@@ -65,12 +104,14 @@ const hasPSP = types => types.some(type => type === 'psp' || type === 'retro-pps
         assert.equal(await page.getByText('Enable PSP (experimental)',{exact:true}).count(),0);
         assert.equal(await page.getByText('3DS performance readout',{exact:true}).count(),enable3DS?1:0);
         assert.equal(await page.getByText('3DS lighting on CPU (slower)',{exact:true}).count(),enable3DS?1:0);
+        assert.equal(await page.getByText(shaderPopInLabel,{exact:true}).count(),enable3DS?1:0);
         if(enable3DS){
           const perf=page.getByText('3DS performance readout',{exact:true}).locator('..');
           assert.equal(await perf.locator('input').isChecked(),false);
           await perf.locator('label').click();
           assert.equal(await perf.locator('input').isChecked(),true);
           await perf.locator('label').click();
+          if (legacyPreference === null) await checkShaderPopIn(page);
         }
         await page.reload();
         assert(hasPSP(await libraryTypes(page)),'PSP remains available after reload');

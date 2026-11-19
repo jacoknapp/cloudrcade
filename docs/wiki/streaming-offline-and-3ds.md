@@ -74,7 +74,7 @@ Worker installation performs no protected fetches during sign-in. Caching starts
 
 ## 3DS setup
 
-The release image includes the key-free Azahar-based app. Enable scanner registration with `WEBRCADE_ENABLE_3DS=true` (the root example default). This registers the 3DS app; **Settings → Core Settings** contains its [readout and CPU-lighting diagnostics](controls-and-menus.md#experimental-settings-and-defaults), which start off. The inherited Experimental apps browser preference is separate. Supply supported application files under `roms/3DS/`; updates, DLC, unsupported seed-protected games and operator exclusions are filtered by the scanner.
+The release image includes the key-free Azahar-based app. Enable scanner registration with `WEBRCADE_ENABLE_3DS=true` (the root example default). This registers the 3DS app and its [Core Settings](controls-and-menus.md#experimental-settings-and-defaults). The inherited Experimental apps browser preference is separate. Supply supported application files under `roms/3DS/`; updates, DLC, unsupported seed-protected games and operator exclusions are filtered by the scanner.
 
 Encrypted games need your own compatible Citra-format `aes_keys.txt`. The root Compose example uses:
 
@@ -89,6 +89,8 @@ The authorized browser reads keys from the same-origin no-store endpoint and pla
 ## 3DS shaders and performance
 
 **Shaders cache as they are created.** The first encounter with a shader can hitch; many new shaders together can cause larger pauses, especially on mobile. Observed cached shaders reduce repeat work, but a cache is not a universal precompiled set for every scene/device. The current core has no Dynarmic CPU recompiler; native 1x resolution and the original model are defaults. Game/browser/device combinations vary substantially in performance.
+
+With **3DS shader pop-in** enabled in **Settings → Core Settings**, the renderer can skip a draw while its shader compiles. Objects or effects can appear late, and a draw that happens only once can be missed. Browsers without a shader completion query can still hitch the next time a draw needs that shader. The setting starts off and takes effect the next time you launch a 3DS game.
 
 The optional **3DS performance readout** in Core Settings is read at launch and helps distinguish emulation, graphics, audio and memory costs. Leave active GPU cost probes off for normal play; those diagnostics deliberately add waits. A passive FPS readout is evidence for the tested scene/device, not a promise for every game.
 
