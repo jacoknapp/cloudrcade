@@ -1,24 +1,30 @@
 --- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
 +++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
-@@ -299,6 +299,8 @@
+@@ -297,8 +297,14 @@
+ struct ConfigHash {
+     std::size_t operator()(const FSConfig& config) const noexcept { return config.Hash(); }
  };
++struct ValidatedSharedProgram {
++    GLuint handle;
++    u32 context;
++};
  struct MaterialVariant {
      OGLProgram ready;
-+    GLuint reused_shared = 0;
++    const ValidatedSharedProgram* reused_shared = nullptr;
 +    bool used_specialized = false;
      u32 draws = 0;
      bool shared_failed = false;
      bool promotion_failed = false;
-@@ -306,6 +308,8 @@
+@@ -306,6 +312,8 @@
  struct SharedStage {
      OGLShader shader;
      std::size_t id = 0;
 +    // Linked shared programs known to work with each exact vertex stage.
-+    std::unordered_map<u32, GLuint> drawn_programs;
++    std::unordered_map<u32, ValidatedSharedProgram> validated_programs;
  };
  struct Material {
      GLSL::CombinerControls controls{};
-@@ -313,6 +317,7 @@
+@@ -313,6 +321,7 @@
      OGLShader specialized;
      bool restored = false;
      SharedStage* family = nullptr;
@@ -26,7 +32,29 @@
      std::size_t id = 0;
      std::unordered_map<u32, MaterialVariant> vertices;
  };
-@@ -363,12 +368,24 @@
+@@ -349,6 +358,21 @@
+     return enabled ? 1 : 0;
+ });
+ 
++// A save restores into the same WebGL context. A browser context restoration
++// can retain the JS context object but invalidates every previous GL program.
++EM_JS(unsigned, SharedProgramContext, (), {
++    const gl = Module.ctx;
++    if (!gl || !gl.canvas || gl.isContextLost()) return 0;
++    if (Module.wrcSharedProgramGL !== gl) {
++        Module.wrcSharedProgramGL = gl;
++        Module.wrcSharedProgramGeneration = (Module.wrcSharedProgramGeneration || 0) + 1;
++        gl.canvas.addEventListener('webglcontextlost', function() {
++            if (Module.wrcSharedProgramGL === gl) Module.wrcSharedProgramGL = null;
++        }, {once: true});
++    }
++    return Module.wrcSharedProgramGeneration;
++});
++
+ bool CanShare(const FSConfig& config, const Pica::Shader::UserConfig& user) {
+     using Texture = Pica::TexturingRegs::TextureConfig;
+     const auto type = config.texture.texture0_type.Value();
+@@ -363,12 +387,24 @@
      auto [entry, fresh] = materials.try_emplace(config);
      added = fresh;
      Material& material = entry->second;
@@ -56,41 +84,45 @@
      if (!material.restored) {
          material.controls = GLSL::MakeCombinerControls(config);
          auto [it, new_stage] = shared_stages.try_emplace(GLSL::GenerateSharedFragmentShader(config, user, profile));
-@@ -730,11 +747,33 @@
+@@ -441,6 +477,8 @@
+ 
+ #ifdef __EMSCRIPTEN__
+     const bool use_shared_combiners = UseSharedCombiners() != 0;
++    const u32 shared_context =
++        use_shared_combiners && !ProgramsLinkInBackground() ? SharedProgramContext() : 0;
+     std::unordered_map<u64, u64> program_aliases;
+     Material* material = nullptr;
+     const Material* upload = nullptr;
+@@ -730,6 +768,28 @@
              state.draw.shader_program = variant.ready.handle;
              return true;
          }
-+        if (material->restored && material->family && vertex_id && !variant.used_specialized) {
-+            if (!variant.reused_shared) {
-+                const auto shared = material->family->drawn_programs.find(vertex_id);
-+                if (shared != material->family->drawn_programs.end()) {
++        if (material->restored && material->family && vertex_id && impl->shared_context &&
++            !variant.used_specialized) {
++            if (!variant.reused_shared || variant.reused_shared->context != impl->shared_context) {
++                variant.reused_shared = nullptr;
++                const auto shared = material->family->validated_programs.find(vertex_id);
++                if (shared != material->family->validated_programs.end() &&
++                    shared->second.context == impl->shared_context) {
 +                    const u64 id = RememberedPrograms::CanonicalProgramId(
 +                        specific_id, impl->current.vs, material->specialized.handle);
 +                    const auto exact = background_programs.find(id);
 +                    if (exact == background_programs.end() || linking.contains(exact->second) ||
 +                        exact->second == 0) {
-+                        variant.reused_shared = shared->second;
++                        variant.reused_shared = &shared->second;
 +                    }
 +                }
 +            }
 +            if (variant.reused_shared) {
 +                impl->upload = material;
-+                state.draw.shader_program = variant.reused_shared;
++                state.draw.shader_program = variant.reused_shared->handle;
 +                return true;
 +            }
 +        }
          if (!material->restored && !variant.shared_failed && material->family->shader.handle) {
              impl->current.fs = material->family->shader.handle;
              impl->current.fs_hash = material->family->id;
-             if (ApplyStages(state, accurate_mul)) {
-                 impl->upload = material;
-+                if (variant.draws == 0 && vertex_id && !ProgramsLinkInBackground()) {
-+                    material->family->drawn_programs.try_emplace(vertex_id, state.draw.shader_program);
-+                }
-                 if (variant.draws < 32) ++variant.draws;
-                 // A speculative replacement can wait for a driver compile even many
-                 // frames after linking. Keep the working shared program on drivers
-@@ -753,6 +792,8 @@
+@@ -753,6 +813,8 @@
              material->specialized.handle = LoadShader(material->specialized_source, GL_FRAGMENT_SHADER, "");
          impl->current.fs = material->specialized.handle;
          impl->current.fs_hash = material->id;
@@ -99,3 +131,30 @@
      }
  #endif
      return ApplyStages(state, accurate_mul);
+@@ -823,6 +885,7 @@
+                 pending = linking.end();
+             }
+             const bool first_use = program == 0;
++            const bool needs_validation = first_use || pending != linking.end();
+             if (first_use) {
+                 const auto shaders = std::array{impl->current.vs, impl->current.gs, impl->current.fs};
+                 if (ProgramsLinkInBackground()) {
+@@ -854,6 +917,18 @@
+                     glDeleteProgram(program);
+                     background_programs.erase(unique_identifier);
+                     return false;
++                }
++            }
++            // Trust a handle for shared-material reuse only after this context
++            // has successfully validated the link. A cache hit alone cannot
++            // certify a program created before browser context loss.
++            if (needs_validation && impl->shared_context && impl->material) {
++                auto* family = impl->material->family;
++                if (family && family->shader.handle == impl->current.fs) {
++                    const u32 vertex = RememberedPrograms::TextId(impl->current.vs);
++                    if (vertex) {
++                        family->validated_programs[vertex] = {program, impl->shared_context};
++                    }
+                 }
+             }
+             if (first_use && impl->use_shared_combiners &&
