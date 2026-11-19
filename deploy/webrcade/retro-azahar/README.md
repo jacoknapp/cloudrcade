@@ -28,6 +28,8 @@ The cache reduces repeated work; first-time shader compilation can still pause.
 - `patches/retroarch-mobile.patch` — bounds startup memory, stack and worker count, exports
   cleanup/audio interfaces, handles gesture-gated audio resumes and uses minimal Asyncify
   with audio blocking at the frontend loop instead of inside the core callbacks.
+- `patches/retroarch-3ds-audio-queue.patch` — appends PCM on the Web Audio timeline
+  and recalibrates the pacing clock when playback resumes.
 - `patches/retroarch-package.patch` — propagates archive failures instead of
   accepting a stale core package. Builds also remove prior archive/extraction output.
 - `patches/azahar-performance.patch` — reuses decoded CPU blocks for the active process
@@ -271,6 +273,13 @@ uses audio pacing instead of waiting for a second browser animation frame after
 each slow emulation frame. Suspended audio restores animation-frame pacing so a
 locked audio context cannot cause the game to run unthrottled. Exit removes the
 audio timing listener before closing the context.
+
+The Web Audio driver keeps the actual end time of its scheduled buffers. It
+appends new samples while that audio is still queued, including on browsers
+that need extra startup lead. Run
+`WEBRCADE_BUILD_ROOT=<WORK> node tests/test_webrcade_3ds_audio_queue.cjs`
+to check buffer continuity, PCM, pacing, and suspend/resume against the patched
+RetroArch source after `build.sh`.
 
 Run `WEBRCADE_BUILD_ROOT=<WORK> node tests/test_webrcade_3ds_cache.cjs` to test the
 actual cache header (requires `c++`). The native lifecycle test checks audio

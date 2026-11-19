@@ -1,0 +1,110 @@
+diff --git a/emscripten/library_rwebaudio.js b/emscripten/library_rwebaudio.js
+--- a/emscripten/library_rwebaudio.js
++++ b/emscripten/library_rwebaudio.js
+@@ -2,7 +2,7 @@
+ 
+ var LibraryRWebAudio = {
+    $RWA: {
+-      /* add 10 ms of silence on start, seems to prevent underrun on start/unpausing (terrible crackling in firefox) */
++      /* Leave time for the initial source to reach the rendering thread. */
+       MIN_START_OFFSET_SEC: 0.01,
+       /* firefox and safari need more latency (transparent to audio driver) */
+       EXTRA_LATENCY_SEC_NONCHROME: 0.01,
+@@ -10,6 +10,7 @@
+       PLATFORM_EMSCRIPTEN_BROWSER_CHROMIUM: 1,
+       context: null,
+       contextRunning: false,
++      resumePending: false,
+       nonblock: false,
+       endTime: 0,
+       latency: 0,
+@@ -20,20 +21,30 @@
+ 
+    /* AudioContext.currentTime can be inaccurate: https://bugzilla.mozilla.org/show_bug.cgi?id=901247 */
+    $RWebAudioGetCurrentTime: function() {
+-      return performance.now() / 1000 - RWA.currentTimeDiff;
++      return Math.max(RWA.context.currentTime, performance.now() / 1000 - RWA.currentTimeDiff);
+    },
+ 
+    $RWebAudioStateChangeCB: function() {
+-      RWA.contextRunning = RWA.context.state == "running";
++      RWA.contextRunning = RWA.context.state === "running";
++      if (RWA.contextRunning)
++         RWA.currentTimeDiff = performance.now() / 1000 - RWA.context.currentTime;
+    },
+ 
++   RWebAudioResumeCtx__deps: ["$RWebAudioStateChangeCB"],
+    RWebAudioResumeCtx: function() {
++      var context = RWA.context;
++      var state = context.state;
++      if ((state === "running") !== RWA.contextRunning)
++         RWebAudioStateChangeCB();
++
+       // A phone may require a fresh user gesture. Keep only one resume pending
+       // and handle denial rather than rejecting a Promise on every audio frame.
+-      if (!RWA.contextRunning && !RWA.resumePending) {
++      if (!RWA.contextRunning && state !== "closed" && !RWA.resumePending) {
+          RWA.resumePending = true;
+-         RWA.context.resume().catch(function() {}).finally(function() {
++         context.resume().catch(function() {}).finally(function() {
++            if (RWA.context !== context) return;
+             RWA.resumePending = false;
++            RWebAudioStateChangeCB();
+          });
+       }
+       return RWA.contextRunning;
+@@ -44,8 +55,9 @@
+       var ac = window.AudioContext || window.webkitAudioContext;
+       if (!ac) return 0;
+ 
+-      RWA.context = window.readyAudioContext || new ac();
+-      RWA.currentTimeDiff = performance.now() / 1000 - RWA.context.currentTime;
++      var readyContext = window.readyAudioContext;
++      RWA.context = readyContext && readyContext.state !== "closed" ? readyContext : new ac();
++      RWA.resumePending = false;
+       RWA.nonblock = false;
+       RWA.endTime = 0;
+       RWA.latency = latency;
+@@ -74,10 +86,12 @@
+       bufferSource.connect(RWA.context.destination);
+ 
+       var currentTime = RWebAudioGetCurrentTime();
+-      /* when empty, start rounded up to nearest 1 ms, add MIN_START_OFFSET_SEC */
+-      var startTime = RWA.endTime > currentTime ? RWA.endTime : Math.ceil(currentTime * 1000) / 1000 + RWA.MIN_START_OFFSET_SEC;
++      // endTime is on the playback timeline, including any startup lead.
++      var startTime = RWA.endTime;
++      if (startTime <= currentTime)
++         startTime = Math.ceil(currentTime * 1000) / 1000 + RWA.MIN_START_OFFSET_SEC + RWA.extraLatencySec;
++      bufferSource.start(startTime);
+       RWA.endTime = startTime + buffer.duration;
+-      bufferSource.start(startTime + RWA.extraLatencySec);
+ 
+       return num_frames;
+    },
+@@ -97,7 +111,8 @@
+    RWebAudioFree__deps: ["$RWebAudioStateChangeCB"],
+    RWebAudioFree: function() {
+       RWA.context.removeEventListener("statechange", RWebAudioStateChangeCB);
+-      RWA.context.close();
++      if (RWA.context.state !== "closed")
++         RWA.context.close();
+       RWA.contextRunning = false;
+    },
+ 
+@@ -105,9 +120,14 @@
+       return RWA.virtualBufferFrames;
+    },
+ 
+-   RWebAudioWriteAvailFrames__deps: ["$RWebAudioGetCurrentTime"],
++   RWebAudioWriteAvailFrames__deps: ["$RWebAudioGetCurrentTime", "$RWebAudioStateChangeCB"],
+    RWebAudioWriteAvailFrames: function() {
+-      var avail = Math.round(((RWA.latency / 1000) - RWA.endTime + RWebAudioGetCurrentTime()) * RWA.context.sampleRate);
++      // The app uses display pacing while the audio clock is stopped.
++      var running = RWA.context.state === "running";
++      if (running !== RWA.contextRunning) RWebAudioStateChangeCB();
++      if (!running) return RWA.virtualBufferFrames;
++      var latencySec = RWA.latency / 1000 + RWA.extraLatencySec;
++      var avail = Math.round((latencySec - RWA.endTime + RWebAudioGetCurrentTime()) * RWA.context.sampleRate);
+       if (avail <= 0) return 0;
+       if (avail >= RWA.virtualBufferFrames) return RWA.virtualBufferFrames;
+       return avail;
