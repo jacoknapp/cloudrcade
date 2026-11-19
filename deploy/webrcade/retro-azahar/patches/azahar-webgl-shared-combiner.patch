@@ -1,0 +1,507 @@
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -644,6 +644,9 @@
+     }
+     state.draw.vertex_buffer = vertex_buffer.GetHandle();
+     state.Apply();
++#ifdef __EMSCRIPTEN__
++    curr_shader_manager->UploadCombiner(state.draw.shader_program);
++#endif
+ 
+     u8* buffer_ptr;
+     GLintptr buffer_offset;
+@@ -836,6 +839,9 @@
+         const bool program_ready = curr_shader_manager->ApplyTo(state, accurate_mul);
+         if (program_ready) {
+             state.Apply();
++#ifdef __EMSCRIPTEN__
++            curr_shader_manager->UploadCombiner(state.draw.shader_program);
++#endif
+         }
+ 
+         std::size_t max_vertices = 3 * (VERTEX_BUFFER_SIZE / (3 * sizeof(HardwareVertex)));
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -267,6 +267,78 @@
+ 
+ using FragmentShaders = ShaderCache<FSConfig, &GLSL::GenerateFragmentShader, GL_FRAGMENT_SHADER>;
+ 
++#ifdef __EMSCRIPTEN__
++namespace {
++struct ConfigHash {
++    std::size_t operator()(const FSConfig& config) const noexcept { return config.Hash(); }
++};
++struct MaterialVariant {
++    OGLProgram ready;
++    u32 draws = 0;
++    bool shared_failed = false;
++    bool promotion_failed = false;
++};
++struct SharedStage {
++    OGLShader shader;
++    std::size_t id = 0;
++};
++struct Material {
++    GLSL::CombinerControls controls{};
++    std::string specialized_source;
++    OGLShader specialized;
++    bool restored = false;
++    SharedStage* family = nullptr;
++    std::size_t id = 0;
++    std::unordered_map<u32, MaterialVariant> vertices;
++};
++// WebGL objects and exact material identities survive a native save-state restore.
++std::unordered_map<FSConfig, Material, ConfigHash> materials;
++std::unordered_map<std::string, SharedStage> shared_stages;
++struct ControlBinding {
++    GLint location = -1;
++    const Material* last = nullptr;
++};
++std::unordered_map<GLuint, ControlBinding> control_bindings;
++
++bool CanShare(const FSConfig& config, const Pica::Shader::UserConfig& user) {
++    using Texture = Pica::TexturingRegs::TextureConfig;
++    static const bool enabled = !EM_ASM_INT({ return Module.wrcShaderWait ? 1 : 0; });
++    const auto type = config.texture.texture0_type.Value();
++    return enabled && user.IsCacheable() && !config.proctex.enable && !config.framebuffer.shadow_rendering &&
++           config.framebuffer.alpha_test_func != Pica::FramebufferRegs::CompareFunc::Never &&
++           config.texture.fog_mode != Pica::TexturingRegs::FogMode::Gas &&
++           (type == Texture::Texture2D || type == Texture::Disabled);
++}
++
++Material& GetMaterial(const FSConfig& config, const Pica::Shader::UserConfig& user,
++                      const Pica::Shader::Profile& profile, bool& added) {
++    auto [entry, fresh] = materials.try_emplace(config);
++    added = fresh;
++    Material& material = entry->second;
++    if (!fresh) return material;
++
++    material.id = config.Hash();
++    material.specialized_source = GLSL::GenerateFragmentShader(config, user, profile);
++    material.specialized.handle = RememberedPrograms::RebuiltFragment(material.specialized_source);
++    material.restored = material.specialized.handle != 0;
++    if (!material.restored) {
++        material.controls = GLSL::MakeCombinerControls(config);
++        auto [it, new_stage] = shared_stages.try_emplace(GLSL::GenerateSharedFragmentShader(config, user, profile));
++        material.family = &it->second;
++        if (new_stage) {
++            it->second.id = Common::ComputeHash64(it->first.data(), it->first.size());
++            it->second.shader.Create(it->first, GL_FRAGMENT_SHADER);
++        }
++    }
++    EM_ASM({
++        const stats = Module.wrcHybrid || (Module.wrcHybrid = {materials:0, families:0, promotions:0});
++        stats.materials = $0; stats.families = $1;
++    }, static_cast<int>(materials.size()), static_cast<int>(shared_stages.size()));
++    return material;
++}
++} // namespace
++#endif
++
+ class ShaderProgramManager::Impl {
+ public:
+     explicit Impl(const Driver& driver, u64 title_id, bool separable)
+@@ -321,6 +393,17 @@
+ 
+ #ifdef __EMSCRIPTEN__
+     std::unordered_map<u64, u64> program_aliases;
++    Material* material = nullptr;
++    const Material* upload = nullptr;
++    struct Promotion {
++        Material* material = nullptr;
++        MaterialVariant* variant = nullptr;
++        GLuint vertex = 0;
++        u64 config_id = 0;
++    };
++    Promotion candidate{}, submitting{};
++    OGLProgram pending;
++    u32 frame = 0, submitted = 0, last_discovery = 0;
+ #endif
+     static_assert(offsetof(ShaderTuple, vs_hash) == 0, "ShaderTuple layout changed!");
+     static_assert(offsetof(ShaderTuple, fs_hash) == sizeof(std::size_t) * 2,
+@@ -428,6 +511,15 @@
+ void ShaderProgramManager::UseFragmentShader(const Pica::RegsInternal& regs,
+                                              const Pica::Shader::UserConfig& user) {
+     const FSConfig fs_config{regs};
++#ifdef __EMSCRIPTEN__
++    impl->material = nullptr;
++    if (!impl->separable && CanShare(fs_config, user)) {
++        bool fresh;
++        impl->material = &GetMaterial(fs_config, user, impl->profile, fresh);
++        if (fresh) impl->last_discovery = impl->frame;
++        return;
++    }
++#endif
+     auto [hash, handle, result] = impl->fragment_shaders.Get(fs_config, user, impl->profile);
+     impl->current.fs = handle;
+     impl->current.fs_hash = hash;
+@@ -468,6 +560,43 @@
+     if (impl->separable) {
+         return;
+     }
++    ++impl->frame;
++    // Specialize a frequently drawn material only after new materials stop arriving.
++    // Keep drawing with the shared program throughout compilation and link validation.
++    if (impl->pending.handle) {
++        const bool ready = ProgramsLinkInBackground() ? IsProgramLinked(impl->pending.handle)
++                                                     : impl->frame - impl->submitted >= 12;
++        if (ready && impl->frame - impl->last_discovery >= 8) {
++            auto& job = impl->submitting;
++            const GLuint previous = OpenGLState::GetCurState().draw.shader_program;
++            if (FinishProgram(impl->pending.handle, "")) {
++                job.variant->ready = std::move(impl->pending);
++                const GLuint fragment = job.material->specialized.handle;
++                const u64 id = RememberedPrograms::CanonicalProgramId(job.config_id, job.vertex, fragment);
++                RememberedPrograms::NoteProgram(id, job.vertex, fragment);
++                EM_ASM({ Module.wrcHybrid.promotions++; });
++            } else {
++                job.variant->promotion_failed = true;
++                impl->pending.Release();
++            }
++            glUseProgram(previous);
++            impl->submitting = {};
++        }
++    } else if (impl->candidate.material && impl->frame - impl->last_discovery >= 8 &&
++               impl->frame - impl->submitted >= 12) {
++        auto job = impl->candidate;
++        impl->candidate = {};
++        if (!job.material->specialized.handle)
++            job.material->specialized.handle = LoadShader(job.material->specialized_source, GL_FRAGMENT_SHADER, "", true);
++        if (job.material->specialized.handle)
++            impl->pending.handle = BeginProgram(std::array{job.vertex, GLuint{0}, job.material->specialized.handle});
++        if (impl->pending.handle) {
++            impl->submitting = job;
++            impl->submitted = impl->frame;
++        } else {
++            job.variant->promotion_failed = true;
++        }
++    }
+     // Poll completion without waiting. Completed but not yet drawn programs
+     // remain in linking until ApplyTo validates them; they no longer consume
+     // compiler capacity. Demand waits briefly pause speculative work.
+@@ -544,6 +673,55 @@
+ }
+ 
+ bool ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mul) {
++#ifdef __EMSCRIPTEN__
++    impl->upload = nullptr;
++    if (Material* material = impl->material) {
++        impl->current.fs_hash = material->id;
++        const u64 specific_id = impl->current.GetConfigHash();
++        const u32 vertex_id = RememberedPrograms::TextId(impl->current.vs);
++        auto& variant = material->vertices[vertex_id];
++        if (variant.ready.handle && vertex_id) {
++            state.draw.shader_program = variant.ready.handle;
++            return true;
++        }
++        if (!material->restored && !variant.shared_failed && material->family->shader.handle) {
++            impl->current.fs = material->family->shader.handle;
++            impl->current.fs_hash = material->family->id;
++            if (ApplyStages(state, accurate_mul)) {
++                impl->upload = material;
++                if (variant.draws < 32) ++variant.draws;
++                if (vertex_id && variant.draws == 32 && !variant.promotion_failed &&
++                    !impl->candidate.material && !impl->pending.handle) {
++                    impl->candidate = {material, &variant, impl->current.vs, specific_id};
++                }
++                return true;
++            }
++            // A driver can reject the general shader. Try the original exact material.
++            variant.shared_failed = true;
++        }
++        if (!material->specialized.handle)
++            material->specialized.handle = LoadShader(material->specialized_source, GL_FRAGMENT_SHADER, "");
++        impl->current.fs = material->specialized.handle;
++        impl->current.fs_hash = material->id;
++    }
++#endif
++    return ApplyStages(state, accurate_mul);
++}
++
++#ifdef __EMSCRIPTEN__
++void ShaderProgramManager::UploadCombiner(GLuint program) {
++    if (!impl->upload) return;
++    auto [it, fresh] = control_bindings.try_emplace(program);
++    auto& binding = it->second;
++    if (fresh) binding.location = glGetUniformLocation(program, "tev_control[0]");
++    if (binding.last != impl->upload) {
++        glUniform4iv(binding.location, 18, impl->upload->controls.data());
++        binding.last = impl->upload;
++    }
++}
++#endif
++
++bool ShaderProgramManager::ApplyStages(OpenGLState& state, bool accurate_mul) {
+     if (impl->separable) {
+         if (driver.HasBug(DriverBug::ShaderStageChangeFreeze)) {
+             glUseProgramStages(
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -58,10 +58,14 @@
+ 
+     /// Rebuilds a few of the programs remembered from earlier sessions.
+     void RebuildRemembered();
++#ifdef __EMSCRIPTEN__
++    void UploadCombiner(u32 program);
++#endif
+ 
+     u64 GetProgramID() const;
+ 
+ private:
++    bool ApplyStages(OpenGLState& state, bool accurate_mul);
+     Frontend::EmuWindow& emu_window;
+     const Driver& driver;
+     bool strict_context_required;
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -23,10 +23,13 @@
+ 
+ namespace OpenGL {
+ 
+-GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name) {
++#ifdef __EMSCRIPTEN__
++constexpr std::string_view WebPreamble = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
++#endif
++GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status) {
+     std::string preamble;
+ #if defined(__EMSCRIPTEN__)
+-    preamble = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
++    preamble = WebPreamble;
+ #else
+     if (GLES) {
+         preamble = R"(#version 320 es
+@@ -86,7 +89,7 @@
+     glCompileShader(shader_id);
+ #if defined(__EMSCRIPTEN__)
+     RememberedPrograms::NoteShader(shader_id, type, preamble, source);
+-    if (ProgramsLinkInBackground()) {
++    if (defer_status || ProgramsLinkInBackground()) {
+         // Asking for the result would wait for the compiler; a shader that
+         // failed shows up when its program is linked.
+         return shader_id;
+@@ -288,6 +291,15 @@
+     return compiled->second;
+ }
+ 
++GLuint RebuiltFragment(std::string_view source) {
++    return RebuiltShader(GL_FRAGMENT_SHADER, WebPreamble, source);
++}
++u32 TextId(GLuint shader) {
++    const auto& hashes = Get().hashes;
++    const auto found = hashes.find(shader);
++    return found == hashes.end() ? 0 : found->second.text + 1;
++}
++
+ bool OwnsShader(GLuint shader) {
+     State& state = Get();
+     const auto identity = state.hashes.find(shader);
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -15,7 +15,7 @@
+  * @param type Type of the shader (GL_VERTEX_SHADER, GL_GEOMETRY_SHADER or GL_FRAGMENT_SHADER)
+  * @param debug_name debug name to show in logs
+  */
+-GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name);
++GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status = false);
+ 
+ /**
+  * Utility function to create and link an OpenGL GLSL shader program
+@@ -46,6 +46,8 @@
+ };
+ /// Borrow a cache-owned shader only when its stage and complete GLSL match.
+ GLuint RebuiltShader(GLenum type, std::string_view preamble, std::string_view source);
++GLuint RebuiltFragment(std::string_view source);
++u32 TextId(GLuint shader);
+ bool OwnsShader(GLuint shader);
+ bool SameShader(GLuint a, GLuint b);
+ void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source);
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -147,7 +147,110 @@
+ 
+ FragmentModule::~FragmentModule() = default;
+ 
+-std::string FragmentModule::Generate() {
++#ifdef __EMSCRIPTEN__
++CombinerControls MakeCombinerControls(const FSConfig& config) {
++    using Stage = TexturingRegs::TevStageConfig;
++    CombinerControls controls{};
++    for (u32 i = 0; i < config.texture.tev_stages.size(); ++i) {
++        const Stage stage = config.texture.tev_stages[i];
++        const auto operand = [&](Stage::Source src, Stage::Source third, u32 modifier) -> s32 {
++            if (i == 0 && src == Stage::Source::Previous) src = third;
++            return static_cast<s32>(src) | (static_cast<s32>(modifier) << 4);
++        };
++        auto* row = controls.data() + 12 * i;
++        row[0] = operand(stage.color_source1, stage.color_source3, static_cast<u32>(stage.color_modifier1.Value()));
++        row[1] = operand(stage.color_source2, stage.color_source3, static_cast<u32>(stage.color_modifier2.Value()));
++        row[2] = operand(stage.color_source3, stage.color_source3, static_cast<u32>(stage.color_modifier3.Value()));
++        row[3] = IsPassThroughTevStage(stage) ? -1 : static_cast<s32>(stage.color_op.Value());
++        row[4] = operand(stage.alpha_source1, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier1.Value()));
++        row[5] = operand(stage.alpha_source2, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier2.Value()));
++        row[6] = operand(stage.alpha_source3, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier3.Value()));
++        row[7] = static_cast<s32>(stage.alpha_op.Value());
++        row[8] = stage.GetColorMultiplier();
++        row[9] = stage.GetAlphaMultiplier();
++        row[10] = config.TevStageUpdatesCombinerBufferColor(i);
++        row[11] = config.TevStageUpdatesCombinerBufferAlpha(i);
++    }
++    return controls;
++}
++
++// Source, modifier and operation numbers below are the native TevStageConfig enums.
++static constexpr std::string_view SharedFunctions = R"(
++uniform highp ivec4 tev_control[18];
++vec4 tevSource(int code, vec4 primary, vec4 diffuse, vec4 specular, vec4 t0, vec4 t1,
++               vec4 t2, vec4 buf, vec4 constantColor, vec4 previous) {
++    switch (code & 15) {
++    case 0: return primary;
++    case 1: return diffuse;
++    case 2: return specular;
++    case 3: return t0;
++    case 4: return t1;
++    case 5: return t2;
++    case 13: return buf;
++    case 14: return constantColor;
++    case 15: return previous;
++    default: return vec4(0.0); // procedural texture is disabled on this path
++    }
++}
++vec3 tevRGB(int code, vec4 value) {
++    int modCode = code >> 4;
++    vec3 result;
++    switch (modCode & ~1) {
++    case 0: result = value.rgb; break;
++    case 2: result = value.aaa; break;
++    case 4: result = value.rrr; break;
++    case 8: result = value.ggg; break;
++    case 12: result = value.bbb; break;
++    default: return vec3(0.0);
++    }
++    return (modCode & 1) != 0 ? vec3(1.0) - result : result;
++}
++float tevAlpha(int code, vec4 value) {
++    int modCode = code >> 4;
++    float result = value[(3 + (modCode >> 1)) & 3];
++    return (modCode & 1) != 0 ? 1.0 - result : result;
++}
++)";
++
++static std::string SharedOperations(std::string_view type, bool rgb) {
++    std::string code = fmt::format("{0} tevCombine(int op, {0} a, {0} b, {0} c) {{\n", type);
++    code += fmt::format("{0} result; switch (op) {{\n", type);
++    code += "case 0: result = a; break;\ncase 1: result = a * b; break;\n"
++            "case 2: result = a + b; break;\ncase 3: result = a + b - 0.5; break;\n"
++            "case 4: result = mix(b, a, c); break;\ncase 5: result = a - b; break;\n";
++    if (rgb) code += "case 6: case 7: result = vec3(dot(a - vec3(0.5), b - vec3(0.5)) * 4.0); break;\n";
++    code += fmt::format("case 8: result = fma(a,b,c); break;\ncase 9: result = min(a+b,{0}(1.0))*c; break;\n"
++                        "default: result = {0}(0.0); break; }} return byteround(clamp(result,{0}(0.0),{0}(1.0))); }}\n", type);
++    return code;
++}
++
++static constexpr std::string_view SharedStages = R"(
++vec4 t0 = sampleTexUnit0(), t1 = sampleTexUnit1(), t2 = sampleTexUnit2();
++for (int i = 0; i < 6; ++i) {
++    ivec4 rgb = tev_control[3*i], alpha = tev_control[3*i+1], config = tev_control[3*i+2];
++    if (rgb.w >= 0) {
++#define TEV_SRC(code) tevSource(code, rounded_primary_color, primary_fragment_color, secondary_fragment_color, t0, t1, t2, combiner_buffer, const_color[i], combiner_output)
++#define TEV_RGB(code) tevRGB(code, TEV_SRC(code))
++#define TEV_ALPHA(code) tevAlpha(code, TEV_SRC(code))
++        vec3 c = tevCombine(rgb.w, TEV_RGB(rgb.x), TEV_RGB(rgb.y), TEV_RGB(rgb.z));
++        float a = rgb.w == 7 ? c.r : tevCombine(alpha.w, TEV_ALPHA(alpha.x), TEV_ALPHA(alpha.y), TEV_ALPHA(alpha.z));
++        combiner_output = vec4(clamp(c * float(config.x), vec3(0.0), vec3(1.0)), clamp(a * float(config.y), 0.0, 1.0));
++    }
++    combiner_buffer = next_combiner_buffer;
++    if (config.z != 0) next_combiner_buffer.rgb = combiner_output.rgb;
++    if (config.w != 0) next_combiner_buffer.a = combiner_output.a;
++}
++)";
++#endif
++
++std::string FragmentModule::Generate(bool shared_combiner) {
++#ifdef __EMSCRIPTEN__
++    if (shared_combiner) {
++        out += SharedFunctions;
++        out += SharedOperations("vec3", true);
++        out += SharedOperations("float", false);
++    }
++#endif
+     // We round the interpolated primary color to the nearest 1/255th
+     // This maintains the PICA's 8 bits of precision
+     out += R"(
+@@ -174,17 +277,24 @@
+            "vec4 next_combiner_buffer = tev_combiner_buffer_color;\n"
+            "vec4 combiner_output = vec4(0.0);\n";
+ 
+-    out += "vec3 color_results_1 = vec3(0.0);\n"
+-           "vec3 color_results_2 = vec3(0.0);\n"
+-           "vec3 color_results_3 = vec3(0.0);\n";
+-
+-    out += "float alpha_results_1 = 0.0;\n"
+-           "float alpha_results_2 = 0.0;\n"
+-           "float alpha_results_3 = 0.0;\n";
+-
+-    // Write shader source to emulate PICA TEV stages
+-    for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
+-        WriteTevStage(index);
++#ifdef __EMSCRIPTEN__
++    if (shared_combiner) {
++        out += SharedStages;
++    } else
++#endif
++    {
++        out += "vec3 color_results_1 = vec3(0.0);\n"
++               "vec3 color_results_2 = vec3(0.0);\n"
++               "vec3 color_results_3 = vec3(0.0);\n";
++
++        out += "float alpha_results_1 = 0.0;\n"
++               "float alpha_results_2 = 0.0;\n"
++               "float alpha_results_3 = 0.0;\n";
++
++        // Write shader source to emulate PICA TEV stages
++        for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
++            WriteTevStage(index);
++        }
+     }
+ 
+     // Append the alpha test condition
+@@ -1851,6 +1961,13 @@
+     out += "\n}\n";
+ }
+ 
++#ifdef __EMSCRIPTEN__
++std::string GenerateSharedFragmentShader(const FSConfig& config, const UserConfig& user,
++                                         const Profile& profile) {
++    return FragmentModule{config, user, profile}.Generate(true);
++}
++#endif
++
+ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& user,
+                                    const Profile& profile) {
+     FragmentModule module{config, user, profile};
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.h
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.h
+@@ -14,7 +14,7 @@
+     ~FragmentModule();
+ 
+     /// Emits GLSL source corresponding to the provided pica fragment configuration
+-    std::string Generate();
++    std::string Generate(bool shared_combiner = false);
+ 
+ private:
+     /// Undos the host perspective transformation and applies the PICA one
+@@ -92,6 +92,14 @@
+     bool use_fragment_shader_barycentric{};
+ };
+ 
++#ifdef __EMSCRIPTEN__
++// Three ivec4 uniforms per stage: RGB operands/op, alpha operands/op, scales and buffer writes.
++using CombinerControls = std::array<s32, 6 * 12>;
++CombinerControls MakeCombinerControls(const FSConfig& config);
++std::string GenerateSharedFragmentShader(const FSConfig& config, const UserConfig& user,
++                                         const Profile& profile);
++#endif
++
+ /**
+  * Generates the GLSL fragment shader program source code for the current Pica state
+  * @param config ShaderCacheKey object generated for the current Pica state, used for the shader

@@ -105,6 +105,7 @@ fs.mkdirSync(output, { recursive: true });
           ({ type, compiled, log, sourceLength: source.length })),
       })),
       shaders: Module.wrcShaders,
+      hybrid: Module.wrcHybrid,
     }));
 
     await frame.waitForFunction(() => window.Module?._get_current_frame_count?.() > 100,
@@ -156,19 +157,31 @@ fs.mkdirSync(output, { recursive: true });
     } else {
       assert.equal(settled.failures.length, 0, 'normal shaders link successfully');
       assert(settled.native.gpu > 0, 'normal draws retain GPU vertex processing');
+      if (process.env.WEBRCADE_TEST_COLD_COMBINERS === '1') {
+        assert(settled.hybrid?.families > 0, 'real draws compiled shared fragment shaders');
+        assert(settled.hybrid.materials > settled.hybrid.families, 'distinct materials share a fragment shader');
+      }
     }
 
     await frame.waitForFunction((count) => Module._get_current_frame_count() > count + 60,
       settled.frames, { timeout: 300000 });
     const continued = await snapshot();
     if (process.env.WEBRCADE_TEST_STATE) {
-      assert.equal(continued.gameLinks, settled.gameLinks, 'failed pairs are not relinked every frame');
+      // A steady scene can still finish promotions for frequently used materials.
+      // Only one extra link submission may be awaiting validation at a time.
+      function checkReuse(before, after) {
+        const promoted = (after.hybrid?.promotions || 0) - (before.hybrid?.promotions || 0);
+        const pending = after.hybrid && !fail ? 1 : 0;
+        assert(after.gameLinks - before.gameLinks <= promoted + pending,
+          'repeated draws reuse accepted and rejected shader pairs');
+      }
+      checkReuse(settled, continued);
       await loadScene();
       const reloaded = await snapshot();
       await frame.waitForFunction((count) => Module._get_current_frame_count() > count + 60,
         reloaded.frames, { timeout: 300000 });
       const afterReload = await snapshot();
-      assert.equal(afterReload.gameLinks, continued.gameLinks, 'state load preserves accepted and rejected pairs');
+      checkReuse(continued, afterReload);
       assert.equal(afterReload.invalidUses, 0);
     }
     await frame.evaluate(() => emulator.pause(true));

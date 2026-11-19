@@ -412,6 +412,11 @@ The same revision eliminates duplicate prewarm shader compilation, preserves
 synchronous programs across state loads, and retries unchanged shader caches
 after failed uploads. Save metadata is heap-owned and snapshot creation runs once
 instead of twice. Temporary state-buffer and shader-string allocations are reduced.
+
+On a cold shader cache, ordinary 2D texture combiners can share a WebGL fragment
+program. Each draw supplies the six original combiner stages as uniforms. After
+new materials stop arriving, the renderer can compile and link a specialized
+program for a frequently drawn material and use it on subsequent draws.
 The build cleans its patch-created header so repeated builds apply cleanly.
 
 Regression checks from the repository root:

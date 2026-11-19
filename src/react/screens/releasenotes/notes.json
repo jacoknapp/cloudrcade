@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.14",
+    "date": "November 18, 2026",
+    "title": "Shared shaders for 3DS battle transitions",
+    "changes": [
+      "The 3DS renderer can draw new materials with a shared shader on first encounter, including when the shader cache is empty.",
+      "Frequently drawn materials switch to specialized shaders after they are ready. Returning sessions also reuse shader stages rebuilt from cache."
+    ]
+  },
+  {
     "version": "3.1.13",
     "date": "November 18, 2026",
     "title": "Faster 3DS movies and battle transitions",
