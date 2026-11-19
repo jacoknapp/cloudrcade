@@ -4,7 +4,7 @@ const {execFileSync} = require('child_process');
 const root = process.env.WEBRCADE_BUILD_ROOT || '/tmp/retro-azahar-build';
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'webrcade-cache-test-'));
 try {
-  for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops']) {
+  for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops', 'test_webrcade_3ds_arm_loop']) {
     const binary = path.join(output, test);
     const armSources = test === 'test_webrcade_3ds_arm_ops'
       ? ['-D__EMSCRIPTEN__', path.join(root, 'azahar/src/core/arm/dyncom/arm_dyncom_dec.cpp')]

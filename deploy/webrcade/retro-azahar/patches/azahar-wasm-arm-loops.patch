@@ -1,0 +1,302 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+index 9d6798a..8d424a6 100644
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -16,6 +16,7 @@
+ #include "core/arm/dyncom/arm_dyncom_trans.h"
+ #ifdef __EMSCRIPTEN__
+ #include "core/arm/dyncom/wasm_arm_ops.h"
++#include "core/arm/dyncom/wasm_arm_loop.h"
+ #endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+@@ -811,9 +812,10 @@ enum { KEEP_GOING, FETCH_EXCEPTION };
+ MICROPROFILE_DEFINE(DynCom_Decode, "DynCom", "Decode", MP_RGB(255, 64, 64));
+ 
+ static unsigned int InterpreterTranslateInstruction(const ARMul_State* cpu, const u32 phys_addr,
+-                                                    ARM_INST_PTR& inst_base) {
++                                                    ARM_INST_PTR& inst_base, u32* fetched = nullptr) {
+     u32 inst_size = 4;
+     u32 inst = cpu->memory.Read32(phys_addr & 0xFFFFFFFC);
++    if (fetched) *fetched = inst;
+ 
+     // If we are in Thumb mode, we'll translate one Thumb instruction to the corresponding ARM
+     // instruction
+@@ -870,10 +872,18 @@ static int InterpreterTranslateBlock(ARMul_State* cpu, std::size_t& bb_start, u3
+     u32 pc_start = GetDyncomInstructionCacheKey(cpu);
+ 
+ #if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    u32 words[WasmArmLoop::MaxInstructions];
++    unsigned word_count = 0;
+     arm_inst* run_start = nullptr;
+ #endif
+     while (ret == TransExtData::NON_BRANCH) {
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++        u32* fetched = word_count < WasmArmLoop::MaxInstructions ? &words[word_count] : nullptr;
++        ++word_count;
++        u32 inst_size = InterpreterTranslateInstruction(cpu, phys_addr, inst_base, fetched);
++#else
+         u32 inst_size = InterpreterTranslateInstruction(cpu, phys_addr, inst_base);
++#endif
+ #if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
+         if (inst_base->idx == WasmArm::DispatchIndex) {
+             if (run_start) {
+@@ -896,6 +906,25 @@ static int InterpreterTranslateBlock(ARMul_State* cpu, std::size_t& bb_start, u3
+         ret = inst_base->br;
+     };
+ 
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    // The original records remain available to the debugger and short slices.
++    if (!cpu->TFlag && word_count <= WasmArmLoop::MaxInstructions) {
++        WasmArmLoop::Block block{};
++        if (WasmArmLoop::Build({words, word_count}, bb_start, block)) {
++            constexpr auto size = sizeof(WasmArmLoop::Block);
++            const auto stride = DyncomRecordSize(sizeof(arm_inst) + size);
++            if (stride <= TRANS_CACHE_SIZE - trans_cache_buf_top) {
++                bb_start = trans_cache_buf_top;
++                auto* entry = reinterpret_cast<arm_inst*>(&trans_cache_buf[bb_start]);
++                entry->idx = WasmArmLoop::DispatchIndex;
++                entry->cond = ConditionCode::AL;
++                entry->br = TransExtData::DIRECT_BRANCH;
++                std::memcpy(entry->component, &block, size);
++                trans_cache_buf_top += stride;
++            }
++        }
++    }
++#endif
+     StoreDyncomInstructionBlock(cpu, pc_start, bb_start);
+ 
+     return KEEP_GOING;
+@@ -1687,11 +1716,18 @@ unsigned InterpreterMainLoop(ARMul_State* cpu) {
+                          &&END,
+ #ifdef __EMSCRIPTEN__
+                          &&WASM_ARM_INST,
++#ifdef HAVE_LIBRETRO
++                         &&WASM_ARM_LOOP,
++#endif
+ #endif
+     };
+ #ifdef __EMSCRIPTEN__
+     static_assert(WasmArm::DispatchIndex <= UINT8_MAX);
+-    static_assert(sizeof(InstLabel) / sizeof(InstLabel[0]) == WasmArm::DispatchIndex + 1);
++#if defined(HAVE_LIBRETRO)
++    static_assert(std::size(InstLabel) == WasmArmLoop::DispatchIndex + 1);
++#else
++    static_assert(std::size(InstLabel) == WasmArm::DispatchIndex + 1);
++#endif
+ #endif
+ #endif
+     arm_inst* inst_base;
+@@ -1736,6 +1772,25 @@ DISPATCH: {
+     GOTO_NEXT_INST;
+ }
+ #ifdef __EMSCRIPTEN__
++#ifdef HAVE_LIBRETRO
++WASM_ARM_LOOP: {
++    const auto& block = *reinterpret_cast<const WasmArmLoop::Block*>(inst_base->component);
++    --num_instrs; // Entry dispatch charged one instruction before selecting this record.
++    const auto budget = std::min<u64>(cpu->NumInstrsToExecute - num_instrs, UINT_MAX - num_instrs);
++    if (budget >= block.length && !GDBStub::IsServerEnabled() && !cpu->InBigEndianMode()) {
++        const auto table = cpu->memory.GetCurrentPageTable();
++        const auto result = WasmArmLoop::Run(*cpu, block, table->GetPointerArray().data(),
++                                             static_cast<unsigned>(budget), [](const auto& c, unsigned cond) {
++                                                 return CondPassed(&c, cond);
++                                             });
++        num_instrs += result.executed;
++        if (!result.original) goto DISPATCH;
++    }
++    ptr = block.original_offset;
++    inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
++    GOTO_NEXT_INST;
++}
++#endif
+ WASM_ARM_INST: {
+ #if defined(HAVE_LIBRETRO)
+     const unsigned extra = inst_base->run_length - 1;
+diff --git a/src/core/arm/dyncom/wasm_arm_loop.h b/src/core/arm/dyncom/wasm_arm_loop.h
+new file mode 100644
+index 0000000..d3fe852
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_arm_loop.h
+@@ -0,0 +1,181 @@
++// Bounded execution of short ARM integer loops over ordinary mapped RAM.
++#pragma once
++
++#include <bit>
++#include <cstdint>
++#include <cstring>
++#include <span>
++
++namespace WasmArmLoop {
++using Word = std::uint32_t;
++using Byte = std::uint8_t;
++
++constexpr unsigned MaxInstructions = 24;
++constexpr unsigned DispatchIndex = 206;
++enum class Kind : Byte { And, Xor, Add, Sub, SubFlags, Load };
++enum class Operand : Byte { Immediate, RotatedImmediate, Register, Lsl, Lsr };
++struct Op {
++    Word immediate;
++    Kind kind;
++    Operand operand;
++    Byte rn, rd, rm, shift;
++    Byte width, pre, writeback;
++};
++struct Block {
++    Word original_offset;
++    unsigned length;
++    unsigned condition;
++    Op ops[MaxInstructions - 1];
++};
++
++inline bool Decode(Word word, Op& op) {
++    op = {};
++    op.rn = (word >> 16) & 15;
++    op.rd = (word >> 12) & 15;
++    if ((word >> 28) != 14 || op.rn == 15 || op.rd == 15)
++        return false;
++
++    const bool regular_load = (word & 0x0e100000) == 0x04100000;
++    const bool half_load = (word & 0x0e5000f0) == 0x005000b0;
++    if (regular_load || half_load) {
++        op.kind = Kind::Load;
++        op.width = half_load ? 2 : ((word & (1u << 22)) ? 1 : 4);
++        op.pre = (word >> 24) & 1;
++        const bool w = word & (1u << 21);
++        op.writeback = !op.pre || w;
++        if ((!op.pre && w) || (op.writeback && op.rn == op.rd))
++            return false;
++        op.immediate = half_load ? ((word >> 4) & 0xf0) | (word & 15) : word & 4095;
++        if (!(word & (1u << 23))) op.immediate = 0u - op.immediate;
++        return true;
++    }
++
++    if ((word & 0x0c000000) != 0)
++        return false;
++    switch ((word >> 20) & 31) {
++    case 0: op.kind = Kind::And; break;
++    case 2: op.kind = Kind::Xor; break;
++    case 4: op.kind = Kind::Sub; break;
++    case 5: op.kind = Kind::SubFlags; break;
++    case 8: op.kind = Kind::Add; break;
++    default: return false;
++    }
++
++    if (word & (1u << 25)) {
++        const unsigned rotation = 2 * ((word >> 8) & 15);
++        op.immediate = std::rotr(word & 255u, static_cast<int>(rotation));
++        op.operand = rotation ? Operand::RotatedImmediate : Operand::Immediate;
++    } else {
++        op.rm = word & 15;
++        if (op.rm == 15 || (word & 0x50)) return false; // Register shift, ASR or ROR.
++        op.shift = (word >> 7) & 31;
++        if (word & 0x20) {
++            if (!op.shift) return false; // LSR #32.
++            op.operand = Operand::Lsr;
++        } else {
++            op.operand = op.shift ? Operand::Lsl : Operand::Register;
++        }
++    }
++    return true;
++}
++
++inline bool Build(std::span<const Word> words, Word original_offset, Block& block) {
++    if (words.size() < 2 || words.size() > MaxInstructions) return false;
++    const Word branch = words.back();
++    // ARM B, with PC pipeline bias, back to the first instruction.
++    if ((branch & 0x0f000000) != 0x0a000000 || (branch >> 28) == 15 ||
++        (branch & 0xffffff) != ((0u - static_cast<Word>(words.size()) - 1) & 0xffffff))
++        return false;
++    for (unsigned i = 0; i + 1 < words.size(); ++i)
++        if (!Decode(words[i], block.ops[i])) return false;
++    block.original_offset = original_offset;
++    block.length = static_cast<unsigned>(words.size());
++    block.condition = branch >> 28;
++    return true;
++}
++
++template<class Cpu>
++inline bool Execute(Cpu& cpu, const Op& op, Byte* const* pages) {
++    const Word lhs = cpu.Reg[op.rn];
++    if (op.kind == Kind::Load) {
++        const Word updated = lhs + op.immediate;
++        const Word address = op.pre ? updated : lhs;
++        const unsigned offset = address & 4095;
++        const auto* page = pages[address >> 12];
++        if (!page || offset > 4096u - op.width) return false;
++        Word value = 0;
++        switch (op.width) {
++        case 1: value = page[offset]; break;
++        case 2: std::memcpy(&value, page + offset, 2); break;
++        case 4: std::memcpy(&value, page + offset, 4); break;
++        }
++        if (op.writeback) cpu.Reg[op.rn] = updated;
++        cpu.Reg[op.rd] = value;
++        return true;
++    }
++
++    Word rhs = op.immediate;
++    Word carry = cpu.CFlag;
++    switch (op.operand) {
++    case Operand::Immediate: break;
++    case Operand::RotatedImmediate: carry = rhs >> 31; break;
++    case Operand::Register: rhs = cpu.Reg[op.rm]; break;
++    case Operand::Lsl:
++        rhs = cpu.Reg[op.rm];
++        carry = (rhs >> (32 - op.shift)) & 1;
++        rhs <<= op.shift;
++        break;
++    case Operand::Lsr:
++        rhs = cpu.Reg[op.rm];
++        carry = (rhs >> (op.shift - 1)) & 1;
++        rhs >>= op.shift;
++        break;
++    }
++    cpu.shifter_carry_out = carry;
++    switch (op.kind) {
++    case Kind::And: cpu.Reg[op.rd] = lhs & rhs; break;
++    case Kind::Xor: cpu.Reg[op.rd] = lhs ^ rhs; break;
++    case Kind::Add: cpu.Reg[op.rd] = lhs + rhs; break;
++    case Kind::Sub: cpu.Reg[op.rd] = lhs - rhs; break;
++    case Kind::SubFlags: {
++        const Word result = lhs - rhs;
++        cpu.Reg[op.rd] = result;
++        cpu.NFlag = result >> 31;
++        cpu.ZFlag = result == 0;
++        cpu.CFlag = lhs >= rhs;
++        cpu.VFlag = ((lhs ^ rhs) & (lhs ^ result)) >> 31;
++        break;
++    }
++    case Kind::Load: break;
++    }
++    return true;
++}
++
++struct Result {
++    unsigned executed;
++    bool original;
++};
++
++// No operation in this loop can call out. A special/cross-page load resumes
++// ordinary decoding at its exact PC, before register writeback or memory access.
++template<class Cpu, class Condition>
++inline Result Run(Cpu& cpu, const Block& block, Byte* const* pages, unsigned budget, Condition passed) {
++    const Word start = cpu.Reg[15];
++    unsigned executed = 0;
++    while (budget - executed >= block.length) {
++        for (unsigned i = 0; i + 1 < block.length; ++i) {
++            if (!Execute(cpu, block.ops[i], pages)) {
++                cpu.Reg[15] = start + 4 * i;
++                return {executed + i, i == 0};
++            }
++        }
++        executed += block.length;
++        if (!passed(cpu, block.condition)) {
++            cpu.Reg[15] = start + 4 * block.length;
++            return {executed, false};
++        }
++        if (!cpu.NirqSig && !(cpu.Cpsr & 0x80)) return {executed, false};
++    }
++    return {executed, executed < budget};
++}
++} // namespace WasmArmLoop
