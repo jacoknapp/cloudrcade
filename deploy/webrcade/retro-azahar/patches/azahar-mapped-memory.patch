@@ -1,0 +1,113 @@
+diff --git a/src/core/memory.cpp b/src/core/memory.cpp
+index 41ad049..049a705 100644
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -105,6 +105,14 @@ public:
+ 
+     PAddr plugin_fb_address{};
+ 
++    // Keep the logging and rasterizer call frames off ordinary guest RAM accesses.
++    template <typename T>
++    static CITRA_NO_INLINE T ReadSpecial(MemorySystem& memory, const PageTable& table, VAddr vaddr);
++
++    template <typename T>
++    static CITRA_NO_INLINE void WriteSpecial(MemorySystem& memory, const PageTable& table,
++                                             VAddr vaddr, T data);
++
+     Impl(Core::System& system_);
+ 
+     const u8* GetPtr(Region r) const {
+@@ -459,35 +467,40 @@ T MemorySystem::Read(const std::shared_ptr<PageTable>& page_table, const VAddr v
+         return value;
+     }
+ 
++    return Impl::ReadSpecial<T>(*this, *page_table, vaddr);
++}
++
++template <typename T>
++T MemorySystem::Impl::ReadSpecial(MemorySystem& memory, const PageTable& table, VAddr vaddr) {
+     // Custom Luma3ds mapping
+     // Is there a more efficient way to do this?
+     if (vaddr & (1 << 31)) {
+         PAddr paddr = (vaddr & ~(1 << 31));
+         if ((paddr & 0xF0000000) == Memory::FCRAM_PADDR) { // Check FCRAM region
+             T value;
+-            std::memcpy(&value, GetFCRAMPointer(paddr - Memory::FCRAM_PADDR), sizeof(T));
++            std::memcpy(&value, memory.GetFCRAMPointer(paddr - Memory::FCRAM_PADDR), sizeof(T));
+             return value;
+         } else if ((paddr & 0xF0000000) == 0x10000000 &&
+                    paddr >= Memory::IO_AREA_PADDR) { // Check MMIO region
+-            return impl->system.GPU().ReadReg(static_cast<VAddr>(paddr) - Memory::IO_AREA_PADDR +
++            return memory.impl->system.GPU().ReadReg(static_cast<VAddr>(paddr) - Memory::IO_AREA_PADDR +
+                                               0x1EC00000);
+         }
+     }
+ 
+-    PageType type = page_table->attributes[vaddr >> CITRA_PAGE_BITS];
++    PageType type = table.attributes[vaddr >> CITRA_PAGE_BITS];
+     switch (type) {
+     case PageType::Unmapped:
+         LOG_ERROR(HW_Memory, "unmapped Read{} @ 0x{:08X} at PC 0x{:08X}", sizeof(T) * 8, vaddr,
+-                  impl->GetPC());
++                  memory.impl->GetPC());
+         return 0;
+     case PageType::Memory:
+         ASSERT_MSG(false, "Mapped memory page without a pointer @ {:08X}", vaddr);
+         break;
+     case PageType::RasterizerCachedMemory: {
+-        RasterizerFlushVirtualRegion(vaddr, sizeof(T), FlushMode::Flush);
++        memory.RasterizerFlushVirtualRegion(vaddr, sizeof(T), FlushMode::Flush);
+ 
+         T value;
+-        std::memcpy(&value, GetPointerForRasterizerCache(vaddr), sizeof(T));
++        std::memcpy(&value, memory.GetPointerForRasterizerCache(vaddr), sizeof(T));
+         return value;
+     }
+     default:
+@@ -507,35 +520,40 @@ void MemorySystem::Write(const std::shared_ptr<PageTable>& page_table, const VAd
+         return;
+     }
+ 
++    return Impl::WriteSpecial<T>(*this, *page_table, vaddr, data);
++}
++
++template <typename T>
++void MemorySystem::Impl::WriteSpecial(MemorySystem& memory, const PageTable& table, VAddr vaddr, T data) {
+     // Custom Luma3ds mapping
+     // Is there a more efficient way to do this?
+     if (vaddr & (1 << 31)) {
+         PAddr paddr = (vaddr & ~(1 << 31));
+         if ((paddr & 0xF0000000) == Memory::FCRAM_PADDR) { // Check FCRAM region
+-            std::memcpy(GetFCRAMPointer(paddr - Memory::FCRAM_PADDR), &data, sizeof(T));
++            std::memcpy(memory.GetFCRAMPointer(paddr - Memory::FCRAM_PADDR), &data, sizeof(T));
+             return;
+         } else if ((paddr & 0xF0000000) == 0x10000000 &&
+                    paddr >= Memory::IO_AREA_PADDR) { // Check MMIO region
+             ASSERT(sizeof(data) == sizeof(u32));
+-            impl->system.GPU().WriteReg(static_cast<VAddr>(paddr) - Memory::IO_AREA_PADDR +
++            memory.impl->system.GPU().WriteReg(static_cast<VAddr>(paddr) - Memory::IO_AREA_PADDR +
+                                             0x1EC00000,
+                                         static_cast<u32>(data));
+             return;
+         }
+     }
+ 
+-    PageType type = page_table->attributes[vaddr >> CITRA_PAGE_BITS];
++    PageType type = table.attributes[vaddr >> CITRA_PAGE_BITS];
+     switch (type) {
+     case PageType::Unmapped:
+         LOG_ERROR(HW_Memory, "unmapped Write{} 0x{:08X} @ 0x{:08X} at PC 0x{:08X}",
+-                  sizeof(data) * 8, (u32)data, vaddr, impl->GetPC());
++                  sizeof(data) * 8, (u32)data, vaddr, memory.impl->GetPC());
+         return;
+     case PageType::Memory:
+         ASSERT_MSG(false, "Mapped memory page without a pointer @ {:08X}", vaddr);
+         break;
+     case PageType::RasterizerCachedMemory: {
+-        RasterizerFlushVirtualRegion(vaddr, sizeof(T), FlushMode::Invalidate);
+-        std::memcpy(GetPointerForRasterizerCache(vaddr), &data, sizeof(T));
++        memory.RasterizerFlushVirtualRegion(vaddr, sizeof(T), FlushMode::Invalidate);
++        std::memcpy(memory.GetPointerForRasterizerCache(vaddr), &data, sizeof(T));
+         break;
+     }
+     default:
