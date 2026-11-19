@@ -544,6 +544,7 @@ export class Emulator extends RetroAppWrapper {
         // loop follows the display, which is 120 Hz on some phones: hold it to
         // the 3DS frame rate ourselves by skipping iterations that come early.
         options.preMainLoop = () => {
+          if (this.lazyRom) this.lazyRom.markReadAheadFrame(performance.now());
           const context = window.Module && window.Module.RWA && window.Module.RWA.context;
           if (context && context.state === 'running') return undefined;
           const now = performance.now();
@@ -735,6 +736,7 @@ export class Emulator extends RetroAppWrapper {
 
     // First hook after the wrapper has written the game file
     if (this.lazyRom) {
+      try { this.lazyRom.enableReadHints(this.uid, window.localStorage); } catch (error) { /* optional */ }
       this.lazyRom.mount(FS, this.game);
     }
 

@@ -9,6 +9,12 @@ const MAX_REQUEST_PAGES = (2 * 1024 * 1024) / PAGE_SIZE;
 const READ_AHEAD_DISTANCE = STREAM_SIZE / 4;
 const MAX_FORWARD_GAP = 64 * 1024;
 const GAME_ID_BYTES = 64 * 1024;
+const MAX_READ_HINTS = 64;
+const MAX_RECENT_ANCHORS = 16;
+const MAX_RANGES_PER_HINT = 2;
+const MAX_HINT_ATTEMPTS = MAX_READ_HINTS * MAX_RANGES_PER_HINT;
+const MIN_HINT_LEAD_MS = 40;
+const MAX_HINT_LEAD_MS = 2400;
 
 async function fetchRange(url, size, first, last, signal, allowHiddenRange = false) {
   const response = await fetch(url, { headers: { Range: `bytes=${first}-${last}` }, signal });
@@ -94,14 +100,14 @@ export class ReadAheadRom extends LazyRom {
     if (pending) pending.controller.abort();
   }
 
-  prefetch(index) {
+  prefetch(index, pages = STREAM_PAGES, learned = null) {
     if (this.closed || typeof fetch !== 'function' || typeof AbortController !== 'function' ||
         index * PAGE_SIZE >= this.size || this.chunks.has(index) ||
         index === this.failedPrefetch || this.pending) return;
     const first = index * PAGE_SIZE;
-    const lastPage = this.lastUncachedPage(index, index + STREAM_PAGES - 1);
+    const lastPage = this.lastUncachedPage(index, index + pages - 1);
     const last = Math.min((lastPage + 1) * PAGE_SIZE, this.size) - 1;
-    const pending = { index, lastPage, controller: new AbortController() };
+    const pending = { index, lastPage, learned, controller: new AbortController() };
     // Reserve the entire in-flight range inside the same 16 MiB budget.
     this.trim(MAX_PAGES - (lastPage - index + 1));
     this.pending = pending;
@@ -111,6 +117,7 @@ export class ReadAheadRom extends LazyRom {
       this.storePages(index, bytes);
       for (let i = index; i <= lastPage; i++) this.prefetched.add(i);
       this.readAheadStats.prefetched++;
+      if (learned?.length) this.prefetchLearned(learned);
     }).catch(() => {
       // Speculation never changes demand-read errors or retries a bad range
       // every frame. A cancelled/stale request cannot modify the current one.
@@ -119,6 +126,95 @@ export class ReadAheadRom extends LazyRom {
         this.failedPrefetch = index;
       }
     });
+    return true;
+  }
+
+  enableReadHints(uid, storage) {
+    if (typeof uid !== 'string' || !/^[0-9a-f]{32}$/i.test(uid) || !storage) return;
+    this.hintStorage = storage;
+    this.hintKey = `wrcad.3ds.rom-hints.v2.${uid}.${this.size}`;
+    this.readHints = new Map();
+    this.recentAnchors = [];
+    this.attemptedHints = new Set();
+    this.startingHints = new Set();
+    this.hintAttempts = 0;
+    this.frameTime = -1;
+    try {
+      const text = storage.getItem(this.hintKey);
+      const rows = text && text.length <= 8192 ? JSON.parse(text) : [];
+      if (!Array.isArray(rows) || rows.length > MAX_READ_HINTS) return;
+      for (const row of rows) {
+        if (!Array.isArray(row) || row.length !== 3) continue;
+        const [before, after, ranges] = row;
+        if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after) || !Array.isArray(ranges) ||
+            ranges.length < 1 || ranges.length > MAX_RANGES_PER_HINT) continue;
+        if (before >= 0 && before < this.size && after >= 0 && after < this.size &&
+            before !== after && ranges.every(range => Array.isArray(range) && range.length === 2 &&
+              range.every(Number.isSafeInteger) && range[0] >= 0 &&
+              (range[0] + range[1] - 1) * PAGE_SIZE < this.size && range[1] >= 1 && range[1] <= 2)) {
+          const key = `${before}:${after}`;
+          this.readHints.set(key, row);
+          this.startingHints.add(key);
+        }
+      }
+    } catch (error) { /* Hints are optional on storage failures. */ }
+  }
+
+  markReadAheadFrame(time) {
+    this.frameTime = time;
+    this.anchorRecorded = false;
+  }
+
+  prefetchLearned(ranges) {
+    for (let i = 0; i < ranges.length && this.hintAttempts < MAX_HINT_ATTEMPTS; i++) {
+      const [page, count] = ranges[i];
+      if (this.prefetch(page, count, ranges.slice(i + 1))) {
+        this.hintAttempts++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  observeShortRead(position, firstMissing, pages) {
+    if (!this.readHints || this.frameTime < 0) return;
+    if (firstMissing >= 0) {
+      for (let i = this.recentAnchors.length - 1; i >= 0; i--) {
+        const anchor = this.recentAnchors[i];
+        const lead = this.frameTime - anchor.time;
+        if (lead < MIN_HINT_LEAD_MS) continue;
+        if (lead > MAX_HINT_LEAD_MS) break;
+        if (this.startingHints.has(anchor.key) || anchor.misses >= MAX_RANGES_PER_HINT) break;
+        let known = this.readHints.get(anchor.key);
+        if (!known) {
+          if (this.readHints.size === MAX_READ_HINTS) this.readHints.delete(this.readHints.keys().next().value);
+          known = [anchor.before, anchor.after, []];
+          this.readHints.set(anchor.key, known);
+        }
+        const range = known[2][anchor.misses++];
+        if (range && (range[0] !== firstMissing || range[1] !== pages)) {
+          this.readHints.delete(anchor.key);
+          anchor.misses = MAX_RANGES_PER_HINT;
+          this.hintsChanged = true;
+        } else if (!range) {
+          known[2].push([firstMissing, pages]);
+          this.hintsChanged = true;
+        }
+        // Prefer the nearest anchor that left time for a fetch to complete.
+        break;
+      }
+    }
+    if (this.anchorRecorded || this.previousReadStart < 0 || position === this.previousReadStart) return;
+    this.anchorRecorded = true;
+    const before = this.previousReadStart;
+    const key = `${before}:${position}`;
+    if (this.recentAnchors.length === MAX_RECENT_ANCHORS) this.recentAnchors.shift();
+    this.recentAnchors.push({ key, before, after: position, time: this.frameTime, misses: 0 });
+    const hint = this.readHints.get(key);
+    if (hint && this.startingHints.has(key) && !this.attemptedHints.has(key) &&
+        this.prefetchLearned(hint[2])) {
+      this.attemptedHints.add(key);
+    }
   }
 
   close() {
@@ -127,6 +223,12 @@ export class ReadAheadRom extends LazyRom {
     this.cancelPrefetch();
     this.chunks.clear();
     this.prefetched.clear();
+    if (this.hintsChanged) {
+      this.hintsChanged = false;
+      try {
+        this.hintStorage.setItem(this.hintKey, JSON.stringify([...this.readHints.values()]));
+      } catch (error) { /* Hints are optional on storage failures. */ }
+    }
   }
 
   fetchChunk(index) {
@@ -147,7 +249,8 @@ export class ReadAheadRom extends LazyRom {
       // Sparse reads fetch one page. A large read can demand up to 2 MiB
       // in one round trip. Stop at a cached page to avoid fetching it twice.
       const last = this.lastUncachedPage(index, lastNeeded);
-      if (this.pending && this.pending.index <= last && this.pending.lastPage >= index) {
+      if (this.pending && (this.pending.learned ||
+          (this.pending.index <= last && this.pending.lastPage >= index))) {
         this.cancelPrefetch();
       }
       const reserved = this.pending ? this.pending.lastPage - this.pending.index + 1 : 0;
@@ -176,7 +279,14 @@ export class ReadAheadRom extends LazyRom {
     const forward = this.previousReadStart >= 0 && position >= this.previousReadStart &&
       position <= this.previousReadEnd + MAX_FORWARD_GAP && end > this.previousReadEnd;
     const sequential = total > 0 && position === this.previousReadEnd;
-    if (total > 0 && !forward && this.pending) this.cancelPrefetch();
+    if (total > 0 && !forward && this.pending && !this.pending.learned) this.cancelPrefetch();
+    let firstMissing = -1;
+    const shortRead = this.readHints && this.frameTime >= 0 && total > 0 && total <= PAGE_SIZE;
+    if (shortRead && !forward) {
+      const firstPage = Math.floor(position / PAGE_SIZE);
+      if (!this.chunks.has(firstPage)) firstMissing = firstPage;
+      else if (!this.chunks.has(lastNeeded)) firstMissing = lastNeeded;
+    }
     let done = 0;
     while (done < total) {
       const at = position + done;
@@ -191,10 +301,15 @@ export class ReadAheadRom extends LazyRom {
       done += count;
     }
     if (total > 0) {
-      if (forward && !this.pending) {
+      if (forward) {
         const next = Math.ceil(end / STREAM_SIZE) * STREAM_PAGES;
-        if (next * PAGE_SIZE - end <= READ_AHEAD_DISTANCE) this.prefetch(next);
+        if (next * PAGE_SIZE - end <= READ_AHEAD_DISTANCE && next * PAGE_SIZE < this.size) {
+          if (this.pending?.learned && !this.chunks.has(next) &&
+              (next < this.pending.index || next > this.pending.lastPage)) this.cancelPrefetch();
+          this.prefetch(next);
+        }
       }
+      if (shortRead) this.observeShortRead(position, firstMissing, lastNeeded - firstMissing + 1);
       this.previousReadStart = position;
       this.previousReadEnd = end;
     }

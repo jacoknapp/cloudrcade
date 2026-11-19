@@ -266,6 +266,15 @@ reserves room for the whole pending range inside its 16 MiB budget.
 Seeks and overlapping demand reads cancel pending prefetches. Run
 `node tests/test_webrcade_3ds_prefetch.cjs` for cancellation, grouped reads and
 cache-budget checks. `emulator.lazyRom.readAheadStats` reports misses and prefetch hits.
+
+On repeat play, the streamed reader can fetch a previously needed range when
+the preceding ROM accesses match. At normal exit it saves up to 64 short
+access patterns for that game's existing header ID and file size in local
+storage. Each stored pattern can start a sequence of at most two background
+requests per launch, with one request active at a time under the same 16 MiB
+budget. A demand miss takes priority. Run
+`node tests/test_webrcade_3ds_rom_hints.cjs` for matching, wrong predictions,
+cache pressure, closed storage and late-session reads.
 These mechanisms require gameplay/device measurements to establish speed gains.
 
 Minimal Asyncify keeps yielding in the RetroArch frontend/audio loop and avoids
