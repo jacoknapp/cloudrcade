@@ -75,6 +75,7 @@ git -C "$WORK/RetroArch" apply "$HERE/patches/retroarch-state-info.patch"
 git -C "$WORK/RetroArch" apply "$HERE/patches/retroarch-package.patch"
 fetch https://github.com/webrcade/webrcade-app-common.git "$COMMON" "$WORK/webrcade-app-common"
 git -C "$WORK/webrcade-app-common" apply "$HERE/patches/app-common-3ds-type.patch"
+git -C "$WORK/webrcade-app-common" apply "$HERE/patches/app-common-save-performance.patch"
 fetch https://github.com/webrcade/webrcade-app-retro-melonds.git "$MELONDS" "$WORK/webrcade-app-retro-azahar"
 
 run() { docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp "$@"; }

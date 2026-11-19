@@ -1,0 +1,146 @@
+diff --git a/src/app/saves.js b/src/app/saves.js
+index 6368019..cc38ba3 100644
+--- a/src/app/saves.js
++++ b/src/app/saves.js
+@@ -50,12 +50,17 @@ class SaveManager {
+         continue;
+       }
+ 
+-      let blob = f.content;
+-      if (!(blob instanceof Blob)) {
+-        blob = new Blob([blob]);
++      // These fingerprints only live in this manager. Hash the binary save
++      // directly instead of building and scanning a binary string on the UI thread.
++      if (window.crypto && window.crypto.subtle) {
++        const bytes = f.content instanceof Uint8Array ? f.content :
++          await new Blob([f.content]).arrayBuffer();
++        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
++        hashes[name] = new Uint8Array(digest).join(',');
++      } else {
++        const blob = f.content instanceof Blob ? f.content : new Blob([f.content]);
++        hashes[name] = md5(await blobToStr(blob));
+       }
+-      const hash = md5(await blobToStr(blob));
+-      hashes[name] = hash;
+     }
+ 
+     if (!this._compareHashes(hashes, this.lastHashes)) {
+diff --git a/src/zip/3rdparty/zip.js b/src/zip/3rdparty/zip.js
+index 93b9b34..4cce19e 100644
+--- a/src/zip/3rdparty/zip.js
++++ b/src/zip/3rdparty/zip.js
+@@ -520,6 +520,36 @@ var zipExport = {};
+       launchProcess(new obj.zip.Inflater(), reader, writer, offset, size, crcType, onprogress, onend, onreaderror, onwriteerror);
+   }
+ 
++  // Only the 3DS save reader/writer supplies Blob entries. Keep the archive
++  // format here and run large entries through a short-lived browser worker.
++  function saveCodec(blob, writer, compress, size, onend, fallback, onerror) {
++    // Larger files retain the library's chunked path on memory-limited devices.
++    if (!blob || size > 32 * 1024 * 1024 || blob.size > 32 * 1024 * 1024 ||
++        !appendABViewSupported || !(writer instanceof BlobWriter) || typeof Worker === 'undefined')
++      return fallback();
++    // WebKit workers can receive a zero-length Blob for a nonempty entry.
++    // Transfer the exact bytes in both directions, including any view offsets.
++    blob.arrayBuffer().then(function (bytes) {
++      var worker;
++      try {
++        worker = new Worker('save-codec-v1.js');
++        worker.onerror = function () { worker.terminate(); fallback(); };
++        worker.onmessage = function (event) {
++          worker.terminate();
++          var result = event.data;
++          if (result.unsupported) return fallback();
++          if (result.error) return onerror(new Error(result.error));
++          var data = result.payload;
++          writer.writeUint8Array(data, function () { onend(data.length, result.crc); });
++        };
++        worker.postMessage({ bytes: bytes, compress: compress, size: size }, [bytes]);
++      } catch (e) {
++        if (worker) worker.terminate();
++        fallback();
++      }
++    }, onerror);
++  }
++
+   function deflate(worker, sn, reader, writer, level, onend, onprogress, onreaderror, onwriteerror) {
+     var crcType = 'input';
+     if (obj.zip.useWebWorkers) {
+@@ -653,10 +683,17 @@ var zipExport = {};
+         readCommonHeader(that, data, 4, false, onerror);
+         dataOffset = that.offset + 30 + that.filenameLength + that.extraFieldLength;
+         writer.init(function () {
+-          if (that.compressionMethod === 0)
+-            copy(that._worker, inflateSN++, reader, writer, dataOffset, that.compressedSize, checkCrc32, getWriterData, onprogress, onreaderror, onwriteerror);
+-          else
++          function legacyInflate() {
+             inflate(that._worker, inflateSN++, reader, writer, dataOffset, that.compressedSize, checkCrc32, getWriterData, onprogress, onreaderror, onwriteerror);
++          }
++          if (that.compressionMethod === 0) {
++            copy(that._worker, inflateSN++, reader, writer, dataOffset, that.compressedSize, checkCrc32, getWriterData, onprogress, onreaderror, onwriteerror);
++          } else if (reader.saveArchive && that.compressionMethod === 8 && !checkCrc32 && that.uncompressedSize >= 65536) {
++            var payload = reader.saveArchive.slice(dataOffset, dataOffset + that.compressedSize);
++            saveCodec(payload, writer, false, that.uncompressedSize, getWriterData, legacyInflate, onreaderror);
++          } else {
++            legacyInflate();
++          }
+         }, onwriteerror);
+       }, onreaderror);
+     };
+@@ -852,13 +889,18 @@ var zipExport = {};
+           filename = getBytes(encodeUTF8(name));
+           filenames.push(name);
+           writeHeader(function () {
+-            if (reader)
+-              if (dontDeflate || options.level === 0)
+-                copy(worker, deflateSN++, reader, writer, 0, reader.size, true, writeFooter, onprogress, onreaderror, onwriteerror);
+-              else
+-                deflate(worker, deflateSN++, reader, writer, options.level, writeFooter, onprogress, onreaderror, onwriteerror);
+-            else
++            function legacyDeflate() {
++              deflate(worker, deflateSN++, reader, writer, options.level, writeFooter, onprogress, onreaderror, onwriteerror);
++            }
++            if (!reader) {
+               writeFooter();
++            } else if (dontDeflate || options.level === 0) {
++              copy(worker, deflateSN++, reader, writer, 0, reader.size, true, writeFooter, onprogress, onreaderror, onwriteerror);
++            } else if (options.deflateBlob && reader.size >= 65536) {
++              saveCodec(options.deflateBlob, writer, true, reader.size, writeFooter, legacyDeflate, onwriteerror);
++            } else {
++              legacyDeflate();
++            }
+           }, onwriteerror);
+         }
+ 
+diff --git a/src/zip/unzip.js b/src/zip/unzip.js
+index 8b6c59d..7829fc1 100644
+--- a/src/zip/unzip.js
++++ b/src/zip/unzip.js
+@@ -66,8 +66,10 @@ export class Unzip {
+         );
+       }
+ 
++      const reader = new zip.BlobReader(blob);
++      reader.saveArchive = blob;
+       zip.createReader(
+-        new zip.BlobReader(blob),
++        reader,
+         blobReader,
+         failure
+       );
+diff --git a/src/zip/zip.js b/src/zip/zip.js
+index 9d9b19f..4bd0dbf 100644
+--- a/src/zip/zip.js
++++ b/src/zip/zip.js
+@@ -14,7 +14,10 @@ export class Zip {
+           const doIt = (index) => {
+             if (index < count) {
+               const f = files[index];
+-              writer.add(f.name, new zip.BlobReader(f.content), () => { doIt(index + 1); });
++              // Azahar already compresses native slot snapshots with Zstandard.
++              const reader = new zip.BlobReader(f.content);
++              writer.add(f.name, reader, () => { doIt(index + 1); }, undefined,
++                { deflateBlob: f.content, level: f.name === "state" ? 0 : undefined });
+             } else {
+               writer.close((blob) => {
+                 success(blob);

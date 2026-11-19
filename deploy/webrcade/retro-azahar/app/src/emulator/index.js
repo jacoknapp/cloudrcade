@@ -72,6 +72,8 @@ export class Emulator extends RetroAppWrapper {
     this.lastInput = {};
     this.loopResumed = false;
     this.shaderFailures = new ShaderFailureTracker(this, CORE_REVISION);
+    this.saveQueue = Promise.resolve();
+    this.saveNeedsRetry = false;
     // Circle Pad and D-pad are separate inputs; do not mirror the stick onto the D-pad.
     this.analogMode = true;
     let view = null;
@@ -703,13 +705,16 @@ export class Emulator extends RetroAppWrapper {
       }
 
       if (files.length > 0) {
-        if (await this.getSaveManager().checkFilesChanged(files)) {
-          await this.getSaveManager().save(
-            saveStatePath,
-            files,
-            this.saveMessageCallback,
-          );
-        }
+        // Preserve snapshot order when an exit arrives during a pause save.
+        const manager = this.getSaveManager();
+        const pending = this.saveQueue.then(async () => {
+          if (!await manager.checkFilesChanged(files) && !this.saveNeedsRetry) return;
+          // The manager updates its hashes before the durable write completes.
+          this.saveNeedsRetry = true;
+          this.saveNeedsRetry = await manager.save(saveStatePath, files, this.saveMessageCallback) === false;
+        });
+        this.saveQueue = pending.catch(() => {});
+        await pending;
       }
     } catch (e) {
       LOG.error('Error persisting save state: ' + e);
