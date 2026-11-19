@@ -269,10 +269,6 @@ fs.mkdirSync(output, { recursive: true });
         }
       }
     }
-    if (settled.sharedEnabled && !settled.parallelCompiler) {
-      assert.equal(settled.hybrid?.promotions || 0, 0,
-        'a driver without a completion query keeps the working shared program');
-    }
     assert.equal(settled.rejectedRelinks, 0, 'no rejected shader pair is submitted again');
     if (fail) {
       assert(settled.rejected > 0, 'fault injection reached real PICA vertex shaders');
@@ -298,12 +294,16 @@ fs.mkdirSync(output, { recursive: true });
     await frame.waitForFunction((count) => Module._get_current_frame_count() > count + 60,
       settled.frames, { timeout: 300000 });
     const continued = await snapshot();
+    if (continued.sharedEnabled && (!continued.parallelCompiler || !continued.shaderPopIn)) {
+      assert.equal(continued.hybrid?.promotions || 0, 0,
+        'the validated shared program keeps rendering when optional specialization is disabled');
+    }
     if (process.env.WEBRCADE_TEST_STATE) {
       function checkReuse(before, after) {
         assert.equal(after.rejectedRelinks, 0, 'rejected shader pairs stay rejected across restore');
         assert.equal(after.liveRelinks, before.liveRelinks, 'repeated draws reuse live linked programs');
-        // The CPU fallback also promotes materials. Restore can discard one pending
-        // promotion and retry that pair, so compare live and rejected pairs directly.
+        // An enabled promotion can be retried after restore. Compare live
+        // and rejected pairs directly across the change of shader manager.
         if (!fail) {
           const promoted = (after.hybrid?.promotions || 0) - (before.hybrid?.promotions || 0);
           const pending = after.hybrid ? 1 : 0;

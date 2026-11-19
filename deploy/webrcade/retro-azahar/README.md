@@ -456,8 +456,11 @@ and its fog settings as uniforms. Materials that differ only in these settings
 can use the same fragment program on their first draw. The loop stops after
 the last stage that can change its output. Single-light materials using supported
 signed reflection lookups can also share one program across different lookup
-inputs and scales. When the driver can report parallel link completion, a frequently
-drawn material can switch to a specialized program after new materials stop arriving.
+inputs and scales. With shader pop-in disabled, a material keeps its working
+shared program. Querying a new specialized program's uniforms can block the
+emulation thread even after the driver reports that linking finished. With
+pop-in enabled and parallel completion available, a frequently drawn material
+can switch to a specialized program after new materials stop arriving.
 
 On a cold cache, the WebGL vertex compiler emits only the components written by
 a guarded multiply or multiply-add and the three components used by a DP3.

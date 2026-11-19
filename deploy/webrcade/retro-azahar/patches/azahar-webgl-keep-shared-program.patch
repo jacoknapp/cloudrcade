@@ -1,0 +1,15 @@
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 38c7e53..d6a2462 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -867,6 +867,10 @@ ProgramStatus ShaderProgramManager::ApplyTo(OpenGLState& state, bool accurate_mu
+             if (status == ProgramStatus::Pending) return status;
+             if (status == ProgramStatus::Ready) {
+                 impl->upload = material;
++                // A replacement can still block in driver reflection after KHR
++                // reports completion. This validated shared program already
++                // renders the material with its current combiner uniforms.
++                if (!ShaderPopInEnabled()) return ProgramStatus::Ready;
+                 if (variant.draws < 32) ++variant.draws;
+                 // A speculative replacement can wait for a driver compile even many
+                 // frames after linking. Keep the working shared program on drivers
