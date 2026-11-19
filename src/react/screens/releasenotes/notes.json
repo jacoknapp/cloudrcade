@@ -1,5 +1,16 @@
 [
   {
+    "version": "3.1.17",
+    "date": "November 19, 2026",
+    "title": "Smoother 3DS battles and repeat play",
+    "changes": [
+      "The 3DS core runs common CPU instructions faster during gameplay and movies.",
+      "With shader pop-in off, supported hardware GPUs can draw small battle effects while avoiding expensive first-use shader work.",
+      "The 3DS player reads smaller ranges for scattered game data and remembers recurring reads on this device so it can fetch them before the game needs them.",
+      "When the core supplies audio in time, the browser queues it continuously across short scheduling delays."
+    ]
+  },
+  {
     "version": "3.1.16",
     "date": "November 19, 2026",
     "title": "3DS shader pop-in and smoother saves",
