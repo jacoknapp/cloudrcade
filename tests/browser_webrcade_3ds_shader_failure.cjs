@@ -167,6 +167,7 @@ fs.mkdirSync(output, { recursive: true });
       shaders: Module.wrcShaders,
       hybrid: Module.wrcHybrid,
       sharedEnabled: Module.wrcSharedCombiner,
+      parallelCompiler: !!Module.ctx.getExtension('KHR_parallel_shader_compile'),
     }));
 
     await frame.waitForFunction(() => window.Module?._get_current_frame_count?.() > 100,
@@ -209,6 +210,10 @@ fs.mkdirSync(output, { recursive: true });
     const settled = await snapshot();
     console.log('SETTLED', JSON.stringify(settled));
     assert.equal(settled.invalidUses, 0, 'no failed program is ever bound');
+    if (settled.sharedEnabled && !settled.parallelCompiler) {
+      assert.equal(settled.hybrid?.promotions || 0, 0,
+        'a driver without a completion query keeps the working shared program');
+    }
     assert.equal(settled.rejectedRelinks, 0, 'no rejected shader pair is submitted again');
     if (fail) {
       assert(settled.rejected > 0, 'fault injection reached real PICA vertex shaders');

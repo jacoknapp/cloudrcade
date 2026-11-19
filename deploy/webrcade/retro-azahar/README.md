@@ -426,9 +426,18 @@ An unidentified renderer uses the same specialized path.
 On a recognized hardware GPU with a cold shader cache, ordinary 2D texture
 combiners can share a WebGL fragment program. Each draw supplies the six original combiner stages, its alpha comparison
 and its fog settings as uniforms. Materials that differ only in these settings
-can use the same fragment program on their first draw. After
-new materials stop arriving, the renderer can compile and link a specialized
-program for a frequently drawn material and use it on subsequent draws.
+can use the same fragment program on their first draw. The loop stops after
+the last stage that can change its output. Single-light materials using supported
+signed reflection lookups can also share one program across different lookup
+inputs and scales. When the driver can report parallel link completion, a frequently
+drawn material can switch to a specialized program after new materials stop arriving.
+
+On a cold cache, the WebGL vertex compiler emits only the components written by
+a guarded multiply or multiply-add and the three components used by a DP3.
+It preserves the PICA rules for NaN and infinity. Padding instructions can shift
+subroutine addresses within an otherwise identical program. The compiler uses
+stable subroutine names so those programs can reuse a vertex stage. Existing
+shader caches retain their original source identities.
 The build cleans its patch-created header so repeated builds apply cleanly.
 
 Regression checks from the repository root:

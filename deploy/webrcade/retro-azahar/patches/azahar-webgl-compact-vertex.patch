@@ -1,0 +1,375 @@
+--- a/src/video_core/renderer_opengl/gl_resource_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_resource_manager.cpp
+@@ -103,14 +103,14 @@
+     handle = 0;
+ }
+ 
+-void OGLShader::Create(std::string_view source, GLenum type) {
++void OGLShader::Create(std::string_view source, GLenum type, std::string_view cache_source) {
+     if (handle != 0)
+         return;
+     if (source.empty())
+         return;
+ 
+     MICROPROFILE_SCOPE(OpenGL_ResourceCreation);
+-    handle = LoadShader(source, type, debug_name);
++    handle = LoadShader(source, type, debug_name, false, cache_source);
+ }
+ 
+ void OGLShader::Release() {
+--- a/src/video_core/renderer_opengl/gl_resource_manager.h
++++ b/src/video_core/renderer_opengl/gl_resource_manager.h
+@@ -108,7 +108,7 @@
+         return *this;
+     }
+ 
+-    void Create(std::string_view source, GLenum type);
++    void Create(std::string_view source, GLenum type, std::string_view cache_source = {});
+ 
+     void Release();
+ 
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -118,9 +118,9 @@
+         }
+     }
+ 
+-    void Create(const char* source, GLenum type) {
++    void Create(const char* source, GLenum type, std::string_view cache_source = {}) {
+         if (shader_or_program.index() == 0) {
+-            std::get<OGLShader>(shader_or_program).Create(source, type);
++            std::get<OGLShader>(shader_or_program).Create(source, type, cache_source);
+         } else {
+             OGLShader shader;
+             shader.Create(source, type);
+@@ -213,6 +213,28 @@
+         const size_t key_hash = key.Hash();
+         auto map_it = shader_map.find(key_hash);
+         if (map_it == shader_map.end()) {
++#ifdef __EMSCRIPTEN__
++            if (!separable) {
++                auto compact = extra;
++                compact.compact_web_vertex = true;
++                auto code = CodeGenerator(setup, key, compact);
++                if (code.empty()) {
++                    shader_map[key_hash] = nullptr;
++                    return {0, 0, std::nullopt};
++                }
++                // Identical generated code shares a driver stage even if the guest
++                // inserted padding and moved its subroutines to other addresses.
++                auto [stage, fresh] = web_vertex_stages.try_emplace(std::move(code), separable);
++                if (fresh) {
++                    // Keep the established source identity for saved programs. A
++                    // previously warmed stage executes the same vertex instructions.
++                    result = CodeGenerator(setup, key, extra);
++                    stage->second.Create(stage->first.c_str(), ShaderType, *result);
++                }
++                shader_map[key_hash] = &stage->second;
++                return {key_hash, stage->second.GetHandle(), std::move(result)};
++            }
++#endif
+             auto program = Common::HashableString(CodeGenerator(setup, key, extra));
+             if (program.empty()) {
+                 shader_map[key_hash] = nullptr;
+@@ -255,6 +277,9 @@
+ 
+ private:
+     bool separable;
++#ifdef __EMSCRIPTEN__
++    std::unordered_map<std::string, OGLShaderStage> web_vertex_stages;
++#endif
+     std::unordered_map<u64, OGLShaderStage*> shader_map;
+     std::unordered_map<u64, OGLShaderStage> shader_cache;
+ };
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -26,7 +26,8 @@
+ #ifdef __EMSCRIPTEN__
+ constexpr std::string_view WebPreamble = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
+ #endif
+-GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status) {
++GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status,
++                  std::string_view cache_source) {
+     std::string preamble;
+ #if defined(__EMSCRIPTEN__)
+     preamble = WebPreamble;
+@@ -69,7 +70,8 @@
+ #endif
+ 
+ #if defined(__EMSCRIPTEN__)
+-    if (const GLuint warmed = RememberedPrograms::RebuiltShader(type, preamble, source)) {
++    if (cache_source.empty()) cache_source = source;
++    if (const GLuint warmed = RememberedPrograms::RebuiltShader(type, preamble, cache_source)) {
+         return warmed;
+     }
+ #endif
+@@ -88,7 +90,7 @@
+     LOG_DEBUG(Render_OpenGL, "Compiling {} shader {}...", debug_type, debug_name);
+     glCompileShader(shader_id);
+ #if defined(__EMSCRIPTEN__)
+-    RememberedPrograms::NoteShader(shader_id, type, preamble, source);
++    RememberedPrograms::NoteShader(shader_id, type, preamble, cache_source);
+     if (defer_status || ProgramsLinkInBackground()) {
+         // Asking for the result would wait for the compiler; a shader that
+         // failed shows up when its program is linked.
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -15,7 +15,8 @@
+  * @param type Type of the shader (GL_VERTEX_SHADER, GL_GEOMETRY_SHADER or GL_FRAGMENT_SHADER)
+  * @param debug_name debug name to show in logs
+  */
+-GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status = false);
++GLuint LoadShader(std::string_view source, GLenum type, const std::string& debug_name, bool defer_status = false,
++                  std::string_view cache_source = {});
+ 
+ /**
+  * Utility function to create and link an OpenGL GLSL shader program
+--- a/src/video_core/shader/generator/glsl_shader_decompiler.cpp
++++ b/src/video_core/shader/generator/glsl_shader_decompiler.cpp
+@@ -40,7 +40,8 @@
+ /// A subroutine is a range of code refereced by a CALL, IF or LOOP instruction.
+ struct Subroutine {
+     /// Generates a name suitable for GLSL source code.
+-    std::string GetName() const {
++    std::string GetName(bool compact) const {
++        if (compact) return "sub_" + std::to_string(ordinal);
+         return "sub_" + std::to_string(begin) + "_" + std::to_string(end);
+     }
+ 
+@@ -48,6 +49,8 @@
+     u32 end;                ///< Return point of the subroutine.
+     ExitMethod exit_method; ///< Exit method of the subroutine.
+     std::set<u32> labels;   ///< Addresses refereced by JMP instructions.
++
++    u32 ordinal = 0;
+ 
+     bool operator<(const Subroutine& rhs) const {
+         return std::tie(begin, end) < std::tie(rhs.begin, rhs.end);
+@@ -85,6 +88,7 @@
+         subroutine.exit_method = Scan(begin, end, subroutine.labels);
+         if (subroutine.exit_method == ExitMethod::Undetermined)
+             throw DecompileFail("Recursive function detected");
++        subroutine.ordinal = static_cast<u32>(subroutines.size());
+         return *subroutines.insert(std::move(subroutine)).first;
+     }
+ 
+@@ -267,10 +271,10 @@
+     GLSLGenerator(const std::set<Subroutine>& subroutines, const ProgramCode& program_code,
+                   const SwizzleData& swizzle_data, u32 main_offset,
+                   const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
+-                  bool sanitize_mul)
++                  bool sanitize_mul, bool compact)
+         : subroutines(subroutines), program_code(program_code), swizzle_data(swizzle_data),
+           main_offset(main_offset), inputreg_getter(inputreg_getter),
+-          outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul) {
++          outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul), compact(compact) {
+ 
+         Generate();
+     }
+@@ -368,12 +372,12 @@
+      */
+     void CallSubroutine(const Subroutine& subroutine) {
+         if (subroutine.exit_method == ExitMethod::AlwaysEnd) {
+-            shader.AddLine("{}();", subroutine.GetName());
++            shader.AddLine("{}();", subroutine.GetName(compact));
+             shader.AddLine("return true;");
+         } else if (subroutine.exit_method == ExitMethod::Conditional) {
+-            shader.AddLine("if ({}()) {{ return true; }}", subroutine.GetName());
++            shader.AddLine("if ({}()) {{ return true; }}", subroutine.GetName(compact));
+         } else {
+-            shader.AddLine("{}();", subroutine.GetName());
++            shader.AddLine("{}();", subroutine.GetName(compact));
+         }
+     }
+ 
+@@ -417,6 +421,41 @@
+         shader.AddLine("{} = {};", dest, src);
+     }
+ 
++    // A PICA write mask discards the other lanes. Pass only the written lanes through
++    // the per-component multiply fixup, including for noncontiguous masks like xw.
++    void SetProduct(const SwizzlePattern& swizzle, std::string_view reg, std::string_view lhs,
++                    std::string_view rhs, std::string_view addend = {}) {
++        if (reg.empty()) {
++            return;
++        }
++        std::string mask;
++        for (int i = 0; i < 4; ++i) {
++            if (swizzle.DestComponentEnabled(i)) {
++                mask += "xyzw"[i];
++            }
++        }
++        if (mask.empty()) {
++            return;
++        }
++        // Source registers already end in their four PICA swizzle components.
++        const auto select = [&](std::string_view source) {
++            const auto selector = source.substr(source.size() - 4);
++            std::string result{source.substr(0, source.size() - 4)};
++            for (int i = 0; i < 4; ++i) {
++                if (swizzle.DestComponentEnabled(i)) {
++                    result += selector[i];
++                }
++            }
++            return result;
++        };
++        const auto product = fmt::format("sanitize_mul({}, {})", select(lhs), select(rhs));
++        if (addend.empty()) {
++            shader.AddLine("{}.{} = {};", reg, mask, product);
++        } else {
++            shader.AddLine("{}.{} = {} + {};", reg, mask, product, select(addend));
++        }
++    }
++
+     /**
+      * Compiles a single instruction from PICA to GLSL.
+      * @param offset the offset of the PICA shader instruction.
+@@ -433,7 +472,7 @@
+                 : instr.common.operand_desc_id;
+         const SwizzlePattern swizzle = {swizzle_data[swizzle_offset]};
+ 
+-        shader.AddLine("// {}: {}", offset, instr.opcode.Value().GetInfo().name);
++        if (!compact) shader.AddLine("// {}: {}", offset, instr.opcode.Value().GetInfo().name);
+ 
+         switch (instr.opcode.Value().GetInfo().type) {
+         case OpCode::Type::Arithmetic: {
+@@ -460,8 +499,11 @@
+ 
+             case OpCode::Id::MUL: {
+                 if (sanitize_mul) {
+-                    SetDest(swizzle, dest_reg, fmt::format("sanitize_mul({}, {})", src1, src2), 4,
+-                            4);
++                    if (compact) {
++                        SetProduct(swizzle, dest_reg, src1, src2);
++                    } else {
++                        SetDest(swizzle, dest_reg, fmt::format("sanitize_mul({}, {})", src1, src2), 4, 4);
++                    }
+                 } else {
+                     SetDest(swizzle, dest_reg, fmt::format("{} * {}", src1, src2), 4, 4);
+                 }
+@@ -501,7 +543,14 @@
+                 std::string dot;
+                 if (opcode == OpCode::Id::DP3) {
+                     if (sanitize_mul) {
+-                        dot = fmt::format("dot(vec3(sanitize_mul({}, {})), vec3(1.0))", src1, src2);
++                        // Drop the unused fourth source selector before multiplication.
++                        if (compact) {
++                            src1.pop_back();
++                            src2.pop_back();
++                            dot = fmt::format("dot(sanitize_mul({}, {}), vec3(1.0))", src1, src2);
++                        } else {
++                            dot = fmt::format("dot(vec3(sanitize_mul({}, {})), vec3(1.0))", src1, src2);
++                        }
+                     } else {
+                         dot = fmt::format("dot(vec3({}), vec3({}))", src1, src2);
+                     }
+@@ -644,8 +693,12 @@
+                         : "";
+ 
+                 if (sanitize_mul) {
+-                    SetDest(swizzle, dest_reg,
+-                            fmt::format("sanitize_mul({}, {}) + {}", src1, src2, src3), 4, 4);
++                    if (compact) {
++                        SetProduct(swizzle, dest_reg, src1, src2, src3);
++                    } else {
++                        SetDest(swizzle, dest_reg,
++                                fmt::format("sanitize_mul({}, {}) + {}", src1, src2, src3), 4, 4);
++                    }
+                 } else {
+                     SetDest(swizzle, dest_reg, fmt::format("{} * {} + {}", src1, src2, src3), 4, 4);
+                 }
+@@ -825,13 +878,16 @@
+ 
+     void Generate() {
+         if (sanitize_mul) {
+-            shader.AddLine("vec4 sanitize_mul(vec4 lhs, vec4 rhs) {{");
+-            ++shader.scope;
+-            shader.AddLine("vec4 product = lhs * rhs;");
+-            shader.AddLine("return mix(product, mix(mix(vec4(0.0), product, isnan(rhs)), product, "
+-                           "isnan(lhs)), isnan(product));");
+-            --shader.scope;
+-            shader.AddLine("}}\n");
++            for (std::string_view type : {"float", "vec2", "vec3", "vec4"}) {
++                if (!compact && type != "vec4") continue;
++                shader.AddLine("{0} sanitize_mul({0} lhs, {0} rhs) {{", type);
++                ++shader.scope;
++                shader.AddLine("{} product = lhs * rhs;", type);
++                shader.AddLine("return mix(product, mix(mix({}(0.0), product, isnan(rhs)), "
++                               "product, isnan(lhs)), isnan(product));", type);
++                --shader.scope;
++                shader.AddLine("}}\n");
++            }
+         }
+ 
+         shader.AddLine("vec4 get_offset_register(int base_index, int offset) {{");
+@@ -852,7 +908,7 @@
+ 
+         // Add declarations for all subroutines
+         for (const auto& subroutine : subroutines) {
+-            shader.AddLine("bool {}();", subroutine.GetName());
++            shader.AddLine("bool {}();", subroutine.GetName(compact));
+         }
+         shader.AddNewLine();
+ 
+@@ -867,7 +923,7 @@
+         for (const auto& subroutine : subroutines) {
+             std::set<u32> labels = subroutine.labels;
+ 
+-            shader.AddLine("bool {}() {{", subroutine.GetName());
++            shader.AddLine("bool {}() {{", subroutine.GetName(compact));
+             ++shader.scope;
+ 
+             if (labels.empty()) {
+@@ -924,18 +980,19 @@
+     const RegGetter& inputreg_getter;
+     const RegGetter& outputreg_getter;
+     const bool sanitize_mul;
++    const bool compact;
+ 
+     ShaderWriter shader;
+ };
+ 
+ std::string DecompileProgram(const ProgramCode& program_code, const SwizzleData& swizzle_data,
+                              u32 main_offset, const RegGetter& inputreg_getter,
+-                             const RegGetter& outputreg_getter, bool sanitize_mul) {
++                             const RegGetter& outputreg_getter, bool sanitize_mul, bool compact) {
+ 
+     try {
+         auto subroutines = ControlFlowAnalyzer(program_code, main_offset).MoveSubroutines();
+         GLSLGenerator generator(subroutines, program_code, swizzle_data, main_offset,
+-                                inputreg_getter, outputreg_getter, sanitize_mul);
++                                inputreg_getter, outputreg_getter, sanitize_mul, compact);
+         return generator.MoveShaderCode();
+     } catch (const DecompileFail& exception) {
+         LOG_INFO(HW_GPU, "Shader decompilation failed: {}", exception.what());
+--- a/src/video_core/shader/generator/glsl_shader_decompiler.h
++++ b/src/video_core/shader/generator/glsl_shader_decompiler.h
+@@ -15,6 +15,6 @@
+ std::string DecompileProgram(const Pica::ProgramCode& program_code,
+                              const Pica::SwizzleData& swizzle_data, u32 main_offset,
+                              const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
+-                             bool sanitize_mul);
++                             bool sanitize_mul, bool compact = false);
+ 
+ } // namespace Pica::Shader::Generator::GLSL
+--- a/src/video_core/shader/generator/glsl_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_shader_gen.cpp
+@@ -204,7 +204,7 @@
+ 
+     auto program_source =
+         DecompileProgram(setup.GetProgramCode(), setup.GetSwizzleData(), config.state.main_offset,
+-                         get_input_reg, get_output_reg, extra.sanitize_mul);
++                         get_input_reg, get_output_reg, extra.sanitize_mul, extra.compact_web_vertex);
+ 
+     if (program_source.empty()) {
+         return "";
+--- a/src/video_core/shader/generator/shader_gen.h
++++ b/src/video_core/shader/generator/shader_gen.h
+@@ -157,6 +157,7 @@
+     u8 use_clip_planes;
+     u8 use_geometry_shader;
+     u8 sanitize_mul;
++    bool compact_web_vertex = false;
+     u8 separable_shader;
+ 
+     // Load operations to apply to the input vertex data

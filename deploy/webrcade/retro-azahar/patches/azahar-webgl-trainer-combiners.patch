@@ -1,0 +1,295 @@
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -588,9 +588,7 @@
+     // Specialize a frequently drawn material only after new materials stop arriving.
+     // Keep drawing with the shared program throughout compilation and link validation.
+     if (impl->pending.handle) {
+-        const bool ready = ProgramsLinkInBackground() ? IsProgramLinked(impl->pending.handle)
+-                                                     : impl->frame - impl->submitted >= 12;
+-        if (ready && impl->frame - impl->last_discovery >= 8) {
++        if (IsProgramLinked(impl->pending.handle) && impl->frame - impl->last_discovery >= 8) {
+             auto& job = impl->submitting;
+             const GLuint previous = OpenGLState::GetCurState().draw.shader_program;
+             if (FinishProgram(impl->pending.handle, "")) {
+@@ -713,7 +711,11 @@
+             if (ApplyStages(state, accurate_mul)) {
+                 impl->upload = material;
+                 if (variant.draws < 32) ++variant.draws;
+-                if (vertex_id && variant.draws == 32 && !variant.promotion_failed &&
++                // A speculative replacement can wait for a driver compile even many
++                // frames after linking. Keep the working shared program on drivers
++                // that cannot report completion without blocking the emulation thread.
++                if (vertex_id && variant.draws == 32 && ProgramsLinkInBackground() &&
++                    !variant.promotion_failed &&
+                     !impl->candidate.material && !impl->pending.handle) {
+                     impl->candidate = {material, &variant, impl->current.vs, specific_id};
+                 }
+@@ -739,7 +741,9 @@
+     if (fresh) binding.location = glGetUniformLocation(program, "tev_control[0]");
+     if (binding.last != impl->upload) {
+         const auto& controls = impl->upload->controls;
+-        glUniform4iv(binding.location, controls.size() / 4, controls.data());
++        // The last row exists only in shared single-light reflection programs.
++        const GLsizei rows = controls.size() / 4 - (controls.back() ? 0 : 1);
++        glUniform4iv(binding.location, rows, controls.data());
+         binding.last = impl->upload;
+     }
+ }
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -1,6 +1,9 @@
+ // Copyright Citra Emulator Project / Azahar Emulator Project
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
++
++#include <algorithm>
++#include <optional>
+ 
+ #include "video_core/shader/generator/glsl_fs_shader_gen.h"
+ 
+@@ -148,9 +151,42 @@
+ FragmentModule::~FragmentModule() = default;
+ 
+ #ifdef __EMSCRIPTEN__
++// Share the reflection calculation across single-light materials using the common signed inputs.
++// More complex lights retain the existing individually generated equations.
++static std::optional<std::array<s32, 3>> ReflectionControls(const LightConfig& lighting) {
++    if (!lighting.enable || lighting.src_num != 1) {
++        return std::nullopt;
++    }
++    using Sampler = LightingRegs::LightingSampler;
++    using Input = LightingRegs::LightingLutInput;
++    constexpr std::array samplers{Sampler::ReflectRed, Sampler::ReflectGreen, Sampler::ReflectBlue};
++    const std::array tables{lighting.lut_rr, lighting.lut_rg, lighting.lut_rb};
++    std::array<s32, 3> controls{};
++    for (std::size_t i = 0; i < tables.size(); ++i) {
++        const auto& lut = tables[i];
++        if (!lut.enable || !LightingRegs::IsLightingSamplerSupported(lighting.config, samplers[i])) {
++            continue;
++        }
++        if (lut.abs_input) {
++            return std::nullopt;
++        }
++        s32 index;
++        switch (lut.type.Value()) {
++        case Input::NH: index = 1; break;
++        case Input::NV: index = 2; break;
++        case Input::LN: index = 3; break;
++        default: return std::nullopt;
++        }
++        // PICA scales are exact multiples of one quarter.
++        controls[i] = (static_cast<s32>(lut.GetScale() * 4.0f) << 2) | index;
++    }
++    return controls;
++}
++
+ CombinerControls MakeCombinerControls(const FSConfig& config) {
+     using Stage = TexturingRegs::TevStageConfig;
+     CombinerControls controls{};
++    s32 stage_count = 0;
+     for (u32 i = 0; i < config.texture.tev_stages.size(); ++i) {
+         const Stage stage = config.texture.tev_stages[i];
+         const auto operand = [&](Stage::Source src, Stage::Source third, u32 modifier) -> s32 {
+@@ -162,6 +198,11 @@
+         row[1] = operand(stage.color_source2, stage.color_source3, static_cast<u32>(stage.color_modifier2.Value()));
+         row[2] = operand(stage.color_source3, stage.color_source3, static_cast<u32>(stage.color_modifier3.Value()));
+         row[3] = IsPassThroughTevStage(stage) ? -1 : static_cast<s32>(stage.color_op.Value());
++        // Later pass-through stages only update the combiner buffer. The last
++        // active stage has already produced the color used by fog and alpha.
++        if (row[3] >= 0) {
++            stage_count = static_cast<s32>(i + 1);
++        }
+         row[4] = operand(stage.alpha_source1, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier1.Value()));
+         row[5] = operand(stage.alpha_source2, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier2.Value()));
+         row[6] = operand(stage.alpha_source3, stage.alpha_source3, static_cast<u32>(stage.alpha_modifier3.Value()));
+@@ -171,16 +212,21 @@
+         row[10] = config.TevStageUpdatesCombinerBufferColor(i);
+         row[11] = config.TevStageUpdatesCombinerBufferAlpha(i);
+     }
+-    auto* effects = controls.data() + controls.size() - 4;
++    auto* effects = controls.data() + 6 * 12;
+     effects[0] = static_cast<s32>(config.framebuffer.alpha_test_func.Value());
+     effects[1] = config.texture.fog_mode == TexturingRegs::FogMode::Fog;
+     effects[2] = config.texture.fog_flip;
++    if (const auto channels = ReflectionControls(config.lighting)) {
++        auto* reflection = effects + 4;
++        std::copy(channels->begin(), channels->end(), reflection);
++        reflection[3] = 1;
++    }
++    effects[3] = stage_count;
+     return controls;
+ }
+ 
+ // Source, modifier and operation numbers below are the native TevStageConfig enums.
+ static constexpr std::string_view SharedFunctions = R"(
+-uniform highp ivec4 tev_control[19];
+ vec4 tevSource(int code, vec4 primary, vec4 diffuse, vec4 specular, vec4 t0, vec4 t1,
+                vec4 t2, vec4 buf, vec4 constantColor, vec4 previous) {
+     switch (code & 15) {
+@@ -230,7 +276,7 @@
+ 
+ static constexpr std::string_view SharedStages = R"(
+ vec4 t0 = sampleTexUnit0(), t1 = sampleTexUnit1(), t2 = sampleTexUnit2();
+-for (int i = 0; i < 6; ++i) {
++for (int i = 0; i < tev_control[18].w; ++i) {
+     ivec4 rgb = tev_control[3*i], alpha = tev_control[3*i+1], config = tev_control[3*i+2];
+     if (rgb.w >= 0) {
+ #define TEV_SRC(code) tevSource(code, rounded_primary_color, primary_fragment_color, secondary_fragment_color, t0, t1, t2, combiner_buffer, const_color[i], combiner_output)
+@@ -248,8 +294,20 @@
+ #endif
+ 
+ std::string FragmentModule::Generate(bool shared_combiner) {
++    bool shared_reflection = false;
+ #ifdef __EMSCRIPTEN__
+     if (shared_combiner) {
++        shared_reflection = ReflectionControls(config.lighting).has_value();
++        out += shared_reflection ? "\nuniform highp ivec4 tev_control[20];" : "\nuniform highp ivec4 tev_control[19];";
++        if (shared_reflection) {
++            out += R"(
++float reflectionChannel(int control, int table, vec3 inputs, float fallback) {
++    if (control == 0) return fallback;
++    float scale = float(control >> 2) * 0.25;
++    return scale * LookupLightingLUTSigned(table, inputs[(control & 3) - 1]);
++}
++)";
++        }
+         out += SharedFunctions;
+         out += SharedOperations("vec3", true);
+         out += SharedOperations("float", false);
+@@ -275,7 +333,7 @@
+     WriteDepth();
+ 
+     // Write shader source to emulate all enabled PICA lights
+-    WriteLighting();
++    WriteLighting(shared_reflection);
+ 
+     out += "vec4 combiner_buffer = vec4(0.0);\n"
+            "vec4 next_combiner_buffer = tev_combiner_buffer_color;\n"
+@@ -626,7 +684,7 @@
+     }
+ }
+ 
+-void FragmentModule::WriteLighting() {
++void FragmentModule::WriteLighting([[maybe_unused]] bool shared_reflection) {
+     if (!config.lighting.enable) {
+         return;
+     }
+@@ -857,43 +915,59 @@
+             specular_0 = fmt::format("({} * geo_factor)", specular_0);
+         }
+ 
+-        // If enabled, lookup ReflectRed value, otherwise, 1.0 is used
+-        if (lighting.lut_rr.enable &&
+-            LightingRegs::IsLightingSamplerSupported(lighting.config,
+-                                                     LightingRegs::LightingSampler::ReflectRed)) {
+-            std::string value =
+-                get_lut_value(LightingRegs::LightingSampler::ReflectRed, light_config.num,
+-                              lighting.lut_rr.type, lighting.lut_rr.abs_input);
+-            value = fmt::format("({:#} * {})", lighting.lut_rr.GetScale(), value);
+-            out += fmt::format("refl_value.r = {};\n", value);
+-        } else {
+-            out += "refl_value.r = 1.0;\n";
+-        }
+-
+-        // If enabled, lookup ReflectGreen value, otherwise, ReflectRed value is used
+-        if (lighting.lut_rg.enable &&
+-            LightingRegs::IsLightingSamplerSupported(lighting.config,
+-                                                     LightingRegs::LightingSampler::ReflectGreen)) {
+-            std::string value =
+-                get_lut_value(LightingRegs::LightingSampler::ReflectGreen, light_config.num,
+-                              lighting.lut_rg.type, lighting.lut_rg.abs_input);
+-            value = fmt::format("({:#} * {})", lighting.lut_rg.GetScale(), value);
+-            out += fmt::format("refl_value.g = {};\n", value);
+-        } else {
+-            out += "refl_value.g = refl_value.r;\n";
+-        }
+-
+-        // If enabled, lookup ReflectBlue value, otherwise, ReflectRed value is used
+-        if (lighting.lut_rb.enable &&
+-            LightingRegs::IsLightingSamplerSupported(lighting.config,
+-                                                     LightingRegs::LightingSampler::ReflectBlue)) {
+-            std::string value =
+-                get_lut_value(LightingRegs::LightingSampler::ReflectBlue, light_config.num,
+-                              lighting.lut_rb.type, lighting.lut_rb.abs_input);
+-            value = fmt::format("({:#} * {})", lighting.lut_rb.GetScale(), value);
+-            out += fmt::format("refl_value.b = {};\n", value);
+-        } else {
+-            out += "refl_value.b = refl_value.r;\n";
++#ifdef __EMSCRIPTEN__
++        if (shared_reflection) {
++            out += R"(
++refl_value = vec3(1.0);
++if (any(notEqual(tev_control[19].xyz, ivec3(0)))) {
++    vec3 inputs = vec3(dot(normal, normalize(half_vector)), dot(normal, normalize(view)),
++                       dot(light_vector, normal));
++    refl_value.r = reflectionChannel(tev_control[19].x, 6, inputs, 1.0);
++    refl_value.g = reflectionChannel(tev_control[19].y, 5, inputs, refl_value.r);
++    refl_value.b = reflectionChannel(tev_control[19].z, 4, inputs, refl_value.r);
++}
++)";
++        } else
++#endif
++        {
++            // If enabled, lookup ReflectRed value, otherwise, 1.0 is used
++            if (lighting.lut_rr.enable &&
++                LightingRegs::IsLightingSamplerSupported(lighting.config,
++                                                         LightingRegs::LightingSampler::ReflectRed)) {
++                std::string value =
++                    get_lut_value(LightingRegs::LightingSampler::ReflectRed, light_config.num,
++                                  lighting.lut_rr.type, lighting.lut_rr.abs_input);
++                value = fmt::format("({:#} * {})", lighting.lut_rr.GetScale(), value);
++                out += fmt::format("refl_value.r = {};\n", value);
++            } else {
++                out += "refl_value.r = 1.0;\n";
++            }
++
++            // If enabled, lookup ReflectGreen value, otherwise, ReflectRed value is used
++            if (lighting.lut_rg.enable &&
++                LightingRegs::IsLightingSamplerSupported(lighting.config,
++                                                         LightingRegs::LightingSampler::ReflectGreen)) {
++                std::string value =
++                    get_lut_value(LightingRegs::LightingSampler::ReflectGreen, light_config.num,
++                                  lighting.lut_rg.type, lighting.lut_rg.abs_input);
++                value = fmt::format("({:#} * {})", lighting.lut_rg.GetScale(), value);
++                out += fmt::format("refl_value.g = {};\n", value);
++            } else {
++                out += "refl_value.g = refl_value.r;\n";
++            }
++
++            // If enabled, lookup ReflectBlue value, otherwise, ReflectRed value is used
++            if (lighting.lut_rb.enable &&
++                LightingRegs::IsLightingSamplerSupported(lighting.config,
++                                                         LightingRegs::LightingSampler::ReflectBlue)) {
++                std::string value =
++                    get_lut_value(LightingRegs::LightingSampler::ReflectBlue, light_config.num,
++                                  lighting.lut_rb.type, lighting.lut_rb.abs_input);
++                value = fmt::format("({:#} * {})", lighting.lut_rb.GetScale(), value);
++                out += fmt::format("refl_value.b = {};\n", value);
++            } else {
++                out += "refl_value.b = refl_value.r;\n";
++            }
+         }
+ 
+         // Specular 1 component
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.h
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.h
+@@ -24,7 +24,7 @@
+     void WriteScissor();
+ 
+     /// Writes the code to emulate fragment lighting
+-    void WriteLighting();
++    void WriteLighting(bool shared_reflection);
+ 
+     /// Writes the code to emulate fog
+     void WriteFog(std::string_view depth);
+@@ -93,8 +93,8 @@
+ };
+ 
+ #ifdef __EMSCRIPTEN__
+-// Three ivec4s per TEV stage, followed by one for the alpha test and fog.
+-using CombinerControls = std::array<s32, (6 * 3 + 1) * 4>;
++// Three ivec4s per TEV stage, then alpha/fog settings and an optional reflection row.
++using CombinerControls = std::array<s32, (6 * 3 + 2) * 4>;
+ CombinerControls MakeCombinerControls(const FSConfig& config);
+ std::string GenerateSharedFragmentShader(const FSConfig& config, const UserConfig& user,
+                                          const Profile& profile);
