@@ -109,10 +109,24 @@ fs.mkdirSync(output, { recursive: true });
 
     await frame.waitForFunction(() => window.Module?._get_current_frame_count?.() > 100,
       null, { timeout: 300000 });
+    if (process.env.WEBRCADE_TEST_SHADER_CACHE) {
+      const cache = fs.readFileSync(process.env.WEBRCADE_TEST_SHADER_CACHE).toString('base64');
+      await frame.evaluate(async (data) => {
+        const bytes = Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0));
+        await emulator.getStorage().put(emulator.shaderCacheKey(), bytes);
+      }, cache);
+      await page.reload();
+      await frame.waitForFunction(() => window.Module?._get_current_frame_count?.() > 100,
+        null, { timeout: 300000 });
+    }
     const yes = frame.getByText('Yes', { exact: true });
     if (await yes.count()) await yes.first().tap();
     const release = frame.locator('.release-screen-content');
     if (await release.isVisible()) await release.tap();
+    if (process.env.WEBRCADE_TEST_SHADER_CACHE) {
+      await frame.waitForFunction(() => Module.wrcShaders?.prewarmScanned, null, { timeout: 60000 });
+      assert((await snapshot()).shaders.rebuilt > 0, 'restored shader pairs were submitted');
+    }
     console.log('BOOT', JSON.stringify(await snapshot()));
     await frame.waitForTimeout(1000);
     const loadScene = async () => {

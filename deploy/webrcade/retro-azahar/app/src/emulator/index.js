@@ -41,7 +41,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-program-pairs-v25';
+const CORE_REVISION = '3ds-warm-links-v26';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is

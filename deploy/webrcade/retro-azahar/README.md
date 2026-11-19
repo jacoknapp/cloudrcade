@@ -237,10 +237,18 @@ The WebGL renderer shares a linked program across configurations that generate
 the same complete vertex and fragment shader text. Older shader caches can contain
 several IDs for one pair. The first ID is used when prewarming those records.
 
-Shader prewarming submits at most two programs per frame with eight outstanding
-compilations; completed programs free capacity without waiting for a draw. A required
-shader still finishes before its draw, and demand waits pause prewarming for two
-frames. Failure reporting and the shader-cache format remain unchanged.
+With `KHR_parallel_shader_compile`, the renderer submits up to two remembered
+programs per frame and tracks eight outstanding completions. On other WebGL2
+contexts it submits one remembered program at most once every 67 ms and polls
+a WebGL fence with a zero timeout to pace submissions. The renderer checks
+the link before the first draw that uses it. It reuses a rebuilt shader stage
+when its type and complete GLSL match. The existing shader cache supplies the program pairs.
+First encounters with previously unseen shaders can still hitch.
+
+To exercise a restored cache in the native browser regression, set
+`WEBRCADE_TEST_SHADER_CACHE` to the game's `programs.bin` fixture. Set
+`WEBRCADE_TEST_SYNC_SHADERS=1` to exercise the path without the parallel
+compile extension.
 
 The 3DS reader caches up to 64 pages of 256 KiB. Sparse misses fetch one page.
 When the game requests consecutive bytes, the reader groups missing pages into
