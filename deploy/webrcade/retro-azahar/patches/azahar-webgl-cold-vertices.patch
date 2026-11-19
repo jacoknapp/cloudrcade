@@ -52,7 +52,7 @@ index 1dd3dae..99c38c9 100644
          return false;
      }
 diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
-index 805707a..d2f09b5 100644
+index 805707a..38c7e53 100644
 --- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
 +++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
 @@ -1,5 +1,6 @@
@@ -170,29 +170,27 @@ index 805707a..d2f09b5 100644
  
  #ifdef __EMSCRIPTEN__
      const bool use_shared_combiners = UseSharedCombiners() != 0;
-+    const bool try_cpu_vertex =
-+        use_shared_combiners && !ShaderPopInEnabled() && !ProgramsLinkInBackground();
++    // With pop-in off, a cold stage or its first program link can block a draw.
++    const bool try_cpu_vertex = use_shared_combiners && !ShaderPopInEnabled();
      const u32 shared_context =
          use_shared_combiners && (ShaderPopInEnabled() || !ProgramsLinkInBackground()) ? SharedProgramContext() : 0;
      std::unordered_map<u64, u64> program_aliases;
-@@ -563,7 +602,15 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
+@@ -563,7 +602,13 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
      PicaVSConfig config{regs, setup};
      ExtraVSConfig extra = impl->CalcExtraConfig(config, accurate_mul);
  
 -    auto [hash, handle, result] = impl->programmable_vertex_shaders.Get(config, extra, setup);
 +    u32 small_draw = 0;
 +#ifdef __EMSCRIPTEN__
-+    // A triangle list finishes with an empty software primitive assembler, so
-+    // later draws can still choose their own vertex execution path.
-+    if (impl->try_cpu_vertex && regs.pipeline.num_vertices <= WasmColdVertices::MaxDraw &&
-+        regs.pipeline.triangle_topology == Pica::PipelineRegs::TriangleTopology::List)
++    if (impl->try_cpu_vertex && WasmColdVertices::EligibleDraw(
++            regs.pipeline.num_vertices, regs.pipeline.triangle_topology.Value()))
 +        small_draw = regs.pipeline.num_vertices;
 +#endif
 +    auto [hash, handle, result] = impl->programmable_vertex_shaders.Get(config, extra, setup, small_draw);
      if (handle == 0)
          return false;
      impl->current.vs = handle;
-@@ -585,6 +632,12 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
+@@ -585,6 +630,12 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
      return true;
  }
  
@@ -205,7 +203,7 @@ index 805707a..d2f09b5 100644
  void ShaderProgramManager::UseTrivialVertexShader() {
      impl->current.vs = impl->trivial_vertex_shader.Get();
      impl->current.vs_hash = 0;
-@@ -664,6 +717,7 @@ void ShaderProgramManager::RebuildRemembered() {
+@@ -664,6 +715,7 @@ void ShaderProgramManager::RebuildRemembered() {
      if (impl->separable) {
          return;
      }
@@ -260,10 +258,10 @@ index 75bb597..e6ce168 100644
  bool OwnsShader(GLuint shader);
 diff --git a/src/video_core/renderer_opengl/wasm_cold_vertices.h b/src/video_core/renderer_opengl/wasm_cold_vertices.h
 new file mode 100644
-index 0000000..8dda057
+index 0000000..0b14cf2
 --- /dev/null
 +++ b/src/video_core/renderer_opengl/wasm_cold_vertices.h
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,44 @@
 +// Copyright CloudRcade contributors
 +// Licensed under GPLv2 or any later version.
 +
@@ -277,6 +275,13 @@ index 0000000..8dda057
 +class WasmColdVertices {
 +public:
 +    static constexpr std::uint32_t MaxDraw = 64;
++
++    template <typename Topology>
++    static constexpr bool EligibleDraw(std::uint32_t count, Topology topology) {
++        // With geometry shaders off, both modes emit independent triples.
++        return count && count <= MaxDraw && count % 3 == 0 &&
++               (topology == Topology::List || topology == Topology::Shader);
++    }
 +
 +    // Both loop forms come from the PICA decompiler: guest LOOP and general
 +    // jumps. Their runtime cost cannot be bounded by the generated code size.

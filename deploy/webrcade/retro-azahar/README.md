@@ -457,9 +457,11 @@ subroutine addresses within an otherwise identical program. The compiler uses
 stable subroutine names so those programs can reuse a vertex stage. Existing
 shader caches retain their original source identities.
 
-With shader pop-in disabled, a recognized hardware GPU without parallel shader
-compilation can draw small triangle lists immediately using the PICA vertex
-interpreter and the normal fragment shader. This applies to newly encountered
+With shader pop-in disabled, a recognized hardware GPU can draw small triangle
+lists using the PICA vertex interpreter and the normal fragment shader. This
+avoids validating a new driver stage or waiting on its first program link.
+PICA shader-topology draws also qualify when geometry shading is disabled and
+they emit independent triangles. This applies to newly encountered
 vertex shaders with 16–48 KiB of generated source and no loops. The renderer
 flushes the index and vertex data before the CPU reads them. It limits CPU
 transformation to 64 vertices per draw, 768 per frame, and 8,192 per vertex

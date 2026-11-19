@@ -25,6 +25,19 @@ function testVfp() {
   execFileSync(binary, [], {stdio: 'inherit'});
 }
 
+function testVertexDraws() {
+  const azahar = path.join(root, 'azahar');
+  const binary = path.join(output, 'test_webrcade_3ds_vertex_draws');
+  execFileSync(process.env.CXX || 'c++', [
+    '-std=c++20', '-Wall', '-Wextra', '-Werror',
+    '-I' + path.join(azahar, 'src'), '-I' + path.join(azahar, 'externals/boost'),
+    '-I' + path.join(azahar, 'externals/fmt/include'),
+    path.join(__dirname, 'test_webrcade_3ds_vertex_draws.cpp'),
+    path.join(azahar, 'src/video_core/pica/primitive_assembly.cpp'), '-o', binary,
+  ], {stdio: 'inherit'});
+  execFileSync(binary, [], {stdio: 'inherit'});
+}
+
 try {
   for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops', 'test_webrcade_3ds_arm_loop']) {
     const binary = path.join(output, test);
@@ -40,4 +53,5 @@ try {
     execFileSync(binary, [], {stdio: 'inherit'});
   }
   testVfp();
+  testVertexDraws();
 } finally { fs.rmSync(output, {recursive:true, force:true}); }
