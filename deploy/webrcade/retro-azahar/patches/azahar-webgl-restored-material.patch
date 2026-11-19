@@ -1,0 +1,101 @@
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -299,6 +299,8 @@
+ };
+ struct MaterialVariant {
+     OGLProgram ready;
++    GLuint reused_shared = 0;
++    bool used_specialized = false;
+     u32 draws = 0;
+     bool shared_failed = false;
+     bool promotion_failed = false;
+@@ -306,6 +308,8 @@
+ struct SharedStage {
+     OGLShader shader;
+     std::size_t id = 0;
++    // Linked shared programs known to work with each exact vertex stage.
++    std::unordered_map<u32, GLuint> drawn_programs;
+ };
+ struct Material {
+     GLSL::CombinerControls controls{};
+@@ -313,6 +317,7 @@
+     OGLShader specialized;
+     bool restored = false;
+     SharedStage* family = nullptr;
++    std::size_t checked_families = 0;
+     std::size_t id = 0;
+     std::unordered_map<u32, MaterialVariant> vertices;
+ };
+@@ -363,12 +368,24 @@
+     auto [entry, fresh] = materials.try_emplace(config);
+     added = fresh;
+     Material& material = entry->second;
++    if (fresh) {
++        material.id = config.Hash();
++        material.specialized_source = GLSL::GenerateFragmentShader(config, user, profile);
++        material.specialized.handle = RememberedPrograms::RebuiltFragment(material.specialized_source);
++        material.restored = material.specialized.handle != 0;
++    }
++    if (material.restored && !material.family && !ProgramsLinkInBackground() &&
++        material.checked_families != shared_stages.size()) {
++        // A restored fragment can still be waiting on its first program link.
++        // Only consider shared code already present in this context.
++        material.checked_families = shared_stages.size();
++        const auto family = shared_stages.find(GLSL::GenerateSharedFragmentShader(config, user, profile));
++        if (family != shared_stages.end()) {
++            material.family = &family->second;
++            material.controls = GLSL::MakeCombinerControls(config);
++        }
++    }
+     if (!fresh) return material;
+-
+-    material.id = config.Hash();
+-    material.specialized_source = GLSL::GenerateFragmentShader(config, user, profile);
+-    material.specialized.handle = RememberedPrograms::RebuiltFragment(material.specialized_source);
+-    material.restored = material.specialized.handle != 0;
+     if (!material.restored) {
+         material.controls = GLSL::MakeCombinerControls(config);
+         auto [it, new_stage] = shared_stages.try_emplace(GLSL::GenerateSharedFragmentShader(config, user, profile));
+@@ -730,11 +747,33 @@
+             state.draw.shader_program = variant.ready.handle;
+             return true;
+         }
++        if (material->restored && material->family && vertex_id && !variant.used_specialized) {
++            if (!variant.reused_shared) {
++                const auto shared = material->family->drawn_programs.find(vertex_id);
++                if (shared != material->family->drawn_programs.end()) {
++                    const u64 id = RememberedPrograms::CanonicalProgramId(
++                        specific_id, impl->current.vs, material->specialized.handle);
++                    const auto exact = background_programs.find(id);
++                    if (exact == background_programs.end() || linking.contains(exact->second) ||
++                        exact->second == 0) {
++                        variant.reused_shared = shared->second;
++                    }
++                }
++            }
++            if (variant.reused_shared) {
++                impl->upload = material;
++                state.draw.shader_program = variant.reused_shared;
++                return true;
++            }
++        }
+         if (!material->restored && !variant.shared_failed && material->family->shader.handle) {
+             impl->current.fs = material->family->shader.handle;
+             impl->current.fs_hash = material->family->id;
+             if (ApplyStages(state, accurate_mul)) {
+                 impl->upload = material;
++                if (variant.draws == 0 && vertex_id && !ProgramsLinkInBackground()) {
++                    material->family->drawn_programs.try_emplace(vertex_id, state.draw.shader_program);
++                }
+                 if (variant.draws < 32) ++variant.draws;
+                 // A speculative replacement can wait for a driver compile even many
+                 // frames after linking. Keep the working shared program on drivers
+@@ -753,6 +792,8 @@
+             material->specialized.handle = LoadShader(material->specialized_source, GL_FRAGMENT_SHADER, "");
+         impl->current.fs = material->specialized.handle;
+         impl->current.fs_hash = material->id;
++        variant.used_specialized = ApplyStages(state, accurate_mul);
++        return variant.used_specialized;
+     }
+ #endif
+     return ApplyStages(state, accurate_mul);
