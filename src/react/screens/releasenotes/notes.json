@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.1.16",
+    "date": "November 19, 2026",
+    "title": "3DS shader pop-in and smoother saves",
+    "changes": [
+      "Settings → Core Settings now includes 3DS shader pop-in. Turn it on and relaunch a 3DS game to let objects or effects appear late while new shaders compile. It starts off.",
+      "The 3DS core runs common memory operations and short CPU loops faster, including during in-game saves. Returning sessions can reuse shaders already prepared for battle effects.",
+      "Saving from the 3DS pause menu does less work when game files are unchanged and builds save-state archives in a background worker when available."
+    ]
+  },
+  {
     "version": "3.1.15",
     "date": "November 19, 2026",
     "title": "Smoother 3DS trainer battle transitions",
