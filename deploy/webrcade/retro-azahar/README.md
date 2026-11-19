@@ -419,8 +419,12 @@ synchronous programs across state loads, and retries unchanged shader caches
 after failed uploads. Save metadata is heap-owned and snapshot creation runs once
 instead of twice. Temporary state-buffer and shader-string allocations are reduced.
 
-On a cold shader cache, ordinary 2D texture combiners can share a WebGL fragment
-program. Each draw supplies the six original combiner stages, its alpha comparison
+Software WebGL renderers use specialized fragment shaders from the first draw.
+They also skip shared combiner programs when warming an existing shader cache.
+An unidentified renderer uses the same specialized path.
+
+On a recognized hardware GPU with a cold shader cache, ordinary 2D texture
+combiners can share a WebGL fragment program. Each draw supplies the six original combiner stages, its alpha comparison
 and its fog settings as uniforms. Materials that differ only in these settings
 can use the same fragment program on their first draw. After
 new materials stop arriving, the renderer can compile and link a specialized

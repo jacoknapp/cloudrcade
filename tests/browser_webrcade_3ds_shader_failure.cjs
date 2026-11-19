@@ -15,18 +15,23 @@ fs.mkdirSync(output, { recursive: true });
   const engine = process.argv[2] || 'webkit';
   const fail = process.env.WEBRCADE_TEST_REJECT_SHADERS !== '0';
   const synchronous = process.env.WEBRCADE_TEST_SYNC_SHADERS === '1';
+  const hardware = process.env.WEBRCADE_TEST_HARDWARE_GPU === '1';
   const browser = await (engine === 'webkit' ? webkit : chromium).launch({
     headless: true,
     ...(engine === 'chromium' ? {
       ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}),
-      args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-    } : {}),
+      args: ['--no-sandbox', ...(hardware ?
+        ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--disable-vulkan-surface'] :
+        ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'])],
+    } : { executablePath: process.env.WEBRCADE_TEST_WEBKIT_PATH }),
   });
   let progress;
   try {
-    const context = await browser.newContext({ ...devices['iPhone 14 Pro'], serviceWorkers: 'block' });
+    const context = await browser.newContext({
+      ...devices['iPhone 14 Pro'], serviceWorkers: 'block', permissions: ['screen-wake-lock'],
+    });
     if (process.env.WEBRCADE_TEST_CORE_DIR) {
-      await context.route('**/js/iphone-*/azahar_libretro.*', (route) => route.fulfill({
+      await context.route('**/js/*/azahar_libretro.{js,wasm}', (route) => route.fulfill({
         path: path.join(process.env.WEBRCADE_TEST_CORE_DIR,
           new URL(route.request().url()).pathname.split('/').pop()),
         headers: { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' },
@@ -34,7 +39,7 @@ fs.mkdirSync(output, { recursive: true });
     }
     await context.addInitScript(({ fail, synchronous }) => {
       const probe = window.shaderFailureProbe = {
-        rejected: 0, invalidUses: 0, links: 0, gameLinks: 0, rejectedRelinks: 0, liveRelinks: 0,
+        sharedStages: 0, specializedStages: 0, rejected: 0, invalidUses: 0, links: 0, gameLinks: 0, rejectedRelinks: 0, liveRelinks: 0,
       };
       const statuses = new WeakMap();
       const sources = new WeakMap();
@@ -51,6 +56,10 @@ fs.mkdirSync(output, { recursive: true });
       proto.shaderSource = function (shader, source) {
         const stage = sources.get(shader);
         if (stage) stage.source = source;
+        if (stage?.type === this.FRAGMENT_SHADER && source.includes('uniform fs_data')) {
+          if (source.includes('uniform highp ivec4 tev_control[')) probe.sharedStages++;
+          else probe.specializedStages++;
+        }
         // PICA-generated GPU vertex programs; the trivial CPU vertex shader is valid.
         if (fail && source.includes('void EmitVtx()') && source.includes('bool sub_')) {
           probe.rejected++;
@@ -157,6 +166,7 @@ fs.mkdirSync(output, { recursive: true });
       })),
       shaders: Module.wrcShaders,
       hybrid: Module.wrcHybrid,
+      sharedEnabled: Module.wrcSharedCombiner,
     }));
 
     await frame.waitForFunction(() => window.Module?._get_current_frame_count?.() > 100,
@@ -210,8 +220,14 @@ fs.mkdirSync(output, { recursive: true });
       assert.equal(settled.failures.length, 0, 'normal shaders link successfully');
       assert(settled.native.gpu > 0, 'normal draws retain GPU vertex processing');
       if (process.env.WEBRCADE_TEST_COLD_COMBINERS === '1') {
+        assert.equal(settled.sharedEnabled, true);
+        assert(settled.sharedStages > 0, 'driver received shared GLSL');
         assert(settled.hybrid?.families > 0, 'real draws compiled shared fragment shaders');
         assert(settled.hybrid.materials > settled.hybrid.families, 'distinct materials share a fragment shader');
+      } else if (process.env.WEBRCADE_TEST_COLD_COMBINERS === '0') {
+        assert.equal(settled.sharedEnabled, false);
+        assert.equal(settled.sharedStages, 0, 'driver never receives a shared fragment shader');
+        assert(settled.specializedStages > 0, 'driver received specialized material shaders');
       }
     }
 

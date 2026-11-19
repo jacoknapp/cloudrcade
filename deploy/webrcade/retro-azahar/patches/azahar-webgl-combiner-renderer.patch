@@ -1,0 +1,136 @@
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -300,11 +300,34 @@
+ };
+ std::unordered_map<GLuint, ControlBinding> control_bindings;
+ 
++// Identify the active WebGL context once per manager, before compiling a material.
++EM_JS(int, UseSharedCombiners, (), {
++    const gl = Module.ctx;
++    let enabled = false;
++    try {
++        if (gl && !Module.wrcShaderWait) {
++            const debug = gl.getExtension('WEBGL_debug_renderer_info');
++            const renderer = String(gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
++            const software = /swiftshader|llvmpipe|softpipe|lavapipe|swrast|software|basic render|(^|[^a-z])warp([^a-z]|$)|apple.*renderer float/i;
++            if (!software.test(renderer)) {
++                // WebKit can mask even a Linux software device as "Apple GPU".
++                const appleMobile = /^(iPhone|iPad|iPod)$/.test(navigator.platform) ||
++                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
++                enabled = /nvidia|geforce|quadro|radeon|(^|[^a-z])(amd|ati|intel)([^a-z]|$)|adreno|mali|powervr|videocore|vivante|apple [am][0-9]/i.test(renderer) ||
++                    (renderer === 'Apple GPU' && appleMobile);
++            }
++        }
++    } catch (e) {
++        // Browsers may restrict access to renderer information.
++    }
++    Module.wrcSharedCombiner = enabled;
++    return enabled ? 1 : 0;
++});
++
+ bool CanShare(const FSConfig& config, const Pica::Shader::UserConfig& user) {
+     using Texture = Pica::TexturingRegs::TextureConfig;
+-    static const bool enabled = !EM_ASM_INT({ return Module.wrcShaderWait ? 1 : 0; });
+     const auto type = config.texture.texture0_type.Value();
+-    return enabled && user.IsCacheable() && !config.proctex.enable && !config.framebuffer.shadow_rendering &&
++    return user.IsCacheable() && !config.proctex.enable && !config.framebuffer.shadow_rendering &&
+            config.framebuffer.alpha_test_func != Pica::FramebufferRegs::CompareFunc::Never &&
+            config.texture.fog_mode != Pica::TexturingRegs::FogMode::Gas &&
+            (type == Texture::Texture2D || type == Texture::Disabled);
+@@ -392,6 +415,7 @@
+     };
+ 
+ #ifdef __EMSCRIPTEN__
++    const bool use_shared_combiners = UseSharedCombiners() != 0;
+     std::unordered_map<u64, u64> program_aliases;
+     Material* material = nullptr;
+     const Material* upload = nullptr;
+@@ -513,7 +537,7 @@
+     const FSConfig fs_config{regs};
+ #ifdef __EMSCRIPTEN__
+     impl->material = nullptr;
+-    if (!impl->separable && CanShare(fs_config, user)) {
++    if (impl->use_shared_combiners && !impl->separable && CanShare(fs_config, user)) {
+         bool fresh;
+         impl->material = &GetMaterial(fs_config, user, impl->profile, fresh);
+         if (fresh) impl->last_discovery = impl->frame;
+@@ -639,8 +663,7 @@
+         if (failed_programs.contains(id) || background_programs.contains(id)) {
+             continue;
+         }
+-        RememberedPrograms::At(index, entry);
+-        if (entry.vertex == 0) {
++        if (!RememberedPrograms::At(index, impl->use_shared_combiners, entry)) {
+             continue;
+         }
+         GLuint& program = background_programs[id];
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -137,6 +137,10 @@
+ struct Source {
+     GLenum type;
+     const ShaderTexts::value_type* text;
++    // The array size changed between generator versions. Its declaration prefix
++    // identifies shared fragment stages in both old and current cache files.
++    bool shared_combiner = type == GL_FRAGMENT_SHADER &&
++                           text->first.find("uniform highp ivec4 tev_control[") != std::string::npos;
+ };
+ struct Record {
+     u64 id, vertex, fragment;
+@@ -201,7 +205,7 @@
+                 if (std::fread(text.data(), 1, length, file) != length) {
+                     break;
+                 }
+-                state.sources[hash] = Source{static_cast<GLenum>(type), Intern(state, std::move(text))};
++                state.sources.insert_or_assign(hash, Source{static_cast<GLenum>(type), Intern(state, std::move(text))});
+                 state.shaders_on_file.insert(hash);
+             } else if (kind == 'P') {
+                 Record record;
+@@ -333,7 +337,7 @@
+     }
+     // Kept as well: the game's own shader objects go when a save state is
+     // loaded, and the programs are then rebuilt from this text.
+-    state.sources[hash] = Source{type, interned};
++    state.sources.insert_or_assign(hash, Source{type, interned});
+     Write(state.file, u8{'S'});
+     Write(state.file, hash);
+     Write(state.file, static_cast<u32>(type));
+@@ -379,17 +383,18 @@
+     return true;
+ }
+ 
+-bool At(std::size_t index, Entry& entry) {
++bool At(std::size_t index, bool allow_shared, Entry& entry) {
+     State& state = Get();
+     if (index >= state.records.size()) {
+         return false;
+     }
+     const Record record = state.records[index];
++    const auto fragment = state.sources.find(record.fragment);
++    if (fragment == state.sources.end() || (!allow_shared && fragment->second.shared_combiner)) {
++        return false;
++    }
+     entry = Entry{record.id, Rebuild(state, record.vertex), Rebuild(state, record.fragment)};
+-    if (entry.fragment == 0) {
+-        entry.vertex = 0;
+-    }
+-    return true;
++    return entry.vertex != 0 && entry.fragment != 0;
+ }
+ } // namespace RememberedPrograms
+ 
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -53,10 +53,10 @@
+ void NoteShader(GLuint shader, GLenum type, std::string_view preamble, std::string_view source);
+ u64 CanonicalProgramId(u64 id, GLuint vertex, GLuint fragment);
+ void NoteProgram(u64 id, GLuint vertex, GLuint fragment);
+-/// False past the end of the list. `entry.vertex` is 0 for a record that cannot be rebuilt.
+ /// Reads only the pair identifier, without compiling duplicate shader objects.
+ bool IdAt(std::size_t index, u64& id);
+-bool At(std::size_t index, Entry& entry);
++/// Rebuild the pair only if it can be used with the active renderer.
++bool At(std::size_t index, bool allow_shared, Entry& entry);
+ } // namespace RememberedPrograms
+ 
+ /// Non-blocking: has the program started by BeginProgram() finished linking?
