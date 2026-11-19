@@ -6,11 +6,14 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'webrcade-cache-test-'));
 try {
   for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops']) {
     const binary = path.join(output, test);
+    const armSources = test === 'test_webrcade_3ds_arm_ops'
+      ? ['-D__EMSCRIPTEN__', path.join(root, 'azahar/src/core/arm/dyncom/arm_dyncom_dec.cpp')]
+      : [];
     execFileSync(process.env.CXX || 'c++', [
       '-std=c++20', '-Wall', '-Wextra', '-Werror',
       '-I' + path.join(root, 'azahar/src'),
       '-I' + path.join(root, 'azahar/externals/dynarmic/externals/robin-map/include'),
-      path.join(__dirname, test + '.cpp'), '-o', binary,
+      ...armSources, path.join(__dirname, test + '.cpp'), '-o', binary,
     ], {stdio: 'inherit'});
     execFileSync(binary, [], {stdio: 'inherit'});
   }

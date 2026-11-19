@@ -1,0 +1,123 @@
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -715,7 +715,8 @@
+     auto& binding = it->second;
+     if (fresh) binding.location = glGetUniformLocation(program, "tev_control[0]");
+     if (binding.last != impl->upload) {
+-        glUniform4iv(binding.location, 18, impl->upload->controls.data());
++        const auto& controls = impl->upload->controls;
++        glUniform4iv(binding.location, controls.size() / 4, controls.data());
+         binding.last = impl->upload;
+     }
+ }
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.h
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.h
+@@ -27,7 +27,7 @@
+     void WriteLighting();
+ 
+     /// Writes the code to emulate fog
+-    void WriteFog();
++    void WriteFog(std::string_view depth);
+ 
+     /// Writes the code to emulate gas rendering
+     void WriteGas();
+@@ -93,8 +93,8 @@
+ };
+ 
+ #ifdef __EMSCRIPTEN__
+-// Three ivec4 uniforms per stage: RGB operands/op, alpha operands/op, scales and buffer writes.
+-using CombinerControls = std::array<s32, 6 * 12>;
++// Three ivec4s per TEV stage, followed by one for the alpha test and fog.
++using CombinerControls = std::array<s32, (6 * 3 + 1) * 4>;
+ CombinerControls MakeCombinerControls(const FSConfig& config);
+ std::string GenerateSharedFragmentShader(const FSConfig& config, const UserConfig& user,
+                                          const Profile& profile);
+--- a/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
++++ b/src/video_core/shader/generator/glsl_fs_shader_gen.cpp
+@@ -171,12 +171,16 @@
+         row[10] = config.TevStageUpdatesCombinerBufferColor(i);
+         row[11] = config.TevStageUpdatesCombinerBufferAlpha(i);
+     }
++    auto* effects = controls.data() + controls.size() - 4;
++    effects[0] = static_cast<s32>(config.framebuffer.alpha_test_func.Value());
++    effects[1] = config.texture.fog_mode == TexturingRegs::FogMode::Fog;
++    effects[2] = config.texture.fog_flip;
+     return controls;
+ }
+ 
+ // Source, modifier and operation numbers below are the native TevStageConfig enums.
+ static constexpr std::string_view SharedFunctions = R"(
+-uniform highp ivec4 tev_control[18];
++uniform highp ivec4 tev_control[19];
+ vec4 tevSource(int code, vec4 primary, vec4 diffuse, vec4 specular, vec4 t0, vec4 t1,
+                vec4 t2, vec4 buf, vec4 constantColor, vec4 previous) {
+     switch (code & 15) {
+@@ -280,6 +284,16 @@
+ #ifdef __EMSCRIPTEN__
+     if (shared_combiner) {
+         out += SharedStages;
++        // The shared program uses the same integer alpha predicates as a specialized material.
++        out += "switch (tev_control[18].x) {\n";
++        for (u32 op = 0; op <= static_cast<u32>(FramebufferRegs::CompareFunc::GreaterThanOrEqual); ++op) {
++            out += fmt::format("case {}: ", op);
++            WriteAlphaTestCondition(static_cast<FramebufferRegs::CompareFunc>(op));
++            out += "break;\n";
++        }
++        out += "}\nif (tev_control[18].y != 0) {\n";
++        WriteFog("(tev_control[18].z != 0 ? 1.0 - depth : depth)");
++        out += "}\n";
+     } else
+ #endif
+     {
+@@ -295,22 +309,19 @@
+         for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
+             WriteTevStage(index);
+         }
+-    }
+-
+-    // Append the alpha test condition
+-    WriteAlphaTestCondition(config.framebuffer.alpha_test_func);
+-
+-    // Emulate the fog
+-    switch (config.texture.fog_mode) {
+-    case TexturingRegs::FogMode::Fog:
+-        WriteFog();
+-        break;
+-    case TexturingRegs::FogMode::Gas:
+-        WriteGas();
+-        // Return early due to unimplemented gas mode
+-        return out;
+-    default:
+-        break;
++
++        WriteAlphaTestCondition(config.framebuffer.alpha_test_func);
++        switch (config.texture.fog_mode) {
++        case TexturingRegs::FogMode::Fog:
++            WriteFog(config.texture.fog_flip ? "(1.0 - float(depth))" : "depth");
++            break;
++        case TexturingRegs::FogMode::Gas:
++            WriteGas();
++            // Return early due to unimplemented gas mode
++            return out;
++        default:
++            break;
++        }
+     }
+ 
+     if (config.framebuffer.shadow_rendering) {
+@@ -956,13 +967,8 @@
+            "secondary_fragment_color = clamp(specular_sum, vec4(0.0), vec4(1.0));\n";
+ }
+ 
+-void FragmentModule::WriteFog() {
+-    // Get index into fog LUT
+-    if (config.texture.fog_flip) {
+-        out += "float fog_index = (1.0 - float(depth)) * 128.0;\n";
+-    } else {
+-        out += "float fog_index = depth * 128.0;\n";
+-    }
++void FragmentModule::WriteFog(std::string_view depth) {
++    out += fmt::format("float fog_index = {} * 128.0;\n", depth);
+ 
+     // Generate clamped fog factor from LUT for given fog index
+     out += "float fog_i = clamp(floor(fog_index), 0.0, 127.0);\n"

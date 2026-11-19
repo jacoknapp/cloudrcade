@@ -60,6 +60,18 @@ int main() {
     }
     // Decoded entries must not survive any arena/process invalidation.
     cache.Reset(); assert(!cache.Find(29999, offset));
+    // A batch can invalidate code repeatedly without another decoded block.
+    // Rewind even an unfinished allocation that has no entry in the map.
+    for (unsigned relocation = 0; relocation < 32; ++relocation) {
+        if (relocation == 16) top = 48;
+        cache.Reset();
+        assert(top == 0 && cache.Blocks().empty());
+        assert(!cache.Find(29999, offset));
+    }
+    cache.Store(29999, 0);
+    assert(cache.Find(29999, offset) && offset == 0);
+    cache.Reset();
+    assert(!cache.Find(29999, offset));
     cache.Store(0x1000, 0); top = 769; cache.ReserveBlock(256);
     assert(!cache.Find(0x1000, offset));
     cache.Store(0x1000, 0); cache.SelectPageTable(std::make_shared<Memory::PageTable>());

@@ -33,13 +33,24 @@ fs.mkdirSync(output, { recursive: true });
       }));
     }
     await context.addInitScript(({ fail, synchronous }) => {
-      const probe = window.shaderFailureProbe = { rejected: 0, invalidUses: 0, links: 0, gameLinks: 0 };
+      const probe = window.shaderFailureProbe = {
+        rejected: 0, invalidUses: 0, links: 0, gameLinks: 0, rejectedRelinks: 0, liveRelinks: 0,
+      };
       const statuses = new WeakMap();
       const sources = new WeakMap();
+      const contexts = new WeakMap();
+      const programs = new WeakMap();
       const proto = WebGL2RenderingContext.prototype;
-      const { shaderSource, getProgramParameter, useProgram, linkProgram, getExtension } = proto;
+      const { createShader, shaderSource, getProgramParameter, useProgram, linkProgram, deleteProgram,
+        getExtension } = proto;
+      proto.createShader = function (type) {
+        const shader = createShader.call(this, type);
+        if (shader) sources.set(shader, { type });
+        return shader;
+      };
       proto.shaderSource = function (shader, source) {
-        sources.set(shader, source);
+        const stage = sources.get(shader);
+        if (stage) stage.source = source;
         // PICA-generated GPU vertex programs; the trivial CPU vertex shader is valid.
         if (fail && source.includes('void EmitVtx()') && source.includes('bool sub_')) {
           probe.rejected++;
@@ -49,17 +60,57 @@ fs.mkdirSync(output, { recursive: true });
       };
       proto.getProgramParameter = function (program, name) {
         const result = getProgramParameter.call(this, program, name);
-        if (name === this.LINK_STATUS) statuses.set(program, result);
+        if (name === this.LINK_STATUS) {
+          statuses.set(program, result);
+          const observed = programs.get(program);
+          if (observed) {
+            const { state, key } = observed;
+            if (result) {
+              if (!state.accepted.has(key)) state.accepted.set(key, new Set());
+              state.accepted.get(key).add(program);
+            } else {
+              state.rejected.add(key);
+            }
+          }
+        }
         return result;
       };
       proto.useProgram = function (program) {
-        if (program && statuses.get(program) === false) probe.invalidUses++;
+        const observed = programs.get(program);
+        if (statuses.get(program) === false || observed?.state.rejected.has(observed.key))
+          probe.invalidUses++;
         return useProgram.call(this, program);
+      };
+      function forgetProgram(program) {
+        const observed = programs.get(program);
+        if (!observed) return;
+        const { state, key } = observed;
+        const active = state.accepted.get(key);
+        if (active?.delete(program) && active.size === 0) state.accepted.delete(key);
+        programs.delete(program);
+      }
+      proto.deleteProgram = function (program) {
+        forgetProgram(program);
+        return deleteProgram.call(this, program);
       };
       proto.linkProgram = function (program) {
         probe.links++;
-        if ((this.getAttachedShaders(program) || []).some((shader) =>
-          sources.get(shader)?.includes('uniform fs_data'))) probe.gameLinks++;
+        const stages = (this.getAttachedShaders(program) || []).map((shader) => sources.get(shader));
+        if (stages.some((stage) => stage?.source?.includes('uniform fs_data'))) {
+          probe.gameLinks++;
+          if (stages.every((stage) => stage?.source !== undefined)) {
+            // Match complete original stage text and type across shader object recreation.
+            const key = JSON.stringify(stages.sort((a, b) => a.type - b.type)
+              .map(({ type, source }) => [type, source]));
+            if (!contexts.has(this)) contexts.set(this, { accepted: new Map(), rejected: new Set() });
+            const state = contexts.get(this);
+            if (state.rejected.has(key)) probe.rejectedRelinks++;
+            if (state.accepted.has(key)) probe.liveRelinks++;
+            forgetProgram(program);
+            programs.set(program, { state, key });
+          }
+        }
+        statuses.delete(program);
         return linkProgram.call(this, program);
       };
       proto.getExtension = function (name) {
@@ -148,6 +199,7 @@ fs.mkdirSync(output, { recursive: true });
     const settled = await snapshot();
     console.log('SETTLED', JSON.stringify(settled));
     assert.equal(settled.invalidUses, 0, 'no failed program is ever bound');
+    assert.equal(settled.rejectedRelinks, 0, 'no rejected shader pair is submitted again');
     if (fail) {
       assert(settled.rejected > 0, 'fault injection reached real PICA vertex shaders');
       assert(settled.native.failed > 0, 'failed GPU draws reached CPU fallback');
@@ -167,13 +219,17 @@ fs.mkdirSync(output, { recursive: true });
       settled.frames, { timeout: 300000 });
     const continued = await snapshot();
     if (process.env.WEBRCADE_TEST_STATE) {
-      // A steady scene can still finish promotions for frequently used materials.
-      // Only one extra link submission may be awaiting validation at a time.
       function checkReuse(before, after) {
-        const promoted = (after.hybrid?.promotions || 0) - (before.hybrid?.promotions || 0);
-        const pending = after.hybrid && !fail ? 1 : 0;
-        assert(after.gameLinks - before.gameLinks <= promoted + pending,
-          'repeated draws reuse accepted and rejected shader pairs');
+        assert.equal(after.rejectedRelinks, 0, 'rejected shader pairs stay rejected across restore');
+        assert.equal(after.liveRelinks, before.liveRelinks, 'repeated draws reuse live linked programs');
+        // The CPU fallback also promotes materials. Restore can discard one pending
+        // promotion and retry that pair, so compare live and rejected pairs directly.
+        if (!fail) {
+          const promoted = (after.hybrid?.promotions || 0) - (before.hybrid?.promotions || 0);
+          const pending = after.hybrid ? 1 : 0;
+          assert(after.gameLinks - before.gameLinks <= promoted + pending,
+            'repeated draws only submit new promotions');
+        }
       }
       checkReuse(settled, continued);
       await loadScene();

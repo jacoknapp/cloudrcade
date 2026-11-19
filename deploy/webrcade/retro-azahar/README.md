@@ -212,6 +212,8 @@ unchanged at 100%. The interpreter
 now retains decoded blocks across thread switches within the same process, sharing
 the existing bounded 125 MiB translation arena across emulated CPU cores. It clears
 all block offsets together on code invalidation, process changes or arena rollover.
+During module relocation, repeated invalidations of an empty cache rewind the
+arena directly. The first invalidation still clears every cached block.
 This relies on the core's single-threaded CPU scheduler; filesystem workers do not
 execute guest CPU instructions.
 
@@ -231,7 +233,11 @@ The browser interpreter predecodes common unconditional ARM adds, subtracts,
 compares, moves and immediate-offset memory transfers into compact records.
 Each record consumes one guest instruction and calls the normal memory accessors.
 Conditional execution, PC operands, shifted registers, address writeback and
-Thumb instructions continue through the existing handlers.
+Thumb instructions continue through the existing handlers. The Wasm build uses
+a four-byte instruction header and word-aligned records. It can advance through
+a run of register operations within the current instruction budget, ending the
+run at the first memory access. Debugger and single-step execution retain
+individual instruction boundaries.
 
 The WebGL renderer shares a linked program across configurations that generate
 the same complete vertex and fragment shader text. Older shader caches can contain
@@ -414,7 +420,9 @@ after failed uploads. Save metadata is heap-owned and snapshot creation runs onc
 instead of twice. Temporary state-buffer and shader-string allocations are reduced.
 
 On a cold shader cache, ordinary 2D texture combiners can share a WebGL fragment
-program. Each draw supplies the six original combiner stages as uniforms. After
+program. Each draw supplies the six original combiner stages, its alpha comparison
+and its fog settings as uniforms. Materials that differ only in these settings
+can use the same fragment program on their first draw. After
 new materials stop arriving, the renderer can compile and link a specialized
 program for a frequently drawn material and use it on subsequent draws.
 The build cleans its patch-created header so repeated builds apply cleanly.

@@ -1,4 +1,6 @@
 // Compare compact ARM operations with a scalar reference and observable memory callbacks.
+#include "core/arm/dyncom/arm_dyncom_dec.h"
+#include "core/arm/dyncom/arm_dyncom_trans.h"
 #include "core/arm/dyncom/wasm_arm_ops.h"
 #include <array>
 #include <cassert>
@@ -35,6 +37,8 @@ struct Cpu {
 void Compare(unsigned word, Cpu before) {
     WasmArm::Instruction inst;
     assert(WasmArm::Decode(word, inst));
+    const bool register_only = !(word & (1u << 26));
+    assert(WasmArm::IsRegisterOperation(inst.operation) == register_only);
     Cpu actual = before;
     WasmArm::Execute(actual, inst);
     const unsigned rd = (word >> 12) & 15, rn = (word >> 16) & 15;
@@ -77,6 +81,34 @@ void Compare(unsigned word, Cpu before) {
 }
 
 int main() {
+    // An empty payload still occupies one byte. The next instruction may
+    // carry an addressing function pointer, including on wider host builds.
+    static_assert(alignof(arm_inst) >= alignof(ldst_inst));
+    static_assert(offsetof(arm_inst, component) % alignof(ldst_inst) == 0);
+    for (auto payload : {sizeof(clrex_inst), sizeof(ldc_inst), sizeof(stc_inst),
+                         sizeof(pld_inst), sizeof(WasmArm::Instruction), sizeof(ldst_inst)}) {
+        const auto size = sizeof(arm_inst) + payload;
+        const auto stride = DyncomRecordSize(size);
+        assert(stride >= size && stride - size < alignof(arm_inst));
+        assert(stride % alignof(arm_inst) == 0);
+    }
+
+    // Decode both branch forms under every normal ARM predicate. Encoding
+    // condition 15 in this space selects a different instruction (BLX).
+    for (unsigned condition = 0; condition < 15; ++condition) {
+        for (unsigned form : {0x0a000000u, 0x0b000000u}) {
+            for (unsigned offset : {0u, 0x7fffffu, 0x800000u, 0xffffffu}) {
+                int index = -1;
+                const auto word = condition << 28 | form | offset;
+                assert(DecodeARMInstruction(word, &index) == ARMDecodeStatus::SUCCESS);
+                assert(static_cast<unsigned>(index) == WasmArm::BranchIndex);
+            }
+        }
+    }
+    int blx = -1;
+    assert(DecodeARMInstruction(0xfa000000, &blx) == ARMDecodeStatus::SUCCESS);
+    assert(static_cast<unsigned>(blx) != WasmArm::BranchIndex);
+
     Cpu cpu;
     std::mt19937 rng(0x3d5);
     for (int i = 0; i < 8192; ++i) {

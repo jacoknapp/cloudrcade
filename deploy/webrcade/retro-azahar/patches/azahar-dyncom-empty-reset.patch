@@ -1,0 +1,17 @@
+--- a/src/core/arm/dyncom/wasm_translation_cache.h
++++ b/src/core/arm/dyncom/wasm_translation_cache.h
+@@ -17,8 +17,12 @@
+         : arena_top(arena_top_), capacity(capacity_) { blocks.max_load_factor(0.75f); }
+ 
+     void Reset() {
+-        blocks.clear();
+-        recent.fill({});
++        // Recent entries only come from blocks. Relocations can invalidate an
++        // already empty cache thousands of times before guest code runs again.
++        if (!blocks.empty()) {
++            blocks.clear();
++            recent.fill({});
++        }
+         arena_top = 0;
+     }
+ 

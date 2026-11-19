@@ -1,0 +1,238 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -869,8 +869,25 @@
+     u32 phys_addr = addr;
+     u32 pc_start = GetDyncomInstructionCacheKey(cpu);
+ 
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    arm_inst* run_start = nullptr;
++#endif
+     while (ret == TransExtData::NON_BRANCH) {
+         u32 inst_size = InterpreterTranslateInstruction(cpu, phys_addr, inst_base);
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++        if (inst_base->idx == WasmArm::DispatchIndex) {
++            if (run_start) {
++                ++run_start->run_length;
++            } else {
++                run_start = inst_base;
++            }
++            const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
++            if (!WasmArm::IsRegisterOperation(inst.operation) || run_start->run_length == 255)
++                run_start = nullptr;
++        } else {
++            run_start = nullptr;
++        }
++#endif
+         phys_addr += inst_size;
+ 
+         if ((phys_addr & 0xfff) == 0) {
+@@ -992,7 +1009,7 @@
+         goto DISPATCH;                                                                             \
+     inst_base = (arm_inst*)&trans_cache_buf[ptr]
+ 
+-#define INC_PC(l) ptr += sizeof(arm_inst) + l
++#define INC_PC(l) ptr += DyncomRecordSize(sizeof(arm_inst) + (l))
+ #define INC_PC_STUB ptr += sizeof(arm_inst)
+ 
+ #ifdef ANDROID
+@@ -1673,6 +1690,7 @@
+ #endif
+     };
+ #ifdef __EMSCRIPTEN__
++    static_assert(WasmArm::DispatchIndex <= UINT8_MAX);
+     static_assert(sizeof(InstLabel) / sizeof(InstLabel[0]) == WasmArm::DispatchIndex + 1);
+ #endif
+ #endif
+@@ -1719,6 +1737,22 @@
+ }
+ #ifdef __EMSCRIPTEN__
+ WASM_ARM_INST: {
++#if defined(HAVE_LIBRETRO)
++    const unsigned extra = inst_base->run_length - 1;
++    // libretro processes debugger packets and settings between CPU slices. A
++    // register-only prefix cannot observe PC, change the budget, or call out.
++    // Keep single-instruction dispatch for breakpoints and short slices.
++    if (extra && extra <= cpu->NumInstrsToExecute - num_instrs && !GDBStub::IsServerEnabled()) {
++        cpu->Reg[15] += 4 * extra;
++        num_instrs += extra;
++        for (unsigned i = 0; i < extra; ++i) {
++            const auto& reg = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
++            WasmArm::ExecuteRegister(*cpu, reg);
++            INC_PC(sizeof(reg));
++            inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
++        }
++    }
++#endif
+     const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
+     WasmArm::Execute(*cpu, inst);
+     cpu->Reg[15] += 4;
+@@ -1727,6 +1761,8 @@
+     BEGIN_INSTRUCTION;
+     if (inst_base->idx == WasmArm::DispatchIndex)
+         goto WASM_ARM_INST;
++    if (inst_base->idx == WasmArm::BranchIndex)
++        goto BBL_INST;
+     goto* InstLabel[inst_base->idx];
+ }
+ #endif
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -10,7 +10,7 @@
+ #include "core/arm/skyeye_common/armsupp.h"
+ #include "core/arm/skyeye_common/vfp/vfp.h"
+ 
+-char trans_cache_buf[TRANS_CACHE_SIZE];
++alignas(arm_inst) char trans_cache_buf[TRANS_CACHE_SIZE];
+ size_t trans_cache_buf_top = 0;
+ 
+ #ifdef __EMSCRIPTEN__
+@@ -63,7 +63,7 @@
+ 
+ static void* AllocBuffer(std::size_t size) {
+     std::size_t start = trans_cache_buf_top;
+-    trans_cache_buf_top += size;
++    trans_cache_buf_top += DyncomRecordSize(size);
+     ASSERT_MSG(trans_cache_buf_top <= TRANS_CACHE_SIZE, "Translation cache is full!");
+     return static_cast<void*>(&trans_cache_buf[start]);
+ }
+@@ -75,7 +75,7 @@
+         return nullptr;
+     auto* entry = static_cast<arm_inst*>(AllocBuffer(sizeof(arm_inst) + sizeof(instruction)));
+     entry->idx = WasmArm::DispatchIndex;
+-    entry->cond = ConditionCode::AL;
++    entry->run_length = 1;
+     entry->br = TransExtData::NON_BRANCH;
+     *reinterpret_cast<WasmArm::Instruction*>(entry->component) = instruction;
+     return entry;
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.h b/src/core/arm/dyncom/arm_dyncom_trans.h
+--- a/src/core/arm/dyncom/arm_dyncom_trans.h
++++ b/src/core/arm/dyncom/arm_dyncom_trans.h
+@@ -11,7 +11,13 @@
+ struct ARMul_State;
+ typedef unsigned int (*shtop_fp_t)(ARMul_State* cpu, unsigned int sht_oper);
+ 
+-enum class TransExtData {
++#ifdef __EMSCRIPTEN__
++using TransFlags = u16;
++#else
++using TransFlags = int;
++#endif
++
++enum class TransExtData : TransFlags {
+     COND = (1 << 0),
+     NON_BRANCH = (1 << 1),
+     DIRECT_BRANCH = (1 << 2),
+@@ -24,12 +30,39 @@
+ };
+ 
+ struct arm_inst {
++#ifdef __EMSCRIPTEN__
++    u8 idx;
++    union {
++        u8 cond;
++        u8 run_length; // Only for unconditional WasmArm instructions.
++    };
++#else
+     unsigned int idx;
+     unsigned int cond;
++#endif
+     TransExtData br;
++#ifdef __EMSCRIPTEN__
++    alignas(shtop_fp_t)
++#endif
+     char component[0];
+ };
+ 
++// Empty operand structures have size one. Allocation and traversal must use
++// the same stride so that the next header and its operand pointers stay aligned.
++constexpr std::size_t DyncomRecordSize(std::size_t size) {
++#ifdef __EMSCRIPTEN__
++    constexpr auto mask = alignof(arm_inst) - 1;
++    return (size + mask) & ~mask;
++#else
++    return size;
++#endif
++}
++
++#ifdef __EMSCRIPTEN__
++static_assert(sizeof(arm_inst) == sizeof(shtop_fp_t));
++static_assert(offsetof(arm_inst, component) == sizeof(arm_inst));
++#endif
++
+ struct generic_arm_inst {
+     u32 Ra;
+     u32 Rm;
+@@ -495,7 +528,7 @@
+ extern const std::size_t arm_instruction_trans_len;
+ 
+ #define TRANS_CACHE_SIZE (64 * 1024 * 2000)
+-extern char trans_cache_buf[TRANS_CACHE_SIZE];
++alignas(arm_inst) extern char trans_cache_buf[TRANS_CACHE_SIZE];
+ extern std::size_t trans_cache_buf_top;
+ 
+ // WASM cores share one translation arena. Reuse decoded blocks for the active
+diff --git a/src/core/arm/dyncom/wasm_arm_ops.h b/src/core/arm/dyncom/wasm_arm_ops.h
+--- a/src/core/arm/dyncom/wasm_arm_ops.h
++++ b/src/core/arm/dyncom/wasm_arm_ops.h
+@@ -20,6 +20,9 @@
+ // the shifter carry from bit 31. An unrotated immediate preserves the input carry.
+ constexpr std::uint8_t Immediate = 16;
+ constexpr std::uint8_t RotatedImmediate = 17;
++// Indices in the DynCom opcode table. B/BL has a direct dispatch path after
++// compact instructions such as CMP, while all branch semantics stay in BBL_INST.
++constexpr unsigned BranchIndex = 196;
+ constexpr unsigned DispatchIndex = 205;
+ 
+ inline bool Decode(std::uint32_t word, Instruction& out) {
+@@ -70,17 +73,20 @@
+     return true;
+ }
+ 
+-template<class Cpu>
+-inline void Execute(Cpu& cpu, const Instruction& inst) {
+-    const std::uint32_t lhs = cpu.Reg[inst.rn];
+-    switch (inst.operation) {
+-    case Operation::LoadWord: cpu.Reg[inst.rd] = cpu.ReadMemory32(lhs + inst.immediate); return;
+-    case Operation::LoadByte: cpu.Reg[inst.rd] = cpu.ReadMemory8(lhs + inst.immediate); return;
+-    case Operation::StoreWord: cpu.WriteMemory32(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
+-    case Operation::StoreByte: cpu.WriteMemory8(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
+-    default: break;
++// A run can group register operations through its first memory callback.
++constexpr bool IsRegisterOperation(Operation operation) {
++    switch (operation) {
++    case Operation::Add:
++    case Operation::Sub:
++    case Operation::Compare:
++    case Operation::Move: return true;
++    default: return false;
+     }
++}
+ 
++template<class Cpu>
++inline void ExecuteRegister(Cpu& cpu, const Instruction& inst) {
++    const std::uint32_t lhs = cpu.Reg[inst.rn];
+     const std::uint32_t rhs = inst.operand < Immediate ? cpu.Reg[inst.operand] : inst.immediate;
+     cpu.shifter_carry_out = inst.operand == RotatedImmediate ? rhs >> 31 : cpu.CFlag;
+     switch (inst.operation) {
+@@ -95,7 +101,18 @@
+         cpu.VFlag = ((lhs ^ rhs) & (lhs ^ result)) >> 31;
+         break;
+     }
+-    default: break; // Memory operations returned above.
++    default: break;
++    }
++}
++template<class Cpu>
++inline void Execute(Cpu& cpu, const Instruction& inst) {
++    const std::uint32_t lhs = cpu.Reg[inst.rn];
++    switch (inst.operation) {
++    case Operation::LoadWord: cpu.Reg[inst.rd] = cpu.ReadMemory32(lhs + inst.immediate); return;
++    case Operation::LoadByte: cpu.Reg[inst.rd] = cpu.ReadMemory8(lhs + inst.immediate); return;
++    case Operation::StoreWord: cpu.WriteMemory32(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
++    case Operation::StoreByte: cpu.WriteMemory8(lhs + inst.immediate, cpu.Reg[inst.rd]); return;
++    default: ExecuteRegister(cpu, inst); return;
+     }
+ }
+ } // namespace WasmArm
