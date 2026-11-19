@@ -363,7 +363,7 @@ geometry shader stay on the CPU; failed GPU programs can fall back as described
 below. **Settings → Core Settings → 3DS lighting on CPU (slower)** restores CPU
 processing for lit draws for device comparisons. Indices are rebased because
 WebGL2 has no base-vertex draws. `Module.nativeVertexStats` counts draws by path
-(`gpu`, `lit`, `geometry`, `failed`). The counters stay in WebAssembly and
+(`gpu`, `lit`, `geometry`, `failed`, `cold`). The counters stay in WebAssembly and
 JavaScript takes a snapshot only when the property is read.
 
 `patches/azahar-webgl-formats.patch` reinterprets D24S8 as RGBA8 and RGBA4 as RGB5A1 with
@@ -455,6 +455,16 @@ It preserves the PICA rules for NaN and infinity. Padding instructions can shift
 subroutine addresses within an otherwise identical program. The compiler uses
 stable subroutine names so those programs can reuse a vertex stage. Existing
 shader caches retain their original source identities.
+
+With shader pop-in disabled, a recognized hardware GPU without parallel shader
+compilation can draw small triangle lists immediately using the PICA vertex
+interpreter and the normal fragment shader. This applies to newly encountered
+vertex shaders with 16–48 KiB of generated source and no loops. The renderer
+flushes the index and vertex data before the CPU reads them. It limits CPU
+transformation to 64 vertices per draw, 768 per frame, and 8,192 per vertex
+shader. A qualifying shader switches to the GPU when any budget is exceeded.
+Previously recorded shaders follow the normal GPU cache path. The `cold`
+counter reports draws completed through this fallback.
 
 When a hardware renderer first links a PICA program, the browser can queue
 draws for the rest of that emulated frame while it prepares other programs.

@@ -1,5 +1,7 @@
 #include "core/arm/dyncom/wasm_translation_cache.h"
 #include "video_core/renderer_opengl/wasm_prewarm_budget.h"
+#include "video_core/renderer_opengl/wasm_cold_vertices.h"
+#include <string>
 #include <cassert>
 #include <iostream>
 namespace Memory { struct PageTable {}; }
@@ -47,7 +49,40 @@ static void TestBranchLinks() {
     check_replacement(24);
 }
 
+static void TestColdVertexBudget() {
+    using OpenGL::WasmColdVertices;
+    assert(!WasmColdVertices::EligibleShader(std::string(16383, ' ')));
+    std::string source(16384, ' ');
+    assert(WasmColdVertices::EligibleShader(source));
+    for (auto loop : {"for (", "while ("}) {
+        assert(!WasmColdVertices::EligibleShader(source + loop));
+    }
+    assert(WasmColdVertices::EligibleShader(std::string(49152, ' ')));
+    assert(!WasmColdVertices::EligibleShader(std::string(49153, ' ')));
+
+    WasmColdVertices budget;
+    std::uint32_t first = 0, second = 0;
+    assert(!budget.Spend(0, first));
+    assert(!budget.Spend(65, first));
+    for (unsigned i = 0; i < 6; ++i) {
+        assert(budget.Spend(64, first));
+        assert(budget.Spend(64, second));
+    }
+    assert(!budget.Spend(1, first));
+    assert(first == 384 && second == 384);
+    for (unsigned i = 0; i < (8192 - 384) / 64; ++i) {
+        budget.BeginFrame();
+        assert(budget.Spend(64, first));
+    }
+    budget.BeginFrame();
+    assert(!budget.Spend(1, first));
+    assert(first == 8192);
+    assert(budget.Spend(64, second));
+    std::cout << "PASS cold vertex shader eligibility and shared per-frame/per-shader budgets\n";
+}
+
 int main() {
+    TestColdVertexBudget();
     TestBranchLinks();
     std::size_t top = 0;
     WasmTranslationCache cache(top, 1024);

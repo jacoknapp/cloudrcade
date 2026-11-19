@@ -254,7 +254,7 @@ export class PerfReadout {
       const lines = [
         `3DS ${(made / seconds).toFixed(1)} fps ${Math.round(made / seconds / 59.83 * 100)}%  ${this.revision}`,
         `loops ${Math.round(this.iterations / seconds)}/s  frame ${per(this.busy).toFixed(1)} ms  worst ${this.longest.toFixed(0)}  busy ${Math.round(this.busy / seconds / 10)}%`,
-        `draws ${Math.round(per(this.draws))} ${per(this.drawTime).toFixed(1)} ms  gpu ${Math.round(per(delta('gpu')))} cpu ${Math.round(per(delta('lit') + delta('geometry') + delta('failed')))}`,
+        `draws ${Math.round(per(this.draws))} ${per(this.drawTime).toFixed(1)} ms  gpu ${Math.round(per(delta('gpu')))} cpu ${Math.round(per(delta('lit') + delta('geometry') + delta('failed') + delta('cold')))}`,
         ...Object.entries(this.calls).map(([group, total]) =>
           `${group} ${Math.round(per(total.count))}  ${per(total.time).toFixed(1)} ms`),
         `timers ${Math.round(this.timers.count / seconds)}/s  asked ${Math.round(this.timers.asked / seconds)}  ran ${Math.round(this.timers.ran / seconds)} ms`,

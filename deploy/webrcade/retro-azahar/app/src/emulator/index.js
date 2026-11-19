@@ -589,11 +589,13 @@ export class Emulator extends RetroAppWrapper {
         window.EJS_Runtime(options).then((module) => {
           // Keep the diagnostic interface, but only cross into Wasm when read.
           if (module._wrc_vertex_draw_stats) {
+            const count = module._wrc_vertex_draw_stats_count?.() || 4;
             Object.defineProperty(module, 'nativeVertexStats', {
               get() {
                 const ptr = module._wrc_vertex_draw_stats();
-                const [gpu, lit, geometry, failed] = new Uint32Array(module.HEAPU8.buffer, ptr, 4);
-                return { gpu, lit, geometry, failed };
+                const [gpu, lit, geometry, failed, cold = 0] =
+                  new Uint32Array(module.HEAPU8.buffer, ptr, count);
+                return { gpu, lit, geometry, failed, cold };
               },
             });
           }

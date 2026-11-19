@@ -1,0 +1,303 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+index 1dd3dae..99c38c9 100644
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -82,12 +82,13 @@ GLenum MakeAttributeType(Pica::PipelineRegs::VertexAttributeFormat format) {
+ 
+ #if defined(__EMSCRIPTEN__)
+ // Keep diagnostic updates inside Wasm while drawing. Only the readout or tests
+-// read them, via a snapshot of these four counters.
++// read them, via a snapshot of these counters.
+ struct VertexDrawStats {
+     u32 gpu{};
+     u32 lit{};
+     u32 geometry{};
+     u32 failed{};
++    u32 cold_cpu{};
+ };
+ VertexDrawStats vertex_draw_stats;
+ 
+@@ -157,6 +158,10 @@ void UploadLutRows(GLenum unit, GLuint texture, const u8* base, GLintptr offset,
+ extern "C" EMSCRIPTEN_KEEPALIVE const VertexDrawStats* wrc_vertex_draw_stats() {
+     return &vertex_draw_stats;
+ }
++
++extern "C" EMSCRIPTEN_KEEPALIVE u32 wrc_vertex_draw_stats_count() {
++    return sizeof(VertexDrawStats) / sizeof(u32);
++}
+ #endif
+ 
+ RasterizerOpenGL::RasterizerOpenGL(Memory::MemorySystem& memory, Pica::PicaCore& pica,
+@@ -612,7 +617,21 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
+ 
+     if (!SetupVertexShader() || !SetupGeometryShader()) {
+ #if defined(__EMSCRIPTEN__)
+-        ++vertex_draw_stats.failed;
++        if (curr_shader_manager->TakeCpuVertexDraw()) {
++            // LoadVertices reads guest memory directly. Bring it up to date
++            // exactly as the normal GPU vertex upload would, including indices.
++            const auto [first, last, size] = AnalyzeVertexArray(is_indexed);
++            const auto& attributes = regs.pipeline.vertex_attributes;
++            for (const auto& loader : attributes.attribute_loaders) {
++                if (!loader.component_count || !loader.byte_count) continue;
++                const PAddr address = attributes.GetPhysicalBaseAddress() +
++                                      loader.data_offset + first * loader.byte_count;
++                res_cache.FlushRegion(address, (last - first + 1) * loader.byte_count);
++            }
++            ++vertex_draw_stats.cold_cpu;
++        } else {
++            ++vertex_draw_stats.failed;
++        }
+ #endif
+         return false;
+     }
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.cpp b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+index 805707a..d2f09b5 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -1,5 +1,6 @@
+ #if defined(__EMSCRIPTEN__)
+ #include "video_core/renderer_opengl/wasm_prewarm_budget.h"
++#include "video_core/renderer_opengl/wasm_cold_vertices.h"
+ #endif
+ // Copyright Citra Emulator Project / Azahar Emulator Project
+ // Licensed under GPLv2 or any later version
+@@ -15,6 +16,7 @@
+ #include <thread>
+ #include <unordered_map>
+ #include <unordered_set>
++#include <utility>
+ #include <variant>
+ #include "common/hash.h"
+ #include "common/settings.h"
+@@ -220,31 +222,50 @@ public:
+     explicit ShaderDoubleCache(bool _separable) : separable{_separable} {}
+     std::tuple<u64, GLuint, std::optional<std::string>> Get(const KeyConfigType& key,
+                                                             const ExtraConfigType& extra,
+-                                                            const Pica::ShaderSetup& setup) {
++                                                            const Pica::ShaderSetup& setup,
++                                                            u32 small_draw = 0) {
+         std::optional<std::string> result{};
+         const size_t key_hash = key.Hash();
+         auto map_it = shader_map.find(key_hash);
+         if (map_it == shader_map.end()) {
+ #ifdef __EMSCRIPTEN__
+             if (!separable) {
+-                auto compact = extra;
+-                compact.compact_web_vertex = true;
+-                auto code = CodeGenerator(setup, key, compact);
+-                if (code.empty()) {
+-                    shader_map[key_hash] = nullptr;
+-                    return {0, 0, std::nullopt};
++                // Share the GPU stage and the CPU work budget across guest code
++                // hashes with the same generated source (e.g. padded subroutines).
++                const auto pending = pending_vertices.find(key_hash);
++                WebEntry* entry;
++                if (pending != pending_vertices.end()) {
++                    entry = pending->second;
++                } else {
++                    auto compact = extra;
++                    compact.compact_web_vertex = true;
++                    auto code = CodeGenerator(setup, key, compact);
++                    if (code.empty()) {
++                        shader_map[key_hash] = nullptr;
++                        return {0, 0, std::nullopt};
++                    }
++                    auto [it, fresh] = web_vertex_stages.try_emplace(std::move(code), separable);
++                    entry = &*it;
++                    if (fresh && small_draw && WasmColdVertices::EligibleShader(entry->first)) {
++                        result = CodeGenerator(setup, key, extra);
++                        entry->second.defer = !RememberedPrograms::HasVertex(*result);
++                    }
+                 }
+-                // Identical generated code shares a driver stage even if the guest
+-                // inserted padding and moved its subroutines to other addresses.
+-                auto [stage, fresh] = web_vertex_stages.try_emplace(std::move(code), separable);
+-                if (fresh) {
+-                    // Keep the established source identity for saved programs. A
+-                    // previously warmed stage executes the same vertex instructions.
+-                    result = CodeGenerator(setup, key, extra);
+-                    stage->second.Create(stage->first.c_str(), ShaderType, *result);
++                auto& web = entry->second;
++                if (!web.created) {
++                    if (web.defer && cold_vertices.Spend(small_draw, web.vertices)) {
++                        if (pending == pending_vertices.end()) pending_vertices.emplace(key_hash, entry);
++                        last_cpu_draw = true;
++                        return {0, 0, std::nullopt};
++                    }
++                    // Preserve the original source identity for existing saved programs.
++                    if (!result) result = CodeGenerator(setup, key, extra);
++                    web.stage.Create(entry->first.c_str(), ShaderType, *result);
++                    web.created = true;
+                 }
+-                shader_map[key_hash] = &stage->second;
+-                return {key_hash, stage->second.GetHandle(), std::move(result)};
++                if (pending != pending_vertices.end()) pending_vertices.erase(pending);
++                shader_map[key_hash] = &web.stage;
++                return {key_hash, web.stage.GetHandle(), std::move(result)};
+             }
+ #endif
+             auto program = Common::HashableString(CodeGenerator(setup, key, extra));
+@@ -287,10 +308,26 @@ public:
+         shader_map.insert_or_assign(key.Hash(), &cached_shader);
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    void BeginFrame() { cold_vertices.BeginFrame(); }
++    bool TakeCpuDraw() { return std::exchange(last_cpu_draw, false); }
++#endif
++
+ private:
+     bool separable;
+ #ifdef __EMSCRIPTEN__
+-    std::unordered_map<std::string, OGLShaderStage> web_vertex_stages;
++    struct WebVertex {
++        explicit WebVertex(bool separable) : stage(separable) {}
++        OGLShaderStage stage;
++        u32 vertices = 0;
++        bool defer = false;
++        bool created = false;
++    };
++    std::unordered_map<std::string, WebVertex> web_vertex_stages;
++    using WebEntry = decltype(web_vertex_stages)::value_type;
++    std::unordered_map<u64, WebEntry*> pending_vertices;
++    WasmColdVertices cold_vertices;
++    bool last_cpu_draw = false;
+ #endif
+     std::unordered_map<u64, OGLShaderStage*> shader_map;
+     std::unordered_map<u64, OGLShaderStage> shader_cache;
+@@ -489,6 +526,8 @@ public:
+ 
+ #ifdef __EMSCRIPTEN__
+     const bool use_shared_combiners = UseSharedCombiners() != 0;
++    const bool try_cpu_vertex =
++        use_shared_combiners && !ShaderPopInEnabled() && !ProgramsLinkInBackground();
+     const u32 shared_context =
+         use_shared_combiners && (ShaderPopInEnabled() || !ProgramsLinkInBackground()) ? SharedProgramContext() : 0;
+     std::unordered_map<u64, u64> program_aliases;
+@@ -563,7 +602,15 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
+     PicaVSConfig config{regs, setup};
+     ExtraVSConfig extra = impl->CalcExtraConfig(config, accurate_mul);
+ 
+-    auto [hash, handle, result] = impl->programmable_vertex_shaders.Get(config, extra, setup);
++    u32 small_draw = 0;
++#ifdef __EMSCRIPTEN__
++    // A triangle list finishes with an empty software primitive assembler, so
++    // later draws can still choose their own vertex execution path.
++    if (impl->try_cpu_vertex && regs.pipeline.num_vertices <= WasmColdVertices::MaxDraw &&
++        regs.pipeline.triangle_topology == Pica::PipelineRegs::TriangleTopology::List)
++        small_draw = regs.pipeline.num_vertices;
++#endif
++    auto [hash, handle, result] = impl->programmable_vertex_shaders.Get(config, extra, setup, small_draw);
+     if (handle == 0)
+         return false;
+     impl->current.vs = handle;
+@@ -585,6 +632,12 @@ bool ShaderProgramManager::UseProgrammableVertexShader(const Pica::RegsInternal&
+     return true;
+ }
+ 
++#ifdef __EMSCRIPTEN__
++bool ShaderProgramManager::TakeCpuVertexDraw() {
++    return impl->programmable_vertex_shaders.TakeCpuDraw();
++}
++#endif
++
+ void ShaderProgramManager::UseTrivialVertexShader() {
+     impl->current.vs = impl->trivial_vertex_shader.Get();
+     impl->current.vs_hash = 0;
+@@ -664,6 +717,7 @@ void ShaderProgramManager::RebuildRemembered() {
+     if (impl->separable) {
+         return;
+     }
++    impl->programmable_vertex_shaders.BeginFrame();
+     ++impl->frame;
+     ++link_frame;
+     // Specialize a frequently drawn material only after new materials stop arriving.
+diff --git a/src/video_core/renderer_opengl/gl_shader_manager.h b/src/video_core/renderer_opengl/gl_shader_manager.h
+index 8dcd43b..a389e6a 100644
+--- a/src/video_core/renderer_opengl/gl_shader_manager.h
++++ b/src/video_core/renderer_opengl/gl_shader_manager.h
+@@ -60,6 +60,7 @@ public:
+     /// Rebuilds a few of the programs remembered from earlier sessions.
+     void RebuildRemembered();
+ #ifdef __EMSCRIPTEN__
++    bool TakeCpuVertexDraw();
+     void UploadCombiner(u32 program);
+ #endif
+ 
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.cpp b/src/video_core/renderer_opengl/gl_shader_util.cpp
+index f4b86f9..c13e071 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_util.cpp
+@@ -297,6 +297,16 @@ GLuint RebuiltShader(GLenum type, std::string_view preamble, std::string_view so
+     return compiled->second;
+ }
+ 
++bool HasVertex(std::string_view source) {
++    const auto& sources = Get().sources;
++    if (sources.empty()) return false;
++    std::string text{WebPreamble};
++    text += source;
++    const auto found = sources.find(Common::ComputeHash64(text.data(), text.size()));
++    return found != sources.end() && found->second.type == GL_VERTEX_SHADER &&
++           found->second.text->first == text;
++}
++
+ GLuint RebuiltFragment(std::string_view source) {
+     return RebuiltShader(GL_FRAGMENT_SHADER, WebPreamble, source);
+ }
+diff --git a/src/video_core/renderer_opengl/gl_shader_util.h b/src/video_core/renderer_opengl/gl_shader_util.h
+index 75bb597..e6ce168 100644
+--- a/src/video_core/renderer_opengl/gl_shader_util.h
++++ b/src/video_core/renderer_opengl/gl_shader_util.h
+@@ -47,6 +47,7 @@ struct Entry {
+ };
+ /// Borrow a cache-owned shader only when its stage and complete GLSL match.
+ GLuint RebuiltShader(GLenum type, std::string_view preamble, std::string_view source);
++bool HasVertex(std::string_view source);
+ GLuint RebuiltFragment(std::string_view source);
+ u32 TextId(GLuint shader);
+ bool OwnsShader(GLuint shader);
+diff --git a/src/video_core/renderer_opengl/wasm_cold_vertices.h b/src/video_core/renderer_opengl/wasm_cold_vertices.h
+new file mode 100644
+index 0000000..8dda057
+--- /dev/null
++++ b/src/video_core/renderer_opengl/wasm_cold_vertices.h
+@@ -0,0 +1,37 @@
++// Copyright CloudRcade contributors
++// Licensed under GPLv2 or any later version.
++
++#pragma once
++
++#include <cstdint>
++#include <string_view>
++
++namespace OpenGL {
++
++class WasmColdVertices {
++public:
++    static constexpr std::uint32_t MaxDraw = 64;
++
++    // Both loop forms come from the PICA decompiler: guest LOOP and general
++    // jumps. Their runtime cost cannot be bounded by the generated code size.
++    static bool EligibleShader(std::string_view code) {
++        return code.size() >= 16 * 1024 && code.size() <= 48 * 1024 &&
++               code.find("for (") == code.npos && code.find("while (") == code.npos;
++    }
++
++    void BeginFrame() { frame_vertices = 0; }
++
++    bool Spend(std::uint32_t count, std::uint32_t& shader_vertices) {
++        if (!count || count > MaxDraw || shader_vertices > 8192 - count ||
++            frame_vertices > 768 - count)
++            return false;
++        shader_vertices += count;
++        frame_vertices += count;
++        return true;
++    }
++
++private:
++    std::uint32_t frame_vertices = 0;
++};
++
++} // namespace OpenGL
