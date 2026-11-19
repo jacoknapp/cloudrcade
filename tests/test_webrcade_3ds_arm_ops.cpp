@@ -2,6 +2,8 @@
 #include "core/arm/dyncom/arm_dyncom_dec.h"
 #include "core/arm/dyncom/arm_dyncom_trans.h"
 #include "core/arm/dyncom/wasm_arm_ops.h"
+#include "core/arm/dyncom/wasm_arm_stack.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -78,9 +80,118 @@ void Compare(unsigned word, Cpu before) {
     }
     assert(actual == before);
 }
+
+void CheckMappedRuns() {
+    constexpr std::array words{
+        0xe5801001u, // STR r1, [r0, #1]
+        0xe5902001u, // LDR r2, [r0, #1]
+        0xe2823001u, // ADD r3, r2, #1
+        0xe5c03004u, // STRB r3, [r0, #4]
+        0xe5d04004u, // LDRB r4, [r0, #4]
+        0xe5851000u, // STR r1, [r5] (cross-page or special)
+        0xe3a06001u, // MOV r6, #1
+    };
+    std::array<WasmArm::Instruction, words.size()> run{};
+    for (unsigned i = 0; i < words.size(); ++i)
+        assert(WasmArm::Decode(words[i], run[i]));
+
+    for (unsigned miss_address : {4093u, 4094u, 4095u, 4096u}) {
+        for (unsigned budget = 0; budget <= words.size(); ++budget) {
+            Cpu expected{};
+            expected.Reg[1] = 0x12345678;
+            expected.Reg[5] = miss_address;
+            expected.Reg[15] = 0x18000;
+            Cpu actual = expected;
+            // Padding makes an accidental cross-page write observable even without sanitizers.
+            std::array<std::uint8_t, 4096 + 3> ram{}, expected_ram{};
+            std::array<std::uint8_t*, 2> pages{ram.data(), nullptr};
+            const auto retired = WasmArm::RunMapped(actual, pages.data(), budget,
+                [&](unsigned i) -> const WasmArm::Instruction& { return run.at(i); });
+
+            if (budget >= 1) {
+                expected_ram[1] = 0x78; expected_ram[2] = 0x56;
+                expected_ram[3] = 0x34; expected_ram[4] = 0x12;
+            }
+            if (budget >= 2) expected.Reg[2] = 0x12345678;
+            if (budget >= 3) expected.Reg[3] = 0x12345679;
+            if (budget >= 4) expected_ram[4] = 0x79;
+            if (budget >= 5) expected.Reg[4] = 0x79;
+            assert(retired == std::min(budget, 5u));
+            assert(actual == expected && ram == expected_ram);
+        }
+    }
+
+    Cpu cpu{};
+    std::array<std::uint8_t, 4096> ram{};
+    std::array<std::uint8_t*, 2> pages{ram.data(), nullptr};
+    cpu.Reg[1] = 4092;
+    cpu.Reg[2] = 0x89abcdef;
+    WasmArm::Instruction store{}, load{}, byte_load{};
+    assert(WasmArm::Decode(0xe5812000u, store));
+    assert(WasmArm::Decode(0xe5913000u, load));
+    assert(WasmArm::Decode(0xe5d13000u, byte_load));
+    assert(WasmArm::ExecuteMapped(cpu, store, pages.data()));
+    assert(WasmArm::ExecuteMapped(cpu, load, pages.data()) && cpu.Reg[3] == 0x89abcdef);
+    cpu.Reg[1] = 4095;
+    assert(WasmArm::ExecuteMapped(cpu, byte_load, pages.data()) && cpu.Reg[3] == 0x89);
+    for (unsigned miss_address : {4093u, 4094u, 4095u, 4096u}) {
+        cpu.Reg[1] = miss_address;
+        const auto before = cpu;
+        const auto before_ram = ram;
+        assert(!WasmArm::ExecuteMapped(cpu, load, pages.data()));
+        assert(cpu == before && ram == before_ram);
+    }
+}
+
+void CheckMappedStackTransfers() {
+    struct StackCpu {
+        std::array<std::uint32_t, 16> Reg{};
+        bool TFlag{}, big{};
+        bool InBigEndianMode() const { return big; }
+        bool operator==(const StackCpu&) const = default;
+    } cpu;
+    std::array<std::uint8_t, 4096 + 12> ram{};
+    std::array<std::uint8_t*, 2> pages{ram.data(), nullptr};
+    constexpr unsigned push = 0xe92d4030, pop = 0xe8bd8030; // r4/r5 and LR (push) or PC (pop).
+    WasmArm::Instruction out{};
+    // These take their own normal dispatch/budget check, including after a compact run.
+    assert(!WasmArm::Decode(push, out) && !WasmArm::Decode(pop, out));
+    for (auto ret : {0x76543210u, 0x76543213u}) {
+        cpu = {};
+        cpu.Reg[4] = 0x44332211; cpu.Reg[5] = 0x88776655;
+        cpu.Reg[13] = 4096; cpu.Reg[14] = ret; cpu.Reg[15] = 0x1000;
+        assert(WasmArmStack::TryTransfer<false>(cpu, push, false, pages.data()));
+        assert(cpu.Reg[13] == 4084 && cpu.Reg[15] == 0x1000);
+        const std::array<std::uint8_t, 12> saved{
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+            static_cast<std::uint8_t>(ret), 0x32, 0x54, 0x76
+        };
+        assert(std::equal(saved.begin(), saved.end(), ram.begin() + 4084));
+        cpu.Reg[4] = cpu.Reg[5] = 0;
+        assert(WasmArmStack::TryTransfer<true>(cpu, pop, false, pages.data()));
+        assert(cpu.Reg[4] == 0x44332211 && cpu.Reg[5] == 0x88776655 && cpu.Reg[13] == 4096);
+        assert(cpu.Reg[15] == (ret & ~1u) && cpu.TFlag == (ret & 1u));
+    }
+
+    // At 4096, POP starts on a special page. Adjacent starts exercise a crossing
+    // transfer, a misaligned SP, and a 32-bit writeback wrap in each direction.
+    for (bool restore : {false, true}) {
+        for (unsigned sp : {restore ? 4092u : 4100u, restore ? 4096u : 4108u,
+                            4085u, restore ? 0xfffffffcu : 4u}) {
+            cpu.TFlag = false; cpu.Reg[13] = sp;
+            const auto before = cpu;
+            const auto bytes = ram;
+            const auto ok = restore ? WasmArmStack::TryTransfer<true>(cpu, pop, false, pages.data())
+                                    : WasmArmStack::TryTransfer<false>(cpu, push, false, pages.data());
+            assert(!ok && cpu == before && ram == bytes);
+        }
+    }
+}
 }
 
 int main() {
+    CheckMappedRuns();
+    CheckMappedStackTransfers();
     // An empty payload still occupies one byte. The next instruction may
     // carry an addressing function pointer, including on wider host builds.
     static_assert(alignof(arm_inst) >= alignof(ldst_inst));
@@ -141,5 +252,5 @@ int main() {
         0xe591f002u, 0xe8900003u, 0xea000000u, 0xef000000u, 0xe0000291u}) {
         assert(!WasmArm::Decode(word, out));
     }
-    std::cout << "PASS compact ARM arithmetic, flags, memory callbacks and generic fallbacks\n";
+    std::cout << "PASS compact ARM arithmetic, flags, mapped runs, memory callbacks and generic fallbacks\n";
 }

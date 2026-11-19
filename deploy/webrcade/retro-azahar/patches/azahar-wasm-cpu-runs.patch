@@ -1,0 +1,707 @@
+diff --git a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+index 8d424a6..f59425c 100644
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -17,6 +17,8 @@
+ #ifdef __EMSCRIPTEN__
+ #include "core/arm/dyncom/wasm_arm_ops.h"
+ #include "core/arm/dyncom/wasm_arm_loop.h"
++#include "core/arm/dyncom/wasm_arm_stack.h"
++#include "core/arm/dyncom/wasm_recent_blocks.h"
+ #endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+@@ -891,8 +893,7 @@ static int InterpreterTranslateBlock(ARMul_State* cpu, std::size_t& bb_start, u3
+             } else {
+                 run_start = inst_base;
+             }
+-            const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
+-            if (!WasmArm::IsRegisterOperation(inst.operation) || run_start->run_length == 255)
++            if (run_start->run_length == 255)
+                 run_start = nullptr;
+         } else {
+             run_start = nullptr;
+@@ -1004,6 +1005,12 @@ MICROPROFILE_DEFINE(DynCom_Execute, "DynCom", "Execute", MP_RGB(255, 0, 0));
+ 
+ unsigned InterpreterMainLoop(ARMul_State* cpu) {
+     MICROPROFILE_SCOPE(DynCom_Execute);
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    // libretro processes debugger commands between slices. Cache lookups still
++    // consult the live table, including after invalidation or arena rollover.
++    const bool debug_enabled = GDBStub::IsServerEnabled();
++    const auto& recent_blocks = GetDyncomRecentBlocks();
++#endif
+ 
+     /// Nearest upcoming GDB code execution breakpoint, relative to the last dispatch's address.
+     GDBStub::BreakpointAddress breakpoint_data;
+@@ -1044,10 +1051,16 @@ unsigned InterpreterMainLoop(ARMul_State* cpu) {
+ #ifdef ANDROID
+ #define GDB_BP_CHECK
+ #else
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++#define SYNC_DEBUG_MODE
++#define DEBUG_SERVER_ENABLED debug_enabled
++#else
++#define SYNC_DEBUG_MODE cpu->Cpsr = (cpu->Cpsr & ~(1u << 5)) | (cpu->TFlag << 5)
++#define DEBUG_SERVER_ENABLED GDBStub::IsServerEnabled()
++#endif
+ #define GDB_BP_CHECK                                                                               \
+-    cpu->Cpsr &= ~(1 << 5);                                                                        \
+-    cpu->Cpsr |= cpu->TFlag << 5;                                                                  \
+-    if (GDBStub::IsServerEnabled()) {                                                              \
++    SYNC_DEBUG_MODE;                                                                               \
++    if (DEBUG_SERVER_ENABLED) {                                                                    \
+         if (GDBStub::IsMemoryBreak()) {                                                            \
+             goto END;                                                                              \
+         } else if (breakpoint_data.type != GDBStub::BreakpointType::None &&                        \
+@@ -1733,6 +1746,9 @@ unsigned InterpreterMainLoop(ARMul_State* cpu) {
+     arm_inst* inst_base;
+     unsigned int addr;
+     unsigned int num_instrs = 0;
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    const auto& page_table_slot = cpu->memory.GetCurrentPageTableSlot();
++#endif
+ 
+     std::size_t ptr;
+ 
+@@ -1750,6 +1766,19 @@ DISPATCH: {
+         cpu->Reg[15] &= 0xfffffffc;
+ 
+     // Find the cached instruction cream, otherwise translate it...
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    // T changes at block boundaries or when loaded directly from Cpsr. Mirror
++    // it before running the block, so guest status reads see the current mode.
++    cpu->Cpsr = (cpu->Cpsr & ~(1u << 5)) | (cpu->TFlag << 5);
++    if (!debug_enabled && recent_blocks.Find(cpu->Reg[15] | cpu->TFlag, ptr)) {
++WASM_CACHED_BLOCK:
++        inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
++        if (num_instrs >= cpu->NumInstrsToExecute) goto END;
++        ++num_instrs;
++        if (inst_base->idx == WasmArm::DispatchIndex) goto WASM_ARM_INST;
++        goto* InstLabel[inst_base->idx];
++    }
++#endif
+     if (FindDyncomInstructionBlock(cpu, ptr)) {
+         // The shared cache returns only offsets from its current arena.
+     } else if (cpu->NumInstrsToExecute != 1) {
+@@ -1777,8 +1806,8 @@ WASM_ARM_LOOP: {
+     const auto& block = *reinterpret_cast<const WasmArmLoop::Block*>(inst_base->component);
+     --num_instrs; // Entry dispatch charged one instruction before selecting this record.
+     const auto budget = std::min<u64>(cpu->NumInstrsToExecute - num_instrs, UINT_MAX - num_instrs);
+-    if (budget >= block.length && !GDBStub::IsServerEnabled() && !cpu->InBigEndianMode()) {
+-        const auto table = cpu->memory.GetCurrentPageTable();
++    if (budget >= block.length && !debug_enabled && !cpu->InBigEndianMode()) {
++        const auto& table = page_table_slot;
+         const auto result = WasmArmLoop::Run(*cpu, block, table->GetPointerArray().data(),
+                                              static_cast<unsigned>(budget), [](const auto& c, unsigned cond) {
+                                                  return CondPassed(&c, cond);
+@@ -1793,23 +1822,32 @@ WASM_ARM_LOOP: {
+ #endif
+ WASM_ARM_INST: {
+ #if defined(HAVE_LIBRETRO)
+-    const unsigned extra = inst_base->run_length - 1;
+-    // libretro processes debugger packets and settings between CPU slices. A
+-    // register-only prefix cannot observe PC, change the budget, or call out.
+-    // Keep single-instruction dispatch for breakpoints and short slices.
+-    if (extra && extra <= cpu->NumInstrsToExecute - num_instrs && !GDBStub::IsServerEnabled()) {
+-        cpu->Reg[15] += 4 * extra;
+-        num_instrs += extra;
+-        for (unsigned i = 0; i < extra; ++i) {
+-            const auto& reg = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
+-            WasmArm::ExecuteRegister(*cpu, reg);
+-            INC_PC(sizeof(reg));
++    // A run ends at the first generic instruction, branch, or translated page boundary.
++    // BEGIN_INSTRUCTION has charged its first instruction and checked the debugger.
++    if (!debug_enabled && !cpu->InBigEndianMode()) {
++        const auto extra = std::min<u64>(inst_base->run_length - 1,
++                                         cpu->NumInstrsToExecute - num_instrs);
++        constexpr auto stride = DyncomRecordSize(sizeof(arm_inst) + sizeof(WasmArm::Instruction));
++        const auto executed = WasmArm::RunMapped(*cpu, page_table_slot->GetPointerArray().data(),
++            1u + static_cast<unsigned>(std::min<u64>(extra, UINT_MAX - num_instrs)),
++            [&](unsigned i) -> const WasmArm::Instruction& {
++                const auto* record = reinterpret_cast<const arm_inst*>(&trans_cache_buf[ptr + i * stride]);
++                return *reinterpret_cast<const WasmArm::Instruction*>(record->component);
++            });
++        if (executed) {
++            const unsigned prefix = executed - 1;
++            ptr += prefix * stride;
+             inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
++            cpu->Reg[15] += 4 * prefix;
++            num_instrs += prefix;
++            goto WASM_ARM_ADVANCE;
+         }
+     }
+ #endif
+-    const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
+-    WasmArm::Execute(*cpu, inst);
++    WasmArm::Execute(*cpu, *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component));
++#if defined(HAVE_LIBRETRO)
++WASM_ARM_ADVANCE:
++#endif
+     cpu->Reg[15] += 4;
+     INC_PC(sizeof(WasmArm::Instruction));
+     FETCH_INST;
+@@ -1921,17 +1959,25 @@ AND_INST: {
+     GOTO_NEXT_INST;
+ }
+ BBL_INST: {
++    bbl_inst* inst_cream = (bbl_inst*)inst_base->component;
+     if ((inst_base->cond == ConditionCode::AL) || CondPassed(cpu, inst_base->cond)) {
+-        bbl_inst* inst_cream = (bbl_inst*)inst_base->component;
+         if (inst_cream->L) {
+             LINK_RTN_ADDR;
+         }
+         SET_PC;
+-        INC_PC(sizeof(bbl_inst));
+-        goto DISPATCH;
++    } else {
++        cpu->Reg[15] += cpu->GetInstructionSize();
+     }
+-    cpu->Reg[15] += cpu->GetInstructionSize();
+     INC_PC(sizeof(bbl_inst));
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    // Ordinary ARM B/BL targets are word-aligned and preserve mode. IRQ and
++    // debug boundaries always pass through their canonical dispatch checks.
++    if (!debug_enabled && cpu->NirqSig && !cpu->TFlag &&
++        recent_blocks.FindBranch(inst_cream->link, cpu->Reg[15], ptr)) {
++        cpu->Cpsr &= ~(1u << 5);
++        goto WASM_CACHED_BLOCK;
++    }
++#endif
+     goto DISPATCH;
+ }
+ BIC_INST: {
+@@ -2191,9 +2237,13 @@ LDC_INST: {
+ LDM_INST: {
+     if (inst_base->cond == ConditionCode::AL || CondPassed(cpu, inst_base->cond)) {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+-        inst_cream->get_addr(cpu, inst_cream->inst, addr);
+-
+         unsigned int inst = inst_cream->inst;
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++        if (WasmArmStack::TryTransfer<true>(*cpu, inst, debug_enabled,
++                                            page_table_slot->GetPointerArray().data()))
++            goto LDM_TRANSFERRED;
++#endif
++        inst_cream->get_addr(cpu, inst, addr);
+         if (BIT(inst, 22) && !BIT(inst, 15)) {
+             for (int i = 0; i < 13; i++) {
+                 if (BIT(inst, i)) {
+@@ -2249,6 +2299,9 @@ LDM_INST: {
+             cpu->Reg[15] = cpu->ReadMemory32(addr);
+         }
+ 
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++LDM_TRANSFERRED:
++#endif
+         if (BIT(inst, 15)) {
+             INC_PC(sizeof(ldst_inst));
+             goto DISPATCH;
+@@ -3715,6 +3768,11 @@ STM_INST: {
+         ldst_inst* inst_cream = (ldst_inst*)inst_base->component;
+         unsigned int inst = inst_cream->inst;
+ 
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++        if (WasmArmStack::TryTransfer<false>(*cpu, inst, debug_enabled,
++                                             page_table_slot->GetPointerArray().data()))
++            goto STM_TRANSFERRED;
++#endif
+         unsigned int Rn = BITS(inst, 16, 19);
+         unsigned int old_RN = cpu->Reg[Rn];
+ 
+@@ -3763,6 +3821,9 @@ STM_INST: {
+             }
+         }
+     }
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++STM_TRANSFERRED:
++#endif
+     cpu->Reg[15] += cpu->GetInstructionSize();
+     INC_PC(sizeof(ldst_inst));
+     FETCH_INST;
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.cpp b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+index ce3ff31..af67349 100644
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -18,6 +18,10 @@ namespace {
+ WasmTranslationCache wasm_cache{trans_cache_buf_top, TRANS_CACHE_SIZE};
+ }
+ 
++const WasmRecentBlocks& GetDyncomRecentBlocks() {
++    return wasm_cache.Recent();
++}
++
+ void ResetDyncomTranslationCache() {
+     wasm_cache.Reset();
+ }
+@@ -165,6 +169,9 @@ static ARM_INST_PTR INTERPRETER_TRANSLATE(bbl)(unsigned int inst, int index) {
+ 
+     inst_cream->L = BIT(inst, 24);
+     inst_cream->signed_immed_24 = BIT(inst, 23) ? NEGBRANCH : POSBRANCH;
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    inst_cream->link = GetDyncomRecentBlocks().NewBranchLink();
++#endif
+ 
+     return inst_base;
+ }
+diff --git a/src/core/arm/dyncom/arm_dyncom_trans.h b/src/core/arm/dyncom/arm_dyncom_trans.h
+index 824852b..9813480 100644
+--- a/src/core/arm/dyncom/arm_dyncom_trans.h
++++ b/src/core/arm/dyncom/arm_dyncom_trans.h
+@@ -7,6 +7,9 @@
+ #include <cstddef>
+ #include <unordered_map>
+ #include "common/common_types.h"
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++#include "core/arm/dyncom/wasm_recent_blocks.h"
++#endif
+ 
+ struct ARMul_State;
+ typedef unsigned int (*shtop_fp_t)(ARMul_State* cpu, unsigned int sht_oper);
+@@ -120,8 +123,12 @@ struct eor_inst {
+ struct bbl_inst {
+     unsigned int L;
+     int signed_immed_24;
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    WasmRecentBlocks::BranchLink link;
++#else
+     unsigned int next_addr;
+     unsigned int jmp_addr;
++#endif
+ };
+ 
+ struct bx_inst {
+@@ -540,5 +547,7 @@ u32 GetDyncomInstructionCacheKey(const ARMul_State* cpu);
+ arm_inst* TranslateWasmArmInstruction(u32 word);
+ void ResetDyncomTranslationCache();
+ void ReserveDyncomTranslationBlock();
++class WasmRecentBlocks;
++const WasmRecentBlocks& GetDyncomRecentBlocks();
+ void PrepareDyncomTranslationCache(ARMul_State* cpu);
+ #endif
+diff --git a/src/core/arm/dyncom/wasm_arm_ops.h b/src/core/arm/dyncom/wasm_arm_ops.h
+index 0aa82d1..8592273 100644
+--- a/src/core/arm/dyncom/wasm_arm_ops.h
++++ b/src/core/arm/dyncom/wasm_arm_ops.h
+@@ -3,10 +3,11 @@
+ 
+ #include <bit>
+ #include <cstdint>
++#include <cstring>
+ 
+ namespace WasmArm {
+ 
+-enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte };
++enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte, CompareZero };
+ 
+ struct Instruction {
+     std::uint32_t immediate;
+@@ -64,6 +65,8 @@ inline bool Decode(std::uint32_t word, Instruction& out) {
+ 
+     if (word & (1u << 25)) {
+         const int rotation = static_cast<int>((word >> 8) & 15) * 2;
++        if (op == Operation::Compare && !(word & 0xfff))
++            op = Operation::CompareZero;
+         out = {std::rotr(word & 255u, rotation), op, rd, rn, rotation ? RotatedImmediate : Immediate};
+     } else {
+         const auto rm = static_cast<std::uint8_t>(word & 15);
+@@ -73,12 +76,13 @@ inline bool Decode(std::uint32_t word, Instruction& out) {
+     return true;
+ }
+ 
+-// A run can group register operations through its first memory callback.
++// Register-only operations never call back into the emulator.
+ constexpr bool IsRegisterOperation(Operation operation) {
+     switch (operation) {
+     case Operation::Add:
+     case Operation::Sub:
+     case Operation::Compare:
++    case Operation::CompareZero:
+     case Operation::Move: return true;
+     default: return false;
+     }
+@@ -93,6 +97,12 @@ inline void ExecuteRegister(Cpu& cpu, const Instruction& inst) {
+     case Operation::Add: cpu.Reg[inst.rd] = lhs + rhs; break;
+     case Operation::Sub: cpu.Reg[inst.rd] = lhs - rhs; break;
+     case Operation::Move: cpu.Reg[inst.rd] = rhs; break;
++    case Operation::CompareZero:
++        cpu.NFlag = lhs >> 31;
++        cpu.ZFlag = lhs == 0;
++        cpu.CFlag = 1;
++        cpu.VFlag = 0;
++        break;
+     case Operation::Compare: {
+         const std::uint32_t result = lhs - rhs;
+         cpu.NFlag = result >> 31;
+@@ -115,4 +125,52 @@ inline void Execute(Cpu& cpu, const Instruction& inst) {
+     default: ExecuteRegister(cpu, inst); return;
+     }
+ }
++
++// Only ordinary RAM pages have a pointer. A miss leaves the instruction entirely
++// untouched so the normal memory callback can observe its exact guest PC.
++template<class Cpu>
++inline bool ExecuteMapped(Cpu& cpu, const Instruction& inst, std::uint8_t* const* pages) {
++    if (IsRegisterOperation(inst.operation)) {
++        ExecuteRegister(cpu, inst);
++        return true;
++    }
++
++    const std::uint32_t address = cpu.Reg[inst.rn] + inst.immediate;
++    const unsigned offset = address & 4095;
++    const bool word = inst.operation == Operation::LoadWord || inst.operation == Operation::StoreWord;
++    std::uint8_t* page = pages[address >> 12];
++    if (!page || (word && offset > 4092))
++        return false;
++
++    switch (inst.operation) {
++    case Operation::LoadWord:
++        std::memcpy(&cpu.Reg[inst.rd], page + offset, 4);
++        break;
++    case Operation::LoadByte:
++        cpu.Reg[inst.rd] = page[offset];
++        break;
++    case Operation::StoreWord:
++        std::memcpy(page + offset, &cpu.Reg[inst.rd], 4);
++        break;
++    case Operation::StoreByte:
++        page[offset] = static_cast<std::uint8_t>(cpu.Reg[inst.rd]);
++        break;
++    default:
++        return false;
++    }
++    return true;
++}
++
++// No instruction accepted here reads or writes PC. Only publish the cumulative
++// PC after returning to dispatch, before any callback or budget boundary.
++template<class Cpu, class InstructionAt>
++inline unsigned RunMapped(Cpu& cpu, std::uint8_t* const* pages, unsigned count,
++                          InstructionAt instruction_at) {
++    unsigned i = 0;
++    for (; i < count; ++i) {
++        if (!ExecuteMapped(cpu, instruction_at(i), pages))
++            break;
++    }
++    return i;
++}
+ } // namespace WasmArm
+diff --git a/src/core/arm/dyncom/wasm_arm_stack.h b/src/core/arm/dyncom/wasm_arm_stack.h
+new file mode 100644
+index 0000000..630c456
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_arm_stack.h
+@@ -0,0 +1,56 @@
++// Fast path for ordinary little-endian ARM register saves and restores.
++#pragma once
++
++#include <bit>
++#include <cstdint>
++#include <cstring>
++
++namespace WasmArmStack {
++
++template<bool Pop, class Cpu>
++inline bool TryTransfer(Cpu& cpu, std::uint32_t word, bool debug_enabled, std::uint8_t* const* pages) {
++    // STMDB sp!, {...} / LDMIA sp!, {...}, unconditional and without the user-bank bit.
++    if ((word >> 16) != (Pop ? 0xe8bd : 0xe92d) ||
++        debug_enabled || cpu.TFlag || cpu.InBigEndianMode())
++        return false;
++
++    const unsigned mask = word & 0xffff;
++    // Leave the base register, stacked PC, combined LR/PC restore and single-register
++    // aliases to the ordinary interpreter. A POP may restore PC instead of LR.
++    if ((mask & (1u << 13)) || (!Pop && (mask & (1u << 15))) ||
++        (Pop && (mask & 0xc000) == 0xc000) || !(mask & (mask - 1)))
++        return false;
++
++    const std::uint32_t sp = cpu.Reg[13];
++    const unsigned size = 4 * std::popcount(mask);
++    const std::uint32_t updated = Pop ? sp + size : sp - size;
++    const std::uint32_t first = Pop ? sp : updated;
++    const unsigned offset = first & 4095;
++    if ((sp & 3) || (Pop ? updated < sp : updated > sp) || offset + size > 4096)
++        return false;
++
++    auto* page = pages[first >> 12];
++    if (!page)
++        return false;
++
++    // All bytes belong to ordinary RAM. No callback can observe a partial transfer.
++    cpu.Reg[13] = updated;
++    auto* cursor = page + offset;
++    for (unsigned left = mask; left; left &= left - 1) {
++        const unsigned reg = std::countr_zero(left);
++        if constexpr (Pop)
++            std::memcpy(&cpu.Reg[reg], cursor, 4);
++        else
++            std::memcpy(cursor, &cpu.Reg[reg], 4);
++        cursor += 4;
++    }
++    if constexpr (Pop) {
++        if (mask & (1u << 15)) {
++            cpu.TFlag = cpu.Reg[15] & 1;
++            cpu.Reg[15] &= ~1u;
++        }
++    }
++    return true;
++}
++
++} // namespace WasmArmStack
+diff --git a/src/core/arm/dyncom/wasm_recent_blocks.h b/src/core/arm/dyncom/wasm_recent_blocks.h
+new file mode 100644
+index 0000000..0caa619
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_recent_blocks.h
+@@ -0,0 +1,62 @@
++// Direct-mapped front end to the browser interpreter's decoded block cache.
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++
++class WasmRecentBlocks {
++public:
++    bool Find(std::uint32_t key, std::size_t& offset) const {
++        const auto& entry = slots[Index(key)];
++        if (!entry.offset_plus_one || entry.key != key) return false;
++        offset = entry.offset_plus_one - 1;
++        return true;
++    }
++
++    void Store(std::uint32_t key, std::size_t offset) {
++        slots[Index(key)] = {key, offset + 1};
++    }
++
++    // Each decoded branch predicts its last successor. Its source may still
++    // physically exist when a memory callback invalidates the arena mid-block.
++    struct BranchLink {
++        std::uint32_t generation;
++        std::uint32_t target_pc{};
++        std::uint32_t offset_plus_one{};
++    };
++
++    BranchLink NewBranchLink() const { return {generation}; }
++
++    bool FindBranch(BranchLink& link, std::uint32_t target_pc, std::size_t& offset) const {
++        if (!generation || link.generation != generation) return false;
++        if (link.offset_plus_one && link.target_pc == target_pc) {
++            offset = link.offset_plus_one - 1;
++            return true;
++        }
++        if (!Find(target_pc, offset)) return false;
++        link.target_pc = target_pc;
++        link.offset_plus_one = static_cast<std::uint32_t>(offset) + 1;
++        return true;
++    }
++
++    void Clear() {
++        slots.fill({});
++        InvalidateBranchLinks();
++    }
++
++    void InvalidateBranchLinks() {
++        // Wrapping disables predictions so no old generation can match again.
++        if (generation) ++generation;
++    }
++
++private:
++    struct Entry {
++        std::uint32_t key;
++        std::size_t offset_plus_one;
++    };
++    static constexpr std::size_t Count = 4096;
++    static constexpr std::size_t Index(std::uint32_t key) { return (key >> 1) & (Count - 1); }
++    std::array<Entry, Count> slots{};
++    std::uint32_t generation = 1;
++};
+diff --git a/src/core/arm/dyncom/wasm_translation_cache.h b/src/core/arm/dyncom/wasm_translation_cache.h
+index da96cfa..bd5e4d5 100644
+--- a/src/core/arm/dyncom/wasm_translation_cache.h
++++ b/src/core/arm/dyncom/wasm_translation_cache.h
+@@ -1,7 +1,7 @@
+ // Shared decoded-block cache for the single-threaded WASM CPU scheduler.
+ #pragma once
+ 
+-#include <array>
++#include "wasm_recent_blocks.h"
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
+@@ -21,7 +21,7 @@ public:
+         // already empty cache thousands of times before guest code runs again.
+         if (!blocks.empty()) {
+             blocks.clear();
+-            recent.fill({});
++            recent.Clear();
+         }
+         arena_top = 0;
+     }
+@@ -39,38 +39,30 @@ public:
+         }
+     }
+ 
++    const WasmRecentBlocks& Recent() const { return recent; }
++
+     bool Find(std::uint32_t key, std::size_t& offset) {
+-        auto& slot = RecentSlot(key);
+-        if (slot.offset_plus_one && slot.key == key) {
+-            offset = slot.offset_plus_one - 1;
+-            return true;
+-        }
++        if (recent.Find(key, offset)) return true;
+         const auto it = blocks.find(key);
+         if (it == blocks.end()) return false;
+         offset = it->second;
+-        slot = {key, offset + 1};
++        recent.Store(key, offset);
+         return true;
+     }
+ 
+     void Store(std::uint32_t key, std::size_t offset) {
+-        blocks[key] = offset;
+-        RecentSlot(key) = {key, offset + 1};
++        const auto [it, inserted] = blocks.try_emplace(key, offset);
++        if (!inserted && it->second != offset) {
++            it.value() = offset;
++            recent.InvalidateBranchLinks();
++        }
++        recent.Store(key, offset);
+     }
+ 
+     const tsl::robin_pg_map<std::uint32_t, std::size_t>& Blocks() const { return blocks; }
+ 
+ private:
+-    // Colliding addresses or execution modes always fall back to the complete map.
+-    struct Entry {
+-        std::uint32_t key;
+-        std::size_t offset_plus_one; // Offset plus one so zero represents an empty slot.
+-    };
+-
+-    Entry& RecentSlot(std::uint32_t key) {
+-        return recent[(key >> 1) & (recent.size() - 1)];
+-    }
+-
+-    std::array<Entry, 4096> recent{};
++    WasmRecentBlocks recent;
+     std::size_t& arena_top;
+     const std::size_t capacity;
+     std::weak_ptr<Memory::PageTable> resident_page_table;
+diff --git a/src/core/arm/skyeye_common/vfp/vfpsingle.cpp b/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
+index 359d816..6a89d4f 100644
+--- a/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
++++ b/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
+@@ -52,6 +52,7 @@
+  */
+ 
+ #include <algorithm>
++#include <bit>
+ #include "common/common_funcs.h"
+ #include "common/common_types.h"
+ #include "common/logging/log.h"
+@@ -1197,6 +1198,61 @@ static struct op fops[] = {
+ #define FREG_BANK(x) ((x) & 0x18)
+ #define FREG_IDX(x) ((x) & 7)
+ 
++#ifdef __EMSCRIPTEN__
++static bool wasm_vfp_finite_or_zero(u32 value) {
++    const u32 magnitude = value & 0x7fffffff;
++    return magnitude == 0 || (magnitude >= 0x00800000 && magnitude < 0x7f800000);
++}
++
++// Scalar VMUL and VMLA share the interpreter's jammed product. Keep that
++// intermediate until after addition, including on near-exact cancellation.
++static bool wasm_vfp_multiply(ARMul_State* state, u32 inst, u32 fpscr, u32& exceptions) {
++    const u32 op = inst & FOP_MASK;
++    if (op != FOP_FMAC && op != FOP_FMUL)
++        return false;
++    const unsigned sd = vfp_get_sd(inst);
++    if ((fpscr & FPSCR_LENGTH_MASK) && FREG_BANK(sd) != 0)
++        return false;
++    const u32 n = state->ExtReg[vfp_get_sn(inst)];
++    const u32 m = state->ExtReg[vfp_get_sm(inst)];
++    const u32 d = state->ExtReg[sd];
++    if (!wasm_vfp_finite_or_zero(n) || !wasm_vfp_finite_or_zero(m) ||
++        (op == FOP_FMAC && !wasm_vfp_finite_or_zero(d)))
++        return false;
++
++    vfp_single left, right, result;
++    vfp_single_unpack(&left, n, 0);
++    vfp_single_unpack(&right, m, 0);
++    result.sign = left.sign ^ right.sign;
++    result.significand = vfp_hi64to32jamming(static_cast<u64>(left.significand) * right.significand);
++    result.exponent = result.significand == 0 ? 0 : left.exponent + right.exponent - 125;
++    if (op == FOP_FMAC) {
++        vfp_single accumulator, product = result;
++        vfp_single_unpack(&accumulator, d, 0);
++        exceptions = vfp_single_add(&result, &accumulator, &product, fpscr);
++    }
++
++    // Normal fixed-point results in round-to-nearest mode can be packed
++    // directly. The original normalizer handles range edges and other modes.
++    if (result.significand && result.exponent != 255 && (fpscr & FPSCR_RMODE_MASK) == FPSCR_ROUND_NEAREST) {
++        const unsigned shift = std::countl_zero(result.significand);
++        const int exponent = result.exponent - static_cast<int>(shift);
++        if (exponent >= 0 && exponent <= 252) {
++            const u32 normalized = result.significand << shift;
++            const u32 discarded = normalized & 255;
++            const u32 kept = normalized >> 8;
++            const u32 rounded = kept + (discarded > 128 || (discarded == 128 && (kept & 1)));
++            state->ExtReg[sd] = (static_cast<u32>(result.sign) << 16) + (static_cast<u32>(exponent) << 23) + rounded;
++            if (discarded)
++                exceptions |= FPSCR_IXC;
++            return true;
++        }
++    }
++    exceptions = vfp_single_normaliseround(state, sd, &result, fpscr, exceptions, "wasm_scalar_multiply");
++    return true;
++}
++#endif
++
+ u32 vfp_single_cpdo(ARMul_State* state, u32 inst, u32 fpscr) {
+     u32 op = inst & FOP_MASK;
+     u32 exceptions = 0;
+@@ -1206,6 +1262,10 @@ u32 vfp_single_cpdo(ARMul_State* state, u32 inst, u32 fpscr) {
+     unsigned int vecitr, veclen, vecstride;
+     struct op* fop;
+ 
++#ifdef __EMSCRIPTEN__
++    if (wasm_vfp_multiply(state, inst, fpscr, exceptions))
++        return exceptions & ~VFP_NAN_FLAG;
++#endif
+     vecstride = 1 + ((fpscr & FPSCR_STRIDE_MASK) == FPSCR_STRIDE_MASK);
+ 
+     fop = (op == FOP_EXT) ? &fops_ext[FEXT_TO_IDX(inst)] : &fops[FOP_TO_IDX(op)];
+diff --git a/src/core/memory.cpp b/src/core/memory.cpp
+index 049a705..835e311 100644
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -392,6 +392,12 @@ std::shared_ptr<PageTable> MemorySystem::GetCurrentPageTable() const {
+     return impl->current_page_table;
+ }
+ 
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++const std::shared_ptr<PageTable>& MemorySystem::GetCurrentPageTableSlot() const {
++    return impl->current_page_table;
++}
++#endif
++
+ void MemorySystem::RasterizerFlushVirtualRegion(VAddr start, u32 size, FlushMode mode) {
+     impl->RasterizerFlushVirtualRegion(start, size, mode);
+ }
+diff --git a/src/core/memory.h b/src/core/memory.h
+index 5c215b3..53b8b71 100644
+--- a/src/core/memory.h
++++ b/src/core/memory.h
+@@ -255,6 +255,10 @@ public:
+     /// Currently active page table
+     void SetCurrentPageTable(std::shared_ptr<PageTable> page_table);
+     std::shared_ptr<PageTable> GetCurrentPageTable() const;
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++    /// The interpreter may retain the slot, resolving the active mapping again after callbacks.
++    const std::shared_ptr<PageTable>& GetCurrentPageTableSlot() const;
++#endif
+ 
+     /**
+      * Gets a pointer to the given address.

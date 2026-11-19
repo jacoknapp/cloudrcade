@@ -3,7 +3,52 @@
 #include <cassert>
 #include <iostream>
 namespace Memory { struct PageTable {}; }
+static void TestBranchLinks() {
+    std::size_t top = 0, offset = 0;
+    WasmTranslationCache cache(top, 1024);
+    const auto& recent = cache.Recent();
+    constexpr unsigned target = 0x1000, collision = 0x3000, fallthrough = target + 4;
+    auto process = std::make_shared<Memory::PageTable>();
+    cache.SelectPageTable(process);
+    auto link = recent.NewBranchLink();
+
+    // The branch can retain an offset of zero through a direct-map collision.
+    assert(!recent.FindBranch(link, target, offset));
+    cache.Store(target, 0);
+    assert(recent.FindBranch(link, target, offset) && offset == 0);
+    cache.Store(collision, 80);
+    assert(recent.FindBranch(link, target, offset) && offset == 0);
+    cache.Store(fallthrough, 32);
+    assert(recent.FindBranch(link, fallthrough, offset) && offset == 32);
+    assert(!recent.FindBranch(link, target, offset));
+    assert(cache.Find(target, offset));
+    assert(recent.FindBranch(link, target, offset) && offset == 0);
+
+    // The currently executing decoded source can outlive invalidation until
+    // the end of its block. Give its old target a new body at the same PC.
+    const auto check_replacement = [&](std::size_t new_offset) {
+        cache.Store(target, new_offset);
+        assert(!recent.FindBranch(link, target, offset));
+        link = recent.NewBranchLink();
+        assert(recent.FindBranch(link, target, offset) && offset == new_offset);
+    };
+    cache.Store(target, 0);
+    assert(recent.FindBranch(link, target, offset) && offset == 0);
+    cache.Store(collision, 80);
+    check_replacement(64);
+    cache.Reset();
+    check_replacement(16);
+    cache.SelectPageTable(process);
+    assert(recent.FindBranch(link, target, offset) && offset == 16);
+    cache.SelectPageTable(std::make_shared<Memory::PageTable>());
+    check_replacement(0);
+    top = 900;
+    cache.ReserveBlock(200);
+    check_replacement(24);
+}
+
 int main() {
+    TestBranchLinks();
     std::size_t top = 0;
     WasmTranslationCache cache(top, 1024);
     auto process = std::make_shared<Memory::PageTable>();
@@ -97,6 +142,6 @@ int main() {
     assert(!budget.BeginFrame([](unsigned) { return false; }));
     assert(budget.BeginFrame([](unsigned) { return true; }));
     assert(budget.Pending() == 0 && budget.Available());
-    std::cout << "PASS flat cache collision/replacement/reset and bounded compiler completion/demand priority\n";
+    std::cout << "PASS branch target lifetime, flat cache collision/replacement/reset and bounded compiler completion/demand priority\n";
     std::cout << "PASS process reuse, shared CPU invalidation, ARM/Thumb identities, lifetime and bounded arena rollover\n";
 }

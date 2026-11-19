@@ -1,8 +1,30 @@
-// Compile the native cache and ARM instruction regressions against the patched headers. Requires c++ and a patched build.sh WORK tree.
+// Run the native CPU regressions against a patched build.sh WORK tree.
 const fs = require('fs'), os = require('os'), path = require('path');
 const {execFileSync} = require('child_process');
 const root = process.env.WEBRCADE_BUILD_ROOT || '/tmp/retro-azahar-build';
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'webrcade-cache-test-'));
+function testVfp() {
+  const src = path.join(root, 'azahar/src');
+  const vfp = path.join(src, 'core/arm/skyeye_common/vfp');
+  const args = ['-std=c++20', '-O2',
+    '-I' + path.join(__dirname, 'fixtures/3ds-vfp'),
+    '-I' + src, '-I' + path.join(root, 'azahar/externals/fmt/include')];
+  const compile = extra => execFileSync(process.env.CXX || 'c++', [...args, ...extra], {stdio: 'inherit'});
+  const reference = path.join(output, 'vfp-reference.o');
+  const candidate = path.join(output, 'vfp-candidate.o');
+
+  compile(['-Dvfp_single_cpdo=reference_single_cpdo',
+    '-Dvfp_single_normaliseround=reference_single_normaliseround',
+    '-Dvfp_estimate_sqrt_significand=reference_estimate_sqrt_significand',
+    '-c', path.join(vfp, 'vfpsingle.cpp'), '-o', reference]);
+  compile(['-D__EMSCRIPTEN__', '-c', path.join(vfp, 'vfpsingle.cpp'), '-o', candidate]);
+
+  const binary = path.join(output, 'test_webrcade_3ds_vfp');
+  compile([path.join(__dirname, 'test_webrcade_3ds_vfp.cpp'),
+    path.join(vfp, 'vfp.cpp'), path.join(vfp, 'vfpdouble.cpp'), reference, candidate, '-o', binary]);
+  execFileSync(binary, [], {stdio: 'inherit'});
+}
+
 try {
   for (const test of ['test_webrcade_3ds_cache', 'test_webrcade_3ds_arm_ops', 'test_webrcade_3ds_arm_loop']) {
     const binary = path.join(output, test);
@@ -17,4 +39,5 @@ try {
     ], {stdio: 'inherit'});
     execFileSync(binary, [], {stdio: 'inherit'});
   }
+  testVfp();
 } finally { fs.rmSync(output, {recursive:true, force:true}); }
