@@ -5,6 +5,7 @@ import {
 } from '@webrcade/app-common';
 
 import { Prefs } from './prefs';
+import { createDrawBatch } from './draw-batch';
 import { ReadAheadRom } from './read-ahead-rom';
 import { requestGameText } from './textinput';
 import { installSystemKeys } from './systemkeys';
@@ -41,7 +42,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-trainer-shaders-v30';
+const CORE_REVISION = '3ds-trainer-shaders-v31';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -570,8 +571,14 @@ export class Emulator extends RetroAppWrapper {
           this.perf = new PerfReadout(this.coreBase.split('/')[1], unfinished);
           this.perf.options(options);
         }
+        const drawBatch = createDrawBatch();
+        options.wrcBeginDrawBatch = (gl) => {
+          if (this.perf) this.perf.attachContext(gl);
+          drawBatch.begin(gl);
+        };
         const postFrame = options.postMainLoop;
         options.postMainLoop = () => {
+          drawBatch.flush();
           if (postFrame) postFrame();
           this.captureStateFrame();
         };

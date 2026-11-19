@@ -438,6 +438,13 @@ It preserves the PICA rules for NaN and infinity. Padding instructions can shift
 subroutine addresses within an otherwise identical program. The compiler uses
 stable subroutine names so those programs can reuse a vertex stage. Existing
 shader caches retain their original source identities.
+
+When a hardware renderer first links a PICA program, the browser can queue
+draws for the rest of that emulated frame while it prepares other programs.
+The queue copies uploaded data and replays rendering commands in order. A
+readback, an unsupported operation, or reaching the queue limit submits the
+pending draws immediately. The frame-end hook submits any remaining work before
+capturing the screen. Software renderers use their ordinary specialized programs.
 The build cleans its patch-created header so repeated builds apply cleanly.
 
 Regression checks from the repository root:

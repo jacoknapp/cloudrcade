@@ -172,7 +172,9 @@ export class PerfReadout {
     return (data && data.byteLength) || 0;
   }
 
-  wrap(context) {
+  attachContext(context) {
+    if (!context || this.context) return;
+    this.context = context;
     // `finish` returns at once in Safari, where graphics run in another
     // process. A call that must answer (`getError`) waits for everything queued.
     const finish = context.getError.bind(context), readout = this;
@@ -242,7 +244,7 @@ export class PerfReadout {
     this.element = element;
     let frames = module._get_current_frame_count(), last = performance.now(), vertex = {};
     this.timer = setInterval(() => {
-      if (!this.context && module.ctx) { this.context = module.ctx; this.wrap(module.ctx); }
+      this.attachContext(module.ctx);
       const now = performance.now(), seconds = (now - last) / 1000;
       const count = module._get_current_frame_count(), made = count - frames;
       frames = count; last = now;

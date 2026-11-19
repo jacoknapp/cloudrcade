@@ -1,0 +1,27 @@
+--- a/src/video_core/renderer_opengl/gl_shader_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_manager.cpp
+@@ -822,7 +822,8 @@
+                 program = 0;
+                 pending = linking.end();
+             }
+-            if (program == 0) {
++            const bool first_use = program == 0;
++            if (first_use) {
+                 const auto shaders = std::array{impl->current.vs, impl->current.gs, impl->current.fs};
+                 if (ProgramsLinkInBackground()) {
+                     program = BeginProgram(shaders);
+@@ -854,6 +855,14 @@
+                     background_programs.erase(unique_identifier);
+                     return false;
+                 }
++            }
++            if (first_use && impl->use_shared_combiners &&
++                impl->current.vs != impl->trivial_vertex_shader.Get()) {
++                // Keep first-use draws in order while the browser prepares other
++                // programs discovered later in this emulated frame.
++                EM_ASM({
++                    if (Module.wrcBeginDrawBatch) Module.wrcBeginDrawBatch(Module.ctx);
++                });
+             }
+             state.draw.shader_program = program;
+             return true;
