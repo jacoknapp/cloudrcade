@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.18",
+    "date": "November 20, 2026",
+    "title": "3DS startup display and save fixes",
+    "changes": [
+      "The 3DS player keeps both screens visible when a browser briefly reports a zero-size canvas during startup or rotation.",
+      "3DS saves now preserve empty folders. Older Pokémon Ultra Moon saves recover the folders the game checks when it opens."
+    ]
+  },
+  {
     "version": "3.1.17",
     "date": "November 19, 2026",
     "title": "Smoother 3DS battles and repeat play",
