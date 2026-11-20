@@ -1,0 +1,57 @@
+diff --git a/emscripten/library_platform_emscripten.js b/emscripten/library_platform_emscripten.js
+--- a/emscripten/library_platform_emscripten.js
++++ b/emscripten/library_platform_emscripten.js
+@@ -29,13 +29,27 @@
+          var width, height;
+          var entry = e.find(i => i.target == Module.canvas);
+          if (!entry) return;
+-         if (entry.devicePixelContentBoxSize) {
+-            width = entry.devicePixelContentBoxSize[0].inlineSize;
+-            height = entry.devicePixelContentBoxSize[0].blockSize;
++         var pixels = entry.devicePixelContentBoxSize && entry.devicePixelContentBoxSize[0];
++         var ratio = window.devicePixelRatio || 1;
++         if (pixels && pixels.inlineSize > 0 && pixels.blockSize > 0) {
++            width = pixels.inlineSize;
++            height = pixels.blockSize;
+          } else {
+-            width = Math.round(entry.contentRect.width * window.devicePixelRatio);
+-            height = Math.round(entry.contentRect.height * window.devicePixelRatio);
++            var cssWidth = entry.contentRect.width;
++            var cssHeight = entry.contentRect.height;
++            if (!(cssWidth > 0 && cssHeight > 0)) {
++               cssWidth = Module.canvas.clientWidth;
++               cssHeight = Module.canvas.clientHeight;
++            }
++            width = Math.round(cssWidth * ratio);
++            height = Math.round(cssHeight * ratio);
+          }
++         // A hidden canvas can briefly measure zero during launch or rotation.
++         // Keep its last drawable buffer until the observer sees a visible box.
++         if (!(width > 0 && height > 0)) return;
++         if (RPE.canvasWidth === width && RPE.canvasHeight === height &&
++             RPE.canvasDpr === ratio && Module.canvas.width === width && Module.canvas.height === height) return;
++         RPE.canvasDpr = ratio;
+          RPE.canvasWidth = width;
+          RPE.canvasHeight = height;
+          // doubles are too big to pass as an argument to exported functions
+@@ -161,14 +175,16 @@
+    $PlatformEmscriptenDoSetWakeLock: async function(state) {
+       if (state && !RPE.sentinelPromise && navigator?.wakeLock?.request) {
+          try {
+-            RPE.sentinelPromise = navigator.wakeLock.request("screen");
++            // A denial is asynchronous when the browser disallows a wake lock.
++            RPE.sentinelPromise = navigator.wakeLock.request("screen").catch(function() { return null; });
+          } catch (e) {}
+       } else if (!state && RPE.sentinelPromise) {
+          try {
+-            var sentinel = await RPE.sentinelPromise;
+-            sentinel.release();
++            var pending = RPE.sentinelPromise;
++            RPE.sentinelPromise = null;
++            var sentinel = await pending;
++            if (sentinel) await sentinel.release();
+          } catch (e) {}
+-         RPE.sentinelPromise = null;
+       }
+    },
+ 

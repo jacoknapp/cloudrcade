@@ -55,6 +55,34 @@ const key='wrcad.core.active.v1';
     await core.evaluate(()=>{window.app={exit(){return 'normal';}};});
     assert.equal(await core.evaluate(()=>app.exit()),'normal');await core.waitForTimeout(100);assert.equal(reports.length,count+1,'normal SDK exit is quiet');await core.close();
    }
+   // A 3DS shader-cache probe uses its own canvas. Only a loss on the real
+   // game canvas belongs in the crash journal.
+   const display = await context.newPage();
+   await display.goto('http://recovery.test/play/app/retro-azahar/');
+   const displayStart = reports.length;
+   await display.evaluate(() => {
+     const canvas = document.body.appendChild(document.createElement('canvas'));
+     window.Module = {
+       ctx:{canvas, drawingBufferWidth:0, drawingBufferHeight:0, isContextLost:()=>true},
+       _get_current_frame_count:()=>123, RWA:{context:{state:'running'}},
+     };
+     const probe = document.body.appendChild(document.createElement('canvas'));
+     probe.dispatchEvent(new Event('webglcontextlost'));
+     canvas.dispatchEvent(new Event('webglcontextlost'));
+   });
+   await waitReports(displayStart + 1);
+   assert.equal(reports.at(-1).reason,'gpu-device-lost');
+   assert.deepEqual(reports.at(-1).sample,{
+     frame:123, bufferWidth:0, bufferHeight:0, layoutWidth:300, layoutHeight:150, contextLost:1, audioRunning:1,
+   });
+   await display.evaluate(()=>{
+     dispatchEvent(new ErrorEvent('error',{error:new Error('XMLHttpRequest: private-ROM-path')}));
+   });
+   await waitReports(displayStart + 2);
+   assert.equal(reports.at(-1).reason,'host-xhr-failure');
+   assert(!JSON.stringify(reports.at(-1)).includes('private-ROM-path'));
+   await display.evaluate(()=>WrcadCoreCrash.clear());
+   await display.close();
    // An uncaught worker exception is reported even when SDK code misses it.
    const core=await context.newPage();await core.goto('http://recovery.test/play/app/retro-snes9x/');
    const before=reports.length;await core.evaluate(()=>{window.app={exit(){}};new Worker(URL.createObjectURL(new Blob(['throw Error("private worker crash")'],{type:'text/javascript'})));});

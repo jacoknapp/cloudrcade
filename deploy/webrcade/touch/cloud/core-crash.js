@@ -4,8 +4,8 @@
   if(window.WrcadCoreCrash)return;
   const KEY='wrcad.core.active.v1',DURABLE=KEY+'.persistent',PENDING=KEY+'.reports';
   const phases=new Set(['starting','playing','paused','saving state','loading state','closing','failed']);
-  const reasons=new Set(['interrupted','gpu-device-lost','gpu-completion','core-abort','core-timeout','no-frame-progress','worker-failure','unknown-runtime-failure','memory-failure','wasm-trap','gpu-validation','host-exception']);
-  const fields=['frame','rendered','lastPresentMs','heapMiB','compiled','textures','bindings','shaders','failedShaders','gpuPending','gpuCompleted','gpuFenceMs','backlog','discWaitMaxMs'];
+  const reasons=new Set(['interrupted','gpu-device-lost','gpu-completion','core-abort','core-timeout','no-frame-progress','worker-failure','unknown-runtime-failure','memory-failure','wasm-trap','gpu-validation','host-exception','empty-drawing-buffer','canvas-resize-failure','webgl-shader-failure','host-xhr-failure']);
+  const fields=['frame','rendered','lastPresentMs','heapMiB','compiled','textures','bindings','shaders','failedShaders','gpuPending','gpuCompleted','gpuFenceMs','backlog','discWaitMaxMs','bufferWidth','bufferHeight','layoutWidth','layoutHeight','contextLost','audioRunning'];
   const pathSystem=document.documentElement.dataset.cloudrcadeCore||location.pathname.match(/^\/play\/app\/([a-z0-9-]+)\//)?.[1];
   const system=pathSystem&&!['editor','standalone'].includes(pathSystem)?pathSystem:null;
   const reported=new Set();
@@ -52,7 +52,25 @@
       }
     })().finally(()=>{sending=null;});return sending;
   }
+  function displaySample() {
+    if (system !== 'retro-azahar' || !record) return null;
+    const module = window.Module, gl = module?.ctx;
+    if (!gl?.canvas) return null;
+    try {
+      return {
+        frame: module._get_current_frame_count(),
+        bufferWidth: gl.drawingBufferWidth, bufferHeight: gl.drawingBufferHeight,
+        layoutWidth: gl.canvas.clientWidth, layoutHeight: gl.canvas.clientHeight,
+        contextLost: Number(gl.isContextLost()),
+        audioRunning: Number(module.RWA?.context?.state === 'running'),
+      };
+    } catch { return null; }
+  }
   function report(previous,reason){
+    if (previous && previous === record) {
+      const display = displaySample();
+      if (display) previous = {...previous, sample:{...previous.sample, ...display}};
+    }
     const value=payload(previous,reason);if(!value)return;
     const signature=value.id+'|'+reason;if(reported.has(signature))return;reported.add(signature);
     if(reported.size>16)reported.delete(reported.values().next().value);
@@ -104,9 +122,27 @@
     },
     clear,
   };
+  function hostFailure(error) {
+    if (!error || !record) return;
+    let reason = 'host-exception';
+    if (system === 'retro-azahar' && typeof error.message === 'string') {
+      const message = error.message;
+      if (/devicePixelContentBoxSize/.test(message)) reason = 'canvas-resize-failure';
+      else if (/detachShader|attachShader/.test(message)) reason = 'webgl-shader-failure';
+      else if (/XMLHttpRequest/.test(message)) reason = 'host-xhr-failure';
+    }
+    report(record, reason);
+  }
   if(system){
-    addEventListener('error',event=>{if(event.error&&record)report(record,'host-exception');});
-    addEventListener('unhandledrejection',event=>{if(event.reason&&record)report(record,'host-exception');});
+    addEventListener('error',event=>hostFailure(event.error));
+    addEventListener('unhandledrejection',event=>hostFailure(event.reason));
+  }
+  if (system === 'retro-azahar') {
+    // Driver identification briefly creates and releases a separate canvas.
+    // Only the emulator's own WebGL context is relevant to a display failure.
+    addEventListener('webglcontextlost', event => {
+      if (event.target === window.Module?.ctx?.canvas) report(record, 'gpu-device-lost');
+    }, true);
   }
   // Every standard SDK core assigns window.app before starting its emulator.
   // Intercept handled aborts as well as global errors; preserve exit's return value.
@@ -125,7 +161,22 @@
       }catch(e){report(previous,'host-exception');throw e;}
     };
     const loaded=app.setModeToLoaded;
-    if(typeof loaded==='function')app.setModeToLoaded=function(...args){window.WrcadCoreCrash.phase('playing');return loaded.apply(this,args);};
+    if(typeof loaded==='function')app.setModeToLoaded=function(...args){
+      const firstLoad = record?.phase === 'starting';
+      window.WrcadCoreCrash.phase('playing');
+      if (firstLoad && system === 'retro-azahar') {
+        const session = record;
+        setTimeout(() => {
+          if (record !== session || record.phase !== 'playing' || document.hidden) return;
+          const sample = displaySample();
+          if (sample && sample.frame > 0 && !sample.contextLost &&
+              sample.layoutWidth > 1 && sample.layoutHeight > 1 &&
+              (sample.bufferWidth <= 1 || sample.bufferHeight <= 1))
+            report(session, 'empty-drawing-buffer');
+        }, 15000);
+      }
+      return loaded.apply(this,args);
+    };
   }
   if(system&&system!=='gamecube'){
     let app=window.app;const descriptor=Object.getOwnPropertyDescriptor(window,'app');

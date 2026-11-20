@@ -21,7 +21,8 @@ if ($body === false || strlen($body) > 4096) crashReply(413);
 $value = json_decode($body, true, 8);
 $phases = ['starting', 'playing', 'paused', 'saving state', 'loading state', 'closing', 'failed'];
 $reasons = ['interrupted', 'gpu-device-lost', 'gpu-completion', 'core-abort', 'core-timeout',
-    'no-frame-progress', 'worker-failure', 'unknown-runtime-failure', 'memory-failure', 'wasm-trap', 'gpu-validation', 'host-exception', 'verification'];
+    'no-frame-progress', 'worker-failure', 'unknown-runtime-failure', 'memory-failure', 'wasm-trap', 'gpu-validation', 'host-exception', 'empty-drawing-buffer',
+    'canvas-resize-failure', 'webgl-shader-failure', 'host-xhr-failure', 'verification'];
 if (!is_array($value) || ($value['version'] ?? null) !== 1 ||
     !is_string($value['id'] ?? null) || !preg_match('/^[a-z0-9-]{1,64}$/D', $value['id']) ||
     !in_array($value['phase'] ?? null, $phases, true) || !in_array($value['reason'] ?? null, $reasons, true)) crashReply(400);
@@ -37,7 +38,8 @@ foreach (['core', 'runtime'] as $key) {
 }
 $sample = is_array($value['sample'] ?? null) ? $value['sample'] : [];
 foreach (['frame', 'rendered', 'lastPresentMs', 'heapMiB', 'compiled', 'textures', 'bindings', 'shaders',
-    'failedShaders', 'gpuPending', 'gpuCompleted', 'gpuFenceMs', 'backlog', 'discWaitMaxMs'] as $key) {
+    'failedShaders', 'gpuPending', 'gpuCompleted', 'gpuFenceMs', 'backlog', 'discWaitMaxMs',
+    'bufferWidth', 'bufferHeight', 'layoutWidth', 'layoutHeight', 'contextLost', 'audioRunning'] as $key) {
     $number = $sample[$key] ?? null;
     if ((is_int($number) || is_float($number)) && is_finite((float)$number) && $number >= 0 && $number <= 9007199254740991) $report['sample'][$key] = $number;
 }
