@@ -31,6 +31,16 @@ const STATE_PATH = HOME + '/retroarch/userdata/states/game.state';
 // Azahar keeps its emulated SD card and NAND below this directory
 const USER_DIR = SAVES_DIR + '/Azahar';
 const SAVE_ROOTS = ['sdmc', 'nand', 'shaders'];
+// Older cores ignore entries outside the guest roots when reading these archives.
+const SAVE_DIRECTORIES = 'azahar-directories-v1.json';
+const ULTRA_MOON_EXTDATA_INDEX = /^sdmc\/Nintendo 3DS\/[a-f0-9]{32}\/[a-f0-9]{32}\/extdata\/00000000\/00001b50\/user\/filelist\.txt$/i;
+
+function validSavePath(name) {
+  if (typeof name !== 'string') return false;
+  const [root, ...parts] = name.split('/');
+  return SAVE_ROOTS.includes(root) && parts.length > 0 &&
+    parts.every(part => part && part !== '.' && part !== '..' && !part.includes('\0'));
+}
 
 // RetroAppWrapper input bit -> libretro joypad id (EmulatorJS simulate_input)
 const BUTTON_MAP = [
@@ -675,17 +685,45 @@ export class Emulator extends RetroAppWrapper {
 
   onFrame() {}
 
-  collectFiles(FS, dir, prefix, out) {
-    let names = [];
-    try { names = FS.readdir(dir); } catch (e) { return; }
+  collectFiles(FS, dir, prefix, out, directories) {
+    let names;
+    try { names = FS.readdir(dir).filter(name => name !== '.' && name !== '..'); } catch (e) { return; }
+    const directory = prefix.slice(0, -1);
+    if (!names.length && validSavePath(directory)) directories.push(directory);
     for (const name of names) {
-      if (name === '.' || name === '..') continue;
       const path = dir + '/' + name;
       if (FS.isDir(FS.stat(path).mode)) {
-        this.collectFiles(FS, path, prefix + name + '/', out);
+        this.collectFiles(FS, path, prefix + name + '/', out, directories);
       } else {
         out.push({ name: prefix + name, content: FS.readFile(path) });
       }
+    }
+  }
+
+  restoreSaveFiles(FS, files) {
+    const manifest = files.find(file => file.name === SAVE_DIRECTORIES);
+    let directories;
+    if (manifest) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(manifest.content));
+        if (Array.isArray(parsed)) directories = parsed;
+      } catch (e) { /* The regular save files can still be restored. */ }
+    }
+    for (const file of files) {
+      if (!validSavePath(file.name)) continue;
+      const path = USER_DIR + '/' + file.name;
+      const parent = path.substring(0, path.lastIndexOf('/'));
+      this.mkdirs(FS, parent);
+      FS.writeFile(path, file.content);
+      // Legacy archives kept Ultra Moon's file index but dropped the empty folders it checks at boot.
+      if (!directories && ULTRA_MOON_EXTDATA_INDEX.test(file.name)) {
+        for (const child of ['btvideo', 'finder_studio', 'reg', 'dummy2', 'dummy3']) {
+          this.mkdirs(FS, parent + '/' + child);
+        }
+      }
+    }
+    for (const name of directories || []) {
+      if (validSavePath(name)) this.mkdirs(FS, USER_DIR + '/' + name);
     }
   }
 
@@ -705,11 +743,13 @@ export class Emulator extends RetroAppWrapper {
       }
 
       const files = [];
+      const directories = [];
       for (const root of SAVE_ROOTS) {
-        this.collectFiles(FS, USER_DIR + '/' + root, root + '/', files);
+        this.collectFiles(FS, USER_DIR + '/' + root, root + '/', files, directories);
       }
 
-      if (files.length > 0) {
+      if (files.length || directories.length) {
+        files.push({ name: SAVE_DIRECTORIES, content: new TextEncoder().encode(JSON.stringify(directories.sort())) });
         // Preserve snapshot order when an exit arrives during a pause save.
         const manager = this.getSaveManager();
         const pending = this.saveQueue.then(async () => {
@@ -747,12 +787,7 @@ export class Emulator extends RetroAppWrapper {
       );
 
       if (files) {
-        for (const f of files) {
-          if (!SAVE_ROOTS.some((root) => f.name.startsWith(root + '/'))) continue;
-          const path = USER_DIR + '/' + f.name;
-          this.mkdirs(FS, path.substring(0, path.lastIndexOf('/')));
-          FS.writeFile(path, f.content);
-        }
+        this.restoreSaveFiles(FS, files);
 
         // Cache the initial files
         await this.getSaveManager().checkFilesChanged(files);

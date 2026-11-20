@@ -8,7 +8,7 @@ const vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../deploy/webrcade/retro-azahar/app/src/emulator/index.js'), 'utf8');
   const method = source.match(/  async saveState\(\) \{[\s\S]*?\n  \}/)[0];
   const Emulator = vm.runInNewContext('(class { ' + method + ' })', {
-    window: { FS: {} }, SAVE_ROOTS: ['sdmc'], USER_DIR: '/save', LOG: { error() {} },
+    window: { FS: {} }, TextEncoder, SAVE_DIRECTORIES: 'azahar-directories-v1.json', SAVE_ROOTS: ['sdmc'], USER_DIR: '/save', LOG: { error() {} },
   });
   let value = 1, seen, releaseFirst;
   const busy = new Promise(resolve => { releaseFirst = resolve; });
