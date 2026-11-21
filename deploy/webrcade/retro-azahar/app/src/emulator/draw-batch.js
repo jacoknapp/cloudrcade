@@ -3,6 +3,8 @@
 // in their original order until the end of the current emulation turn.
 const MAX_CALLS = 1536;
 const MAX_BYTES = 2 * 1024 * 1024;
+const MAX_FRAME_CALLS = 4096;
+const UNIFORM_BYTES = 1024 * 1024;
 const states = new Set((
   'activeTexture bindBuffer bindFramebuffer bindSampler bindTexture bindVertexArray ' +
   'blendColor blendEquation blendFunc blendFuncSeparate clear clearBufferfi clearColor ' +
@@ -77,27 +79,86 @@ function uploadSize(gl, state, name, args, available) {
   }
 }
 
-export function createDrawBatch() {
-  let device, armed = false, batch, turn = 0;
+// Only Azahar's dedicated uniform buffers enter this path. Other uploads use
+// the ordinary command queue and remain visible to the original WebGL object.
+function uniformUploads(gl, methods) {
+  const rawBind = methods.get('bindBuffer');
+  const rawData = methods.get('bufferData');
+  const rawBase = methods.get('bindBufferBase');
+  const rawRange = methods.get('bindBufferRange');
+  if (!rawBind || !rawData || !rawBase || !rawRange) return null;
+  const alignment = gl.getParameter(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT);
+  if (!integral(alignment) || !alignment || alignment > UNIFORM_BYTES) return null;
+  const stream = gl.createBuffer();
+  if (!stream) return null;
+  const bytes = new Uint8Array(UNIFORM_BYTES);
+  const target = gl.UNIFORM_BUFFER;
+  let used = 0;
+  const latest = new Map();
+  function stage(pending, owner, slot, source, offset, size) {
+    const start = Math.ceil(used / alignment) * alignment;
+    if (start + size > bytes.length) return false;
+    bytes.set(source.subarray(offset, offset + size), start);
+    used = start + size;
+    latest.set(slot, {owner, start, size});
+    pending.calls.push([rawRange, [target, slot, stream, start, size]]);
+    // bindBufferRange updates the generic binding as well as the slot.
+    pending.calls.push([rawBind, [target, owner]]);
+    return true;
+  }
+  function submit(pending, binding) {
+    if (used) {
+      rawBind.call(gl, target, stream);
+      rawData.call(gl, target, bytes, gl.STREAM_DRAW, 0, used);
+      rawBind.call(gl, target, pending.uniform);
+    }
+    for (const [fn, args] of pending.calls) fn.apply(gl, args);
+    if (!used) return;
+    // Preserve each original buffer and its base binding at every boundary.
+    // Readbacks, state changes and a later frame can use the contents normally.
+    for (const [slot, {owner, start, size}] of latest) {
+      rawBind.call(gl, target, owner);
+      rawData.call(gl, target, bytes, gl.STREAM_DRAW, start, size);
+      rawBase.call(gl, target, slot, owner);
+    }
+    rawBind.call(gl, target, binding);
+    used = 0;
+    latest.clear();
+  }
+  function dispose() {
+    methods.get('deleteBuffer').call(gl, stream);
+  }
+  return {stage, submit, dispose};
+}
+
+export function createDrawBatch(packUniforms = false) {
+  let device, armed = false, frame = false, batch, turn = 0;
   function disable() {
     armed = false;
+    frame = false;
     batch = null;
     if (device) device.restore();
     device = null;
   }
-  const flush = () => {
+  const drain = () => {
     armed = false;
     const pending = batch;
     batch = null;
-    if (device) device.idle();
+    if (device && !device.uploads) device.idle();
     if (!pending) return;
     try {
-      for (const [fn, args] of pending.calls) fn.apply(device.gl, args);
+      if (device.uploads) device.uploads.submit(pending, device.uniform);
+      else for (const [fn, args] of pending.calls) fn.apply(device.gl, args);
     } catch (error) {
       disable();
       throw error;
     }
   };
+  const flush = () => {
+    frame = false;
+    drain();
+  };
+  const start = () => ({calls: [], bytes: 0, uniform: device.uniform, newObjects: new WeakSet()});
 
   function install(gl) {
     const methods = new Map();
@@ -114,6 +175,18 @@ export function createDrawBatch() {
       skipRows: gl.getParameter(gl.UNPACK_SKIP_ROWS),
     };
     const query = methods.get('getParameter').bind(gl);
+    state.uploads = packUniforms ? uniformUploads(gl, methods) : null;
+    const uniformOwners = new WeakSet();
+    if (state.uploads) {
+      state.uniform = query(gl.UNIFORM_BUFFER_BINDING);
+      if (state.uniform) uniformOwners.add(state.uniform);
+      // Install before the guest's first draw where possible. The ordinary
+      // tracker also learns buffers already allocated during core startup.
+      for (let slot = 0; slot < 3; slot++) {
+        const owner = gl.getIndexedParameter(gl.UNIFORM_BUFFER_BINDING, slot);
+        if (owner) uniformOwners.add(owner);
+      }
+    }
     const vaos = new WeakSet(), elementBuffers = new WeakSet();
     if (state.vao) vaos.add(state.vao);
     const initialElement = query(gl.ELEMENT_ARRAY_BUFFER_BINDING);
@@ -135,6 +208,7 @@ export function createDrawBatch() {
       else if (name === 'bindBuffer') {
         if (a[0] === gl.ELEMENT_ARRAY_BUFFER) state.elements.set(state.vao, a[1]);
         if (a[0] === gl.PIXEL_UNPACK_BUFFER) state.pbo = a[1];
+        if (state.uploads && a[0] === gl.UNIFORM_BUFFER) state.uniform = a[1];
       } else if (name === 'pixelStorei') {
         if (a[0] === gl.UNPACK_ALIGNMENT && [1,2,4,8].includes(a[1])) state.alignment = a[1];
         if (a[0] === gl.UNPACK_ROW_LENGTH && integral(a[1])) state.row = a[1];
@@ -147,6 +221,10 @@ export function createDrawBatch() {
       } else if (name === 'deleteBuffer') {
         elementBuffers.delete(a[0]);
         if (state.pbo === a[0]) state.pbo = null;
+        if (state.uploads) {
+          uniformOwners.delete(a[0]);
+          if (state.uniform === a[0]) state.uniform = query(gl.UNIFORM_BUFFER_BINDING);
+        }
         // A deleted buffer can remain attached to an unbound VAO. Re-query
         // that VAO on its next use instead of manufacturing a null binding.
         for (const [vao, buffer] of state.elements) if (buffer === a[0]) state.elements.delete(vao);
@@ -159,8 +237,12 @@ export function createDrawBatch() {
       const checkElement = name === 'bindBuffer' && args[0] === gl.ELEMENT_ARRAY_BUFFER &&
         args[1] && !elementBuffers.has(args[1]);
       const checkUnpack = name === 'bindBuffer' && args[0] === gl.PIXEL_UNPACK_BUFFER && args[1];
-      if (checkVao || checkElement || checkUnpack) {
-        if (batch) flush();
+      const checkUniform = state.uploads && (
+        (name === 'bindBuffer' && args[0] === gl.UNIFORM_BUFFER && args[1] && !uniformOwners.has(args[1])) ||
+        ((name === 'bindBufferBase' || name === 'bindBufferRange') && args[0] === gl.UNIFORM_BUFFER)
+      );
+      if (checkVao || checkElement || checkUnpack || checkUniform) {
+        if (batch) drain();
         const result = fn.apply(gl, args);
         if (checkVao) {
           state.vao = query(gl.VERTEX_ARRAY_BINDING);
@@ -173,11 +255,15 @@ export function createDrawBatch() {
             elementBuffers.add(bound);
         }
         if (checkUnpack) state.pbo = query(gl.PIXEL_UNPACK_BUFFER_BINDING);
+        if (checkUniform) {
+          state.uniform = query(gl.UNIFORM_BUFFER_BINDING);
+          if (state.uniform) uniformOwners.add(state.uniform);
+        }
         return result;
       }
       if (armed && (name === 'drawElements' || name === 'drawArrays')) {
         armed = false;
-        batch = {calls: [], bytes: 0, newObjects: new WeakSet()};
+        batch = start();
       }
       if (batch) {
         if (allocations.has(name)) {
@@ -192,7 +278,9 @@ export function createDrawBatch() {
         if (name === 'getParameter' && args[0] === gl.ELEMENT_ARRAY_BUFFER_BINDING && state.elements.has(state.vao)) {
           return state.elements.get(state.vao);
         }
-        if (batch.calls.length < MAX_CALLS) {
+        const uniformBarrier = frame && args[0] === gl.UNIFORM_BUFFER &&
+          (name === 'bufferData' || name === 'bufferSubData');
+        if (!uniformBarrier && batch.calls.length < (frame ? MAX_FRAME_CALLS : MAX_CALLS)) {
           const bytes = states.has(name) ? 0 : uploadSize(gl, state, name, args, MAX_BYTES - batch.bytes);
           if (bytes >= 0) {
             batch.calls.push([fn, args]);
@@ -201,7 +289,7 @@ export function createDrawBatch() {
             return;
           }
         }
-        flush();
+        drain();
       }
       const result = fn.apply(gl, args);
       if (track.has(name)) observe(name, args, result);
@@ -211,6 +299,7 @@ export function createDrawBatch() {
     function restore() {
       for (const name of originalDescriptors.keys()) restoreMethod(name);
       if (gl.canvas && gl.canvas.removeEventListener) gl.canvas.removeEventListener('webglcontextlost', disable);
+      if (state.uploads) state.uploads.dispose();
     }
     state.restore = restore;
     try {
@@ -238,16 +327,34 @@ export function createDrawBatch() {
     };
     return state;
   }
-  function begin(gl) {
-    if (!gl || batch || armed) return;
+  function activate(gl) {
+    if (!gl) return false;
     if (device === undefined) {
       try { device = install(gl); } catch { device = null; }
     }
-    if (!device || device.gl !== gl) return;
-    try { device.activate(); } catch { disable(); return; }
+    if (!device || device.gl !== gl) return false;
+    try { device.activate(); } catch { disable(); return false; }
+    return true;
+  }
+  function begin(gl) {
+    if (batch || armed || !activate(gl)) return;
     armed = true;
     const current = ++turn;
     queueMicrotask(() => { if (turn === current) flush(); });
   }
-  return {begin, flush};
+  function beginFrame(gl) {
+    if (!packUniforms || !activate(gl) || !device.uploads) return;
+    frame = true;
+  }
+  function queueUniform(owner, slot, source, offset, size) {
+    if (!frame || !owner || owner !== device.uniform ||
+        !integral(slot) || slot > 2 || !integral(offset) || !integral(size) ||
+        !size || size > UNIFORM_BYTES || offset + size > source.length) return false;
+    if (!batch) batch = start();
+    if (batch.calls.length < MAX_FRAME_CALLS && device.uploads.stage(batch, owner, slot, source, offset, size)) return true;
+    drain();
+    batch = start();
+    return device.uploads.stage(batch, owner, slot, source, offset, size);
+  }
+  return {begin, beginFrame, queueUniform, flush};
 }

@@ -1,0 +1,18 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -106,6 +106,14 @@
+     }
+     state.draw.uniform_buffer = buffer.handle;
+     OpenGLState::BindUniformBuffer(buffer.handle);
++    // The browser can stage updates to these three dedicated buffers in draw order.
++    static const bool batch_uploads =
++        EM_ASM_INT({ return Module.wrcQueueUniformUpload ? 1 : 0; }) != 0;
++    if (batch_uploads && !first_upload && EM_ASM_INT({
++            return Module.wrcQueueUniformUpload(GL.buffers[$0], $1, HEAPU8, $2, $3) ? 1 : 0;
++        }, buffer.handle, binding, &uniforms, sizeof(uniforms))) {
++        return;
++    }
+     // Replace only the changed block. Fresh storage avoids updating bytes that
+     // queued draws may still reference in Safari's GPU process.
+     glBufferData(GL_UNIFORM_BUFFER, sizeof(uniforms), &uniforms, GL_STREAM_DRAW);

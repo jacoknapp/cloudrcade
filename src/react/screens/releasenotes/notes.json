@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.1.19",
+    "date": "November 20, 2026",
+    "title": "Fewer WebKit graphics uploads for 3DS",
+    "changes": [
+      "The 3DS player groups small uniform-buffer uploads on WebKit to reduce graphics stalls during gameplay."
+    ]
+  },
+  {
     "version": "3.1.18",
     "date": "November 20, 2026",
     "title": "3DS startup display and save fixes",

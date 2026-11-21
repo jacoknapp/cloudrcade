@@ -264,3 +264,82 @@ test('context restoration cannot reuse the old VAO and its element buffer', asyn
   batch.flush();
   assert.deepEqual(gl.calls, [['draw', 1]]);
 });
+
+const UBO = {
+  UNIFORM_BUFFER: 0x8a11, UNIFORM_BUFFER_BINDING: 0x8a28,
+  UNIFORM_BUFFER_OFFSET_ALIGNMENT: 0x8a34, STREAM_DRAW: 0x88e0,
+};
+
+class UniformGL extends FakeGL {
+  uniform = null;
+  indexed = new Map();
+  uploads = 0;
+
+  getParameter(name) {
+    if (name === UBO.UNIFORM_BUFFER_BINDING) return this.uniform;
+    if (name === UBO.UNIFORM_BUFFER_OFFSET_ALIGNMENT) return 16;
+    return super.getParameter(name);
+  }
+  getIndexedParameter(name, slot) { return this.indexed.get(slot)?.buffer ?? null; }
+  bindBuffer(target, buffer) {
+    if (target === UBO.UNIFORM_BUFFER) this.uniform = buffer;
+    else super.bindBuffer(target, buffer);
+  }
+  bindBufferBase(target, slot, buffer) {
+    this.uniform = buffer;
+    this.indexed.set(slot, {buffer});
+  }
+  bindBufferRange(target, slot, buffer, offset, size) {
+    assert.equal(offset % 16, 0);
+    this.uniform = buffer;
+    this.indexed.set(slot, {buffer, offset, size});
+  }
+  bufferData(target, data, usage, offset, count) {
+    if (target !== UBO.UNIFORM_BUFFER) return super.bufferData(target, data, usage, offset, count);
+    this.uploads++;
+    this.uniform.contents = bytes(data, offset, count).slice();
+  }
+  getBufferParameter() { return [...this.uniform.contents]; }
+  deleteBuffer(buffer) {
+    if (this.uniform === buffer) this.uniform = null;
+  }
+  drawArrays(mode, first) {
+    const uniform = this.indexed.get(1);
+    const offset = uniform.offset || 0;
+    this.calls.push(['draw', first, ...uniform.buffer.contents.subarray(offset, offset + (uniform.size ?? 4))]);
+  }
+}
+Object.assign(UniformGL.prototype, UBO);
+
+test('packs native uniform updates in draw order and restores base bindings at barriers', async () => {
+  const {createDrawBatch} = await modulePromise;
+  const batch = createDrawBatch(true);
+  const gl = new UniformGL();
+  const owner = gl.createBuffer();
+  gl.bindBuffer(UBO.UNIFORM_BUFFER, owner);
+  gl.bindBufferBase(UBO.UNIFORM_BUFFER, 1, owner);
+  batch.beginFrame(gl);
+  const source = Uint8Array.of(1, 2, 3, 4, 5, 6);
+  assert.equal(batch.queueUniform(gl.createBuffer(), 1, source, 1, 4), false);
+  for (let i = 0; i < 6; i++) {
+    source[1] = i + 2;
+    assert.equal(batch.queueUniform(owner, 1, source, 1, 4), true);
+    gl.drawArrays(GL.TRIANGLES, i, 3);
+  }
+  const other = gl.createBuffer();
+  gl.bindBuffer(UBO.UNIFORM_BUFFER, other);
+  assert.equal(gl.uploads, 2, 'one packed upload and one final copy');
+  assert.deepEqual(gl.calls, Array.from({length: 6}, (_, i) => ['draw', i, i + 2, 3, 4, 5]));
+  assert.deepEqual([...owner.contents], [7, 3, 4, 5]);
+  assert.deepEqual(gl.indexed.get(1), {buffer: owner});
+  assert.equal(gl.uniform, other);
+
+  gl.bindBuffer(UBO.UNIFORM_BUFFER, owner);
+  assert.equal(batch.queueUniform(owner, 1, source, 2, 4), true);
+  assert.deepEqual(gl.getBufferParameter(UBO.UNIFORM_BUFFER), [3, 4, 5, 6]);
+  assert.equal(batch.queueUniform(owner, 1, source, 0, 4), true);
+  batch.flush();
+  assert.equal(batch.queueUniform(owner, 1, source, 0, 4), false);
+  gl.canvas.dispatchEvent(new Event('webglcontextlost'));
+  assert.equal(Object.hasOwn(gl, 'bufferData'), false);
+});

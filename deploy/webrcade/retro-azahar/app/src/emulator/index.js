@@ -52,7 +52,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-canvas-v36';
+const CORE_REVISION = '3ds-uniform-batch-v37';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -528,6 +528,8 @@ export class Emulator extends RetroAppWrapper {
       const script = document.createElement('script');
       script.onerror = () => reject(new Error('Unable to load ' + scriptUrl));
       script.onload = () => {
+        const packUniforms = navigator.vendor === 'Apple Computer, Inc.';
+        const drawBatch = createDrawBatch(packUniforms);
         const options = {
           canvas: canvas,
           // RetroArch registers its keyboard listeners on this element. Keep it detached:
@@ -550,16 +552,23 @@ export class Emulator extends RetroAppWrapper {
           getInputText: requestGameText,
           wrcShaderPopIn: false,
         };
+        if (packUniforms) options.wrcQueueUniformUpload = drawBatch.queueUniform;
         // Audio paces the game at the console's rate. Without running audio the
         // loop follows the display, which is 120 Hz on some phones: hold it to
         // the 3DS frame rate ourselves by skipping iterations that come early.
         options.preMainLoop = () => {
           if (this.lazyRom) this.lazyRom.markReadAheadFrame(performance.now());
           const context = window.Module && window.Module.RWA && window.Module.RWA.context;
-          if (context && context.state === 'running') return undefined;
-          const now = performance.now();
-          if (now < this.nextFrameAt) return false;
-          this.nextFrameAt = Math.max((this.nextFrameAt || now) + FRAME_MS, now);
+          if (!context || context.state !== 'running') {
+            const now = performance.now();
+            if (now < this.nextFrameAt) return false;
+            this.nextFrameAt = Math.max((this.nextFrameAt || now) + FRAME_MS, now);
+          }
+          if (packUniforms) {
+            const gl = window.Module?.ctx;
+            if (this.perf) this.perf.attachContext(gl);
+            drawBatch.beginFrame(gl);
+          }
           return undefined;
         };
         // Comparison switch from the library's Core Settings: run lit
@@ -586,7 +595,6 @@ export class Emulator extends RetroAppWrapper {
           this.perf = new PerfReadout(this.coreBase.split('/')[1], unfinished);
           this.perf.options(options);
         }
-        const drawBatch = createDrawBatch();
         options.wrcBeginDrawBatch = (gl) => {
           if (this.perf) this.perf.attachContext(gl);
           drawBatch.begin(gl);
