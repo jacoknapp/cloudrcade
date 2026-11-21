@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.1.20",
+    "date": "November 21, 2026",
+    "title": "Smoother 3DS battle menus on WebKit",
+    "changes": [
+      "The 3DS player uses immediate uniform uploads for the rest of a frame when a new shader program links. Batching resumes on the next frame to reduce the stall when opening battle menus."
+    ]
+  },
+  {
     "version": "3.1.19",
     "date": "November 20, 2026",
     "title": "Fewer WebKit graphics uploads for 3DS",
