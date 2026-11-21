@@ -343,3 +343,26 @@ test('packs native uniform updates in draw order and restores base bindings at b
   gl.canvas.dispatchEvent(new Event('webglcontextlost'));
   assert.equal(Object.hasOwn(gl, 'bufferData'), false);
 });
+
+test('draws a newly linked program with immediate uniform updates for the rest of its turn', async () => {
+  const {createDrawBatch} = await modulePromise;
+  const batch = createDrawBatch(true);
+  const gl = new UniformGL();
+  const owner = gl.createBuffer();
+  gl.bindBufferBase(UBO.UNIFORM_BUFFER, 1, owner);
+  batch.beginFrame(gl);
+  const source = Uint8Array.of(1, 2, 3, 4);
+  assert.equal(batch.queueUniform(owner, 1, source, 0, 4), true);
+  gl.drawArrays(GL.TRIANGLES, 0, 3);
+  const program = gl.createProgram();
+  gl.linkProgram(program);
+  source[0] = 5;
+  assert.equal(batch.queueUniform(owner, 1, source, 0, 4), false);
+  gl.bufferData(UBO.UNIFORM_BUFFER, source, UBO.STREAM_DRAW);
+  gl.drawArrays(GL.TRIANGLES, 1, 3);
+  batch.flush();
+  assert.deepEqual(gl.calls, [['draw', 0, 1, 2, 3, 4], ['draw', 1, 5, 2, 3, 4]]);
+  batch.beginFrame(gl);
+  assert.equal(batch.queueUniform(owner, 1, source, 0, 4), true);
+  batch.flush();
+});

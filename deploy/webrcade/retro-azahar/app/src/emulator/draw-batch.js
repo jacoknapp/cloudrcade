@@ -132,7 +132,7 @@ function uniformUploads(gl, methods) {
 }
 
 export function createDrawBatch(packUniforms = false) {
-  let device, armed = false, frame = false, batch, turn = 0;
+  let device, armed = false, frame = false, linkedThisFrame = false, batch, turn = 0;
   function disable() {
     armed = false;
     frame = false;
@@ -231,6 +231,9 @@ export function createDrawBatch(packUniforms = false) {
       }
     }
     function call(name, fn, args) {
+      // New programs can require driver work on their first draw. Keep the
+      // remaining uniform updates on their original buffers for this turn.
+      if (frame && name === 'linkProgram') linkedThisFrame = true;
       // An object might belong to another context, have been deleted, or
       // already be a non-index buffer. Confirm unfamiliar bindings with GL.
       const checkVao = name === 'bindVertexArray' && args[0] && !vaos.has(args[0]);
@@ -345,9 +348,10 @@ export function createDrawBatch(packUniforms = false) {
   function beginFrame(gl) {
     if (!packUniforms || !activate(gl) || !device.uploads) return;
     frame = true;
+    linkedThisFrame = false;
   }
   function queueUniform(owner, slot, source, offset, size) {
-    if (!frame || !owner || owner !== device.uniform ||
+    if (!frame || linkedThisFrame || !owner || owner !== device.uniform ||
         !integral(slot) || slot > 2 || !integral(offset) || !integral(size) ||
         !size || size > UNIFORM_BYTES || offset + size > source.length) return false;
     if (!batch) batch = start();
