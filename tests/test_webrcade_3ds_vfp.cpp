@@ -82,10 +82,26 @@ int main() {
 
         for (const u32 n : edges) for (const u32 m : edges) {
             for (const u32 controls : {0u, u32(FPSCR_DEFAULT_NAN | FPSCR_FLUSH_TO_ZERO)}) {
-                Check(FOP_FMUL, n, m, 0, mode | controls);
+                for (const u32 op : {FOP_FMUL, FOP_FADD, FOP_FSUB})
+                    Check(op, n, m, 0, mode | controls);
                 for (const u32 d : edges) Check(FOP_FMAC, n, m, d, mode | controls);
             }
         }
+    }
+
+    // Check the exact-double path on both sides of its exponent limits.
+    for (const u32 n : {0x3f800001u, 0xbf800001u}) {
+        for (const unsigned distance : {28u, 29u, 30u, 31u}) {
+            const u32 m = (127u - distance) << 23 | 0x7fffffu;
+            Check(FOP_FADD, n, m, 0, FPSCR_ROUND_NEAREST);
+            Check(FOP_FSUB, n, m, 0, FPSCR_ROUND_NEAREST);
+        }
+    }
+    for (const unsigned exponent : {1u, 2u, 253u, 254u}) {
+        const u32 word = exponent << 23 | 0x7fffffu;
+        Check(FOP_FMUL, word, 0x3f800001, 0, FPSCR_ROUND_NEAREST);
+        Check(FOP_FADD, word, word, 0, FPSCR_ROUND_NEAREST);
+        Check(FOP_FSUB, word, word, 0, FPSCR_ROUND_NEAREST);
     }
 
     // A nonzero destination bank enables short vectors. Exercise all lengths
@@ -93,7 +109,7 @@ int main() {
     for (unsigned length = 0; length < 8; ++length) {
         for (const u32 stride : {0u, u32(FPSCR_STRIDE_MASK)}) {
             for (const Registers regs : {Registers{3, 5, 7}, {8, 16, 24}, {9, 9, 9}, {15, 7, 14}}) {
-                for (const u32 op : {FOP_FMUL, FOP_FMAC, FOP_FADD})
+                for (const u32 op : {FOP_FMUL, FOP_FMAC, FOP_FADD, FOP_FSUB})
                     Check(op, 0x3f800001, 0xbf000000, 0x40000001,
                           (length << FPSCR_LENGTH_BIT) | stride, regs);
             }
@@ -105,7 +121,8 @@ int main() {
         const u32 n = random(), m = random(), d = random();
         const u32 fpscr = i % 3 == 0 ? static_cast<u32>(random()) : 0;
         const Registers regs{u32(random() % 32), u32(random() % 32), u32(random() % 32)};
-        Check(i % 2 ? FOP_FMUL : FOP_FMAC, n, m, d, fpscr, regs);
+        constexpr std::array<u32, 4> ops{FOP_FMUL, FOP_FMAC, FOP_FADD, FOP_FSUB};
+        Check(ops[i % ops.size()], n, m, d, fpscr, regs);
     }
     std::printf("PASS %u VFP comparisons of register files, exception masks and cumulative FPSCR\n",
                 checked);

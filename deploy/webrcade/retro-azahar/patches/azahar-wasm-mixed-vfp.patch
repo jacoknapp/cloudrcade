@@ -1,0 +1,237 @@
+--- a/src/core/arm/dyncom/wasm_arm_ops.h
++++ b/src/core/arm/dyncom/wasm_arm_ops.h
+@@ -7,7 +7,7 @@
+ 
+ namespace WasmArm {
+ 
+-enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte, CompareZero, And, Xor, Or, ClearBits };
++enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte, CompareZero, And, Xor, Or, ClearBits, LoadFloat, StoreFloat, ScalarFloat };
+ 
+ struct Instruction {
+     std::uint32_t immediate;
+@@ -25,6 +25,7 @@
+ // compact instructions such as CMP, while all branch semantics stay in BBL_INST.
+ constexpr unsigned BranchIndex = 196;
+ constexpr unsigned DispatchIndex = 205;
++constexpr unsigned MixedDispatchIndex = 207;
+ 
+ inline bool Decode(std::uint32_t word, Instruction& out) {
+     if ((word >> 28) != 14)
+--- /dev/null
++++ b/src/core/arm/dyncom/wasm_arm_vfp.h
+@@ -0,0 +1,89 @@
++// Single-precision VFP operations that can share compact ARM runs.
++#pragma once
++
++#include "core/arm/dyncom/wasm_arm_ops.h"
++
++namespace WasmArm {
++
++constexpr bool IsVfp(Operation op) {
++    return op >= Operation::LoadFloat;
++}
++
++inline bool DecodeVfp(std::uint32_t word, Instruction& out) {
++    if (word >> 28 != 14)
++        return false;
++
++    // VLDR/VSTR with a single-precision register and no writeback.
++    if ((word & 0x0f200f00) == 0x0d000a00) {
++        const auto rn = static_cast<std::uint8_t>((word >> 16) & 15);
++        const auto sd = static_cast<std::uint8_t>(((word >> 11) & 30) | ((word >> 22) & 1));
++        const auto offset = (word & 255u) << 2;
++        const auto op = word & (1u << 20) ? Operation::LoadFloat : Operation::StoreFloat;
++        out = {word & (1u << 23) ? offset : 0u - offset, op, sd, rn, Immediate};
++        return true;
++    }
++
++    // Scalar-register encodings for VMLA, VMUL, VADD and VSUB. Rounding,
++    // vectors and exceptions are still handled by the existing VFP engine.
++    if ((word & 0x0f800f10) != 0x0e000a00)
++        return false;
++    switch (word & 0x00b00040) {
++    case 0:
++    case 0x00200000:
++    case 0x00300000:
++    case 0x00300040:
++        out = {word, Operation::ScalarFloat, 0, 0, 0};
++        return true;
++    default:
++        return false;
++    }
++}
++
++template <class Cpu>
++inline std::uint32_t VfpAddress(const Cpu& cpu, const Instruction& inst, std::uint32_t pc) {
++    const auto base = inst.rn == 15 ? (pc & ~3u) + 8u : cpu.Reg[inst.rn];
++    return base + inst.immediate;
++}
++
++template <class Cpu, class ExecuteScalar>
++inline void ExecuteVfp(Cpu& cpu, const Instruction& inst, ExecuteScalar execute_scalar) {
++    if (inst.operation == Operation::ScalarFloat) {
++        execute_scalar(cpu, inst.immediate);
++        return;
++    }
++    const auto address = VfpAddress(cpu, inst, cpu.Reg[15]);
++    if (inst.operation == Operation::LoadFloat)
++        cpu.ExtReg[inst.rd] = cpu.ReadMemory32(address);
++    else
++        cpu.WriteMemory32(address, cpu.ExtReg[inst.rd]);
++}
++
++template <class Cpu, class InstructionAt, class ExecuteScalar>
++inline unsigned RunMappedWithVfp(Cpu& cpu, std::uint8_t* const* pages, unsigned count,
++                                  InstructionAt instruction_at, ExecuteScalar execute_scalar) {
++    unsigned i = 0;
++    for (; i < count; ++i) {
++        const auto& inst = instruction_at(i);
++        if (!IsVfp(inst.operation)) {
++            if (!ExecuteMapped(cpu, inst, pages))
++                break;
++            continue;
++        }
++        if (inst.operation == Operation::ScalarFloat) {
++            execute_scalar(cpu, inst.immediate);
++            continue;
++        }
++        const auto address = VfpAddress(cpu, inst, cpu.Reg[15] + 4 * i);
++        const auto offset = address & 4095u;
++        auto* page = pages[address >> 12];
++        if (!page || offset > 4092)
++            break;
++        if (inst.operation == Operation::LoadFloat)
++            std::memcpy(&cpu.ExtReg[inst.rd], page + offset, 4);
++        else
++            std::memcpy(page + offset, &cpu.ExtReg[inst.rd], 4);
++    }
++    return i;
++}
++
++} // namespace WasmArm
+--- a/src/core/arm/dyncom/arm_dyncom_trans.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_trans.cpp
+@@ -5,6 +5,9 @@
+ #ifdef __EMSCRIPTEN__
+ #include "core/arm/dyncom/wasm_translation_cache.h"
+ #include "core/arm/dyncom/wasm_arm_ops.h"
++#ifdef HAVE_LIBRETRO
++#include "core/arm/dyncom/wasm_arm_vfp.h"
++#endif
+ #endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+@@ -75,10 +78,18 @@
+ #ifdef __EMSCRIPTEN__
+ arm_inst* TranslateWasmArmInstruction(u32 word) {
+     WasmArm::Instruction instruction;
+-    if (!WasmArm::Decode(word, instruction))
++    unsigned index = WasmArm::DispatchIndex;
++    if (!WasmArm::Decode(word, instruction)) {
++#ifdef HAVE_LIBRETRO
++        if (!WasmArm::DecodeVfp(word, instruction))
++            return nullptr;
++        index = WasmArm::MixedDispatchIndex;
++#else
+         return nullptr;
++#endif
++    }
+     auto* entry = static_cast<arm_inst*>(AllocBuffer(sizeof(arm_inst) + sizeof(instruction)));
+-    entry->idx = WasmArm::DispatchIndex;
++    entry->idx = static_cast<u8>(index);
+     entry->run_length = 1;
+     entry->br = TransExtData::NON_BRANCH;
+     *reinterpret_cast<WasmArm::Instruction*>(entry->component) = instruction;
+--- a/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
++++ b/src/core/arm/dyncom/arm_dyncom_interpreter.cpp
+@@ -19,6 +19,9 @@
+ #include "core/arm/dyncom/wasm_arm_loop.h"
+ #include "core/arm/dyncom/wasm_arm_stack.h"
+ #include "core/arm/dyncom/wasm_recent_blocks.h"
++#ifdef HAVE_LIBRETRO
++#include "core/arm/dyncom/wasm_arm_vfp.h"
++#endif
+ #endif
+ #include "core/arm/skyeye_common/armstate.h"
+ #include "core/arm/skyeye_common/armsupp.h"
+@@ -887,9 +890,14 @@
+         u32 inst_size = InterpreterTranslateInstruction(cpu, phys_addr, inst_base);
+ #endif
+ #if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
+-        if (inst_base->idx == WasmArm::DispatchIndex) {
++        const bool has_vfp = inst_base->idx == WasmArm::MixedDispatchIndex;
++        if (has_vfp || inst_base->idx == WasmArm::DispatchIndex) {
+             if (run_start) {
+                 ++run_start->run_length;
++                // Only the first record needs a mixed entry point. Pure integer
++                // runs keep their existing dispatch and inner loop.
++                if (has_vfp)
++                    run_start->idx = WasmArm::MixedDispatchIndex;
+             } else {
+                 run_start = inst_base;
+             }
+@@ -998,6 +1006,14 @@
+         LnSWoUB(ImmediateOffset)(cpu, transfer->inst, addr);
+     else
+         transfer->get_addr(cpu, transfer->inst, addr);
++}
++#endif
++
++#if defined(__EMSCRIPTEN__) && defined(HAVE_LIBRETRO)
++static void ExecuteScalarVfp(ARMul_State& cpu, u32 inst) {
++    const u32 fpscr = cpu.VFP[VFP_FPSCR];
++    const u32 exceptions = vfp_single_cpdo(&cpu, inst, fpscr);
++    vfp_raise_exceptions(&cpu, exceptions, inst, fpscr);
+ }
+ #endif
+ 
+@@ -1731,13 +1747,14 @@
+                          &&WASM_ARM_INST,
+ #ifdef HAVE_LIBRETRO
+                          &&WASM_ARM_LOOP,
++                         &&WASM_ARM_MIXED,
+ #endif
+ #endif
+     };
+ #ifdef __EMSCRIPTEN__
+     static_assert(WasmArm::DispatchIndex <= UINT8_MAX);
+ #if defined(HAVE_LIBRETRO)
+-    static_assert(std::size(InstLabel) == WasmArmLoop::DispatchIndex + 1);
++    static_assert(std::size(InstLabel) == WasmArm::MixedDispatchIndex + 1);
+ #else
+     static_assert(std::size(InstLabel) == WasmArm::DispatchIndex + 1);
+ #endif
+@@ -1818,6 +1835,33 @@
+     ptr = block.original_offset;
+     inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
+     GOTO_NEXT_INST;
++}
++WASM_ARM_MIXED: {
++    const auto& inst = *reinterpret_cast<const WasmArm::Instruction*>(inst_base->component);
++    if (!debug_enabled && !cpu->InBigEndianMode()) {
++        const auto extra = std::min<u64>(inst_base->run_length - 1,
++                                         cpu->NumInstrsToExecute - num_instrs);
++        constexpr auto stride = DyncomRecordSize(sizeof(arm_inst) + sizeof(WasmArm::Instruction));
++        const auto executed = WasmArm::RunMappedWithVfp(*cpu, page_table_slot->GetPointerArray().data(),
++            1u + static_cast<unsigned>(std::min<u64>(extra, UINT_MAX - num_instrs)),
++            [&](unsigned i) -> const WasmArm::Instruction& {
++                const auto* record = reinterpret_cast<const arm_inst*>(&trans_cache_buf[ptr + i * stride]);
++                return *reinterpret_cast<const WasmArm::Instruction*>(record->component);
++            }, ExecuteScalarVfp);
++        if (executed) {
++            const unsigned prefix = executed - 1;
++            ptr += prefix * stride;
++            inst_base = reinterpret_cast<arm_inst*>(&trans_cache_buf[ptr]);
++            cpu->Reg[15] += 4 * prefix;
++            num_instrs += prefix;
++            goto WASM_ARM_ADVANCE;
++        }
++    }
++    if (WasmArm::IsVfp(inst.operation))
++        WasmArm::ExecuteVfp(*cpu, inst, ExecuteScalarVfp);
++    else
++        WasmArm::Execute(*cpu, inst);
++    goto WASM_ARM_ADVANCE;
+ }
+ #endif
+ WASM_ARM_INST: {

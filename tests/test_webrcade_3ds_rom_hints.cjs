@@ -17,6 +17,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   const alternateUid = 'b'.repeat(32);
   const bytesFor = (first, last) => Uint8Array.from({ length: last - first + 1 },
     (_, offset) => ((first + offset) ^ ((first + offset) >>> 12)) & 255);
+  let wallClock = 0;
+  const simulatedMissCosts = new Map();
+  global.performance = { now: () => wallClock };
   const requests = [];
   const disk = new Map();
   let writes = 0;
@@ -41,6 +44,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     rom.enableReadHints(id, hintStorage);
     rom.fetchBytes = (first, last) => {
       sync.push([first, last]);
+      wallClock += simulatedMissCosts.get(Math.floor(first / PAGE_SIZE)) || 0;
       return bytesFor(first, last);
     };
     function read(frame, first, length = 8) {
@@ -226,6 +230,123 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(limited.sync.length, lateDemandCount, 'late action was prefetched after all startup anchors');
   assert.equal(requests.length, startCount + 128, 'all saved anchors can use both ranges once');
   limited.rom.close();
+
+  const learnedWarmStorage = new Map();
+  const warmStorage = {
+    getItem: key => learnedWarmStorage.get(key),
+    setItem: (key, value) => learnedWarmStorage.set(key, value),
+  };
+  const warmTraining = make(uid, warmStorage);
+  simulatedMissCosts.set(310, 31);
+  simulatedMissCosts.set(602, 24);
+  warmTraining.read(100, 310 * PAGE_SIZE, PAGE_SIZE * 2);
+  warmTraining.read(110, 602 * PAGE_SIZE + 10, 16);
+  assert.equal(learnedWarmStorage.size, 0);
+  warmTraining.rom.close();
+  assert.deepEqual(JSON.parse(learnedWarmStorage.get(warmTraining.rom.warmKey)), [[310, 2, 31], [602, 1, 24]]);
+  simulatedMissCosts.clear();
+
+  const beforeWarm = requests.length;
+  const warmed = make(uid, warmStorage);
+  assert.equal(requests.length, beforeWarm + 1);
+  const firstWarm = requests.at(-1);
+  assert.deepEqual([firstWarm.first, firstWarm.last], [310 * PAGE_SIZE, 312 * PAGE_SIZE - 1]);
+  firstWarm.finish();
+  await flush();
+  assert.equal(requests.length, beforeWarm + 2);
+  const secondWarm = requests.at(-1);
+  assert.equal(secondWarm.first, 602 * PAGE_SIZE);
+  secondWarm.finish();
+  await flush();
+  // Simulate enough startup churn to evict the warmed pages in ordinary LRU.
+  for (let i = 0; i < MAX_PAGES + 20; i++) warmed.rom.chunks.set(900 + i, new Uint8Array(1));
+  warmed.rom.trim(MAX_PAGES);
+  assert.equal(warmed.rom.chunks.size, MAX_PAGES);
+  assert.equal(warmed.rom.warmPages.size, 3);
+  warmed.read(100, 310 * PAGE_SIZE, PAGE_SIZE * 2);
+  warmed.read(110, 602 * PAGE_SIZE + 10, 16);
+  assert.deepEqual(warmed.sync, []);
+  assert.equal(warmed.rom.hintAttempts, 0);
+  assert.equal(warmed.rom.warmPages.size, 3, 'warm pages remain protected for repeat reads');
+  for (let page = 500; page <= 505; page++) {
+    simulatedMissCosts.set(page, 100);
+    warmed.read(150, page * PAGE_SIZE + 2);
+  }
+  assert.equal(warmed.rom.warmRanges.some(([page]) => page === 310), false);
+  warmed.rom.close();
+  const persisted = JSON.parse(learnedWarmStorage.get(warmed.rom.warmKey));
+  assert.deepEqual(persisted.slice(0, 2), [[310, 2, 31], [602, 1, 24]]);
+  assert.equal(persisted.length, 6);
+  simulatedMissCosts.clear();
+  learnedWarmStorage.set(warmed.rom.warmKey, JSON.stringify(persisted.slice(0, 2)));
+
+  const beforeCanceledWarm = requests.length;
+  const canceledWarm = make(uid, warmStorage);
+  const unfinishedWarm = requests.at(-1);
+  canceledWarm.read(100, 888 * PAGE_SIZE + 2);
+  assert.equal(canceledWarm.sync.length, 1);
+  assert.equal(unfinishedWarm.signal.aborted, true);
+  unfinishedWarm.finish();
+  await flush();
+  assert.equal(requests.length, beforeCanceledWarm + 1, 'demand cancels all remaining warm ranges');
+  assert.equal(canceledWarm.rom.chunks.has(310), false);
+  canceledWarm.rom.close();
+  const expired = make(uid, warmStorage);
+  requests.at(-1).finish();
+  await flush();
+  requests.at(-1).finish();
+  await flush();
+  expired.rom.markReadAheadFrame(100);
+  assert.equal(expired.rom.warmPages.size, 3);
+  expired.rom.markReadAheadFrame(45100);
+  assert.equal(expired.rom.warmPages.size, 0);
+  expired.rom.close();
+  const beforeForeign = requests.length;
+  make(alternateUid, warmStorage).rom.close();
+  assert.equal(requests.length, beforeForeign, 'warm offsets are isolated per ROM');
+  console.log('PASS exact bounded warm offsets, two serial requests, demand cancellation and game identity');
+
+  const burstData = new Map();
+  let burstWrites = 0;
+  const burstStorage = {
+    getItem: key => burstData.get(key),
+    setItem(key, value) { burstWrites++; burstData.set(key, value); },
+  };
+  const burstTraining = make(uid, burstStorage);
+  for (const page of [157, 504, 506, 508]) simulatedMissCosts.set(page, 8);
+  burstTraining.read(100, 157 * PAGE_SIZE);
+  burstTraining.read(150, 504 * PAGE_SIZE + 1);
+  burstTraining.read(235, 506 * PAGE_SIZE + 2, PAGE_SIZE);
+  burstTraining.read(330, 508 * PAGE_SIZE);
+  assert.equal(burstTraining.sync.length, 4);
+  burstTraining.rom.close();
+  assert.deepEqual(JSON.parse(burstData.get(burstTraining.rom.burstKey)), [[504, 5]]);
+  const writesAfterTraining = burstWrites;
+  burstTraining.rom.close();
+  assert.equal(burstWrites, writesAfterTraining, 'closing twice persists the same burst only once');
+  assert.equal(burstData.has(burstTraining.rom.warmKey), false);
+  const beforeBurst = requests.length;
+  const burstRepeat = make(uid, burstStorage);
+  assert.equal(requests.length, beforeBurst + 1);
+  const burstRequest = requests.at(-1);
+  assert.deepEqual([burstRequest.first, burstRequest.last], [504 * PAGE_SIZE, 509 * PAGE_SIZE - 1]);
+  burstRequest.finish();
+  await flush();
+  for (let i = 0; i < MAX_PAGES + 20; i++) burstRepeat.rom.chunks.set(700 + i, new Uint8Array(1));
+  burstRepeat.rom.trim(MAX_PAGES);
+  assert.equal(burstRepeat.rom.chunks.size, MAX_PAGES);
+  burstRepeat.read(150, 504 * PAGE_SIZE + 1);
+  burstRepeat.read(235, 506 * PAGE_SIZE + 2, PAGE_SIZE);
+  burstRepeat.read(330, 508 * PAGE_SIZE);
+  assert.deepEqual(burstRepeat.sync, []);
+  assert.deepEqual([...burstRepeat.rom.usedBurstRanges], [504]);
+  burstRepeat.rom.close();
+  burstData.set(burstRepeat.rom.burstKey, JSON.stringify([[504, 11], [MAX_PAGES * 4, 1]]));
+  const beforeInvalidBurst = requests.length;
+  make(uid, burstStorage).rom.close();
+  assert.equal(requests.length, beforeInvalidBurst, 'invalid stored bursts issue no requests');
+  simulatedMissCosts.clear();
+  console.log('PASS sparse timed misses learn a bounded span recovered after cache churn');
 
   console.log(`PASS cold/control ${baseline.length} sync ranges; repeat ${learned.sync.length} + one 128 KiB async; game identity, bad predictions, contention, validity, and 16 MiB checked`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,0 +1,175 @@
+diff --git a/src/core/arm/dyncom/wasm_arm_ops.h b/src/core/arm/dyncom/wasm_arm_ops.h
+--- a/src/core/arm/dyncom/wasm_arm_ops.h
++++ b/src/core/arm/dyncom/wasm_arm_ops.h
+@@ -7,7 +7,7 @@
+ 
+ namespace WasmArm {
+ 
+-enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte, CompareZero };
++enum class Operation : std::uint8_t { Add, Sub, Compare, Move, LoadWord, LoadByte, StoreWord, StoreByte, CompareZero, And, Xor, Or, ClearBits };
+ 
+ struct Instruction {
+     std::uint32_t immediate;
+@@ -50,12 +50,16 @@
+         return false;
+     Operation op;
+     switch ((word >> 20) & 31) { // Four-bit ALU opcode and the S bit.
++    case 0: op = Operation::And; break;
++    case 2: op = Operation::Xor; break;
+     case 4: op = Operation::Sub; break;
+     case 8: op = Operation::Add; break;
+     case 21:
+         if (rd != 0) return false;
+         op = Operation::Compare;
+         break;
++    case 24: op = Operation::Or; break;
++    case 28: op = Operation::ClearBits; break;
+     case 26:
+         if (rn != 0) return false;
+         op = Operation::Move;
+@@ -83,7 +87,11 @@
+     case Operation::Sub:
+     case Operation::Compare:
+     case Operation::CompareZero:
+-    case Operation::Move: return true;
++    case Operation::Move:
++    case Operation::And:
++    case Operation::Xor:
++    case Operation::Or:
++    case Operation::ClearBits: return true;
+     default: return false;
+     }
+ }
+@@ -97,6 +105,10 @@
+     case Operation::Add: cpu.Reg[inst.rd] = lhs + rhs; break;
+     case Operation::Sub: cpu.Reg[inst.rd] = lhs - rhs; break;
+     case Operation::Move: cpu.Reg[inst.rd] = rhs; break;
++    case Operation::And: cpu.Reg[inst.rd] = lhs & rhs; break;
++    case Operation::Xor: cpu.Reg[inst.rd] = lhs ^ rhs; break;
++    case Operation::Or: cpu.Reg[inst.rd] = lhs | rhs; break;
++    case Operation::ClearBits: cpu.Reg[inst.rd] = lhs & ~rhs; break;
+     case Operation::CompareZero:
+         cpu.NFlag = lhs >> 31;
+         cpu.ZFlag = lhs == 0;
+diff --git a/src/core/arm/skyeye_common/vfp/vfpsingle.cpp b/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
+--- a/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
++++ b/src/core/arm/skyeye_common/vfp/vfpsingle.cpp
+@@ -1204,17 +1204,50 @@
+     return magnitude == 0 || (magnitude >= 0x00800000 && magnitude < 0x7f800000);
+ }
+ 
++// Wasm's f64 result is exact for a product of two f32 significands or
++// for an aligned sum that fits within 53 bits. Keep edge cases and other
++// rounding modes in the original VFP path.
++static bool wasm_vfp_exact_scalar(u32 op, u32 n, u32 m, u32& bits, u32& exceptions) {
++    const auto n_exponent = (n >> 23) & 255u;
++    const auto m_exponent = (m >> 23) & 255u;
++    if (!n_exponent || !m_exponent || n_exponent == 255 || m_exponent == 255)
++        return false;
++
++    const double left = std::bit_cast<float>(n);
++    const double right = std::bit_cast<float>(m);
++    double result;
++    if (op == FOP_FMUL) {
++        result = left * right;
++    } else {
++        if (n_exponent > m_exponent + 29 || m_exponent > n_exponent + 29)
++            return false;
++        result = op == FOP_FSUB ? left - right : left + right;
++    }
++    const float rounded = static_cast<float>(result);
++    const u32 word = std::bit_cast<u32>(rounded);
++    const u32 exponent = (word >> 23) & 255u;
++    if (exponent < 2 || exponent > 253)
++        return false;
++    bits = word;
++    exceptions = result == rounded ? 0 : FPSCR_IXC;
++    return true;
++}
++
+ // Scalar VMUL and VMLA share the interpreter's jammed product. Keep that
+ // intermediate until after addition, including on near-exact cancellation.
+-static bool wasm_vfp_multiply(ARMul_State* state, u32 inst, u32 fpscr, u32& exceptions) {
++static bool wasm_vfp_scalar_arithmetic(ARMul_State* state, u32 inst, u32 fpscr, u32& exceptions) {
+     const u32 op = inst & FOP_MASK;
+-    if (op != FOP_FMAC && op != FOP_FMUL)
++    const bool add = op == FOP_FADD || op == FOP_FSUB;
++    if (!add && op != FOP_FMAC && op != FOP_FMUL)
+         return false;
+     const unsigned sd = vfp_get_sd(inst);
+     if ((fpscr & FPSCR_LENGTH_MASK) && FREG_BANK(sd) != 0)
+         return false;
+     const u32 n = state->ExtReg[vfp_get_sn(inst)];
+     const u32 m = state->ExtReg[vfp_get_sm(inst)];
++    if ((fpscr & FPSCR_RMODE_MASK) == FPSCR_ROUND_NEAREST && op != FOP_FMAC &&
++        wasm_vfp_exact_scalar(op, n, m, state->ExtReg[sd], exceptions))
++        return true;
+     const u32 d = state->ExtReg[sd];
+     if (!wasm_vfp_finite_or_zero(n) || !wasm_vfp_finite_or_zero(m) ||
+         (op == FOP_FMAC && !wasm_vfp_finite_or_zero(d)))
+@@ -1223,32 +1256,39 @@
+     vfp_single left, right, result;
+     vfp_single_unpack(&left, n, 0);
+     vfp_single_unpack(&right, m, 0);
+-    result.sign = left.sign ^ right.sign;
+-    result.significand = vfp_hi64to32jamming(static_cast<u64>(left.significand) * right.significand);
+-    result.exponent = result.significand == 0 ? 0 : left.exponent + right.exponent - 125;
+-    if (op == FOP_FMAC) {
+-        vfp_single accumulator, product = result;
+-        vfp_single_unpack(&accumulator, d, 0);
+-        exceptions = vfp_single_add(&result, &accumulator, &product, fpscr);
++    if (add) {
++        if (op == FOP_FSUB)
++            right.sign = vfp_sign_negate(right.sign);
++        exceptions = vfp_single_add(&result, &left, &right, fpscr);
++    } else {
++        result.sign = left.sign ^ right.sign;
++        result.significand = vfp_hi64to32jamming(static_cast<u64>(left.significand) * right.significand);
++        result.exponent = result.significand == 0 ? 0 : left.exponent + right.exponent - 125;
++        if (op == FOP_FMAC) {
++            vfp_single accumulator, product = result;
++            vfp_single_unpack(&accumulator, d, 0);
++            exceptions = vfp_single_add(&result, &accumulator, &product, fpscr);
++        }
+     }
+ 
+     // Normal fixed-point results in round-to-nearest mode can be packed
+     // directly. The original normalizer handles range edges and other modes.
+     if (result.significand && result.exponent != 255 && (fpscr & FPSCR_RMODE_MASK) == FPSCR_ROUND_NEAREST) {
+-        const unsigned shift = std::countl_zero(result.significand);
+-        const int exponent = result.exponent - static_cast<int>(shift);
+-        if (exponent >= 0 && exponent <= 252) {
+-            const u32 normalized = result.significand << shift;
+-            const u32 discarded = normalized & 255;
+-            const u32 kept = normalized >> 8;
+-            const u32 rounded = kept + (discarded > 128 || (discarded == 128 && (kept & 1)));
+-            state->ExtReg[sd] = (static_cast<u32>(result.sign) << 16) + (static_cast<u32>(exponent) << 23) + rounded;
+-            if (discarded)
++        // Convert the jammed significand with the hardware's ties-to-even rounding.
++        // Adjust its IEEE exponent by the exact fixed-point scale when the result
++        // stays away from subnormal and overflow boundaries.
++        const float rounded = static_cast<float>(result.significand);
++        const u32 word = std::bit_cast<u32>(rounded);
++        const int exponent = static_cast<int>(word >> 23) + result.exponent - 157;
++        if (exponent >= 2 && exponent <= 253) {
++            state->ExtReg[sd] = (static_cast<u32>(result.sign) << 16) |
++                                (static_cast<u32>(exponent) << 23) | (word & 0x7fffff);
++            if (static_cast<double>(rounded) != result.significand)
+                 exceptions |= FPSCR_IXC;
+             return true;
+         }
+     }
+-    exceptions = vfp_single_normaliseround(state, sd, &result, fpscr, exceptions, "wasm_scalar_multiply");
++    exceptions = vfp_single_normaliseround(state, sd, &result, fpscr, exceptions, "wasm_scalar_arithmetic");
+     return true;
+ }
+ #endif
+@@ -1263,7 +1303,7 @@
+     struct op* fop;
+ 
+ #ifdef __EMSCRIPTEN__
+-    if (wasm_vfp_multiply(state, inst, fpscr, exceptions))
++    if (wasm_vfp_scalar_arithmetic(state, inst, fpscr, exceptions))
+         return exceptions & ~VFP_NAN_FLAG;
+ #endif
+     vecstride = 1 + ((fpscr & FPSCR_STRIDE_MASK) == FPSCR_STRIDE_MASK);

@@ -52,7 +52,7 @@ const BUTTON_MAP = [
 ];
 const ANALOG_MAX = 0x7fff;
 // Keep every JS/worker/WASM version together, including older open sessions.
-const CORE_REVISION = '3ds-uniform-batch-v37';
+const CORE_REVISION = '3ds-mixed-vfp-v40';
 const CORE_BASE = 'js/' + CORE_REVISION + '/';
 // Screen arrangements offered by the touch controller. `layout` and `screen` are
 // values of the core's citra_layout_option and citra_swap_screen; the size is
@@ -160,6 +160,9 @@ export class Emulator extends RetroAppWrapper {
   setRoms(uid, frontendArray, biosBuffers, romBytes, ext) {
     super.setRoms(uid, frontendArray, biosBuffers, romBytes, ext);
     this.game = this.RA_DIR + 'game.' + this.detectExtension(romBytes, ext);
+    if (this.lazyRom) {
+      try { this.lazyRom.enableReadHints(uid, window.localStorage); } catch (error) { /* optional */ }
+    }
   }
 
   // Large games are streamed: `romBytes` then only holds the start of the file.
@@ -784,7 +787,9 @@ export class Emulator extends RetroAppWrapper {
 
     // First hook after the wrapper has written the game file
     if (this.lazyRom) {
-      try { this.lazyRom.enableReadHints(this.uid, window.localStorage); } catch (error) { /* optional */ }
+      if (!this.lazyRom.readHints) {
+        try { this.lazyRom.enableReadHints(this.uid, window.localStorage); } catch (error) { /* optional */ }
+      }
       this.lazyRom.mount(FS, this.game);
     }
 

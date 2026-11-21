@@ -1,0 +1,202 @@
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.h b/src/video_core/renderer_opengl/gl_rasterizer.h
+--- a/src/video_core/renderer_opengl/gl_rasterizer.h
++++ b/src/video_core/renderer_opengl/gl_rasterizer.h
+@@ -4,6 +4,10 @@
+ 
+ #pragma once
+ 
++#if defined(__EMSCRIPTEN__)
++#include <optional>
++#include <unordered_map>
++#endif
+ #include "video_core/rasterizer_accelerated.h"
+ #include "video_core/rasterizer_interface.h"
+ #include "video_core/renderer_opengl/gl_shader_manager.h"
+@@ -96,6 +100,13 @@
+     void SetupVertexArray(u8* array_ptr, GLintptr buffer_offset, GLuint vs_input_index_min,
+                           GLuint vs_input_index_max);
+ 
++#if defined(__EMSCRIPTEN__)
++    // Empty if the original copy is required. Zero means the streaming data
++    // is ready, while a nonzero handle identifies immutable resident bytes.
++    std::optional<GLuint> PrepareResidentVertexInput(u8* output, u32 size, u32 vertex_min,
++                                                      u32 vertex_max);
++#endif
++
+     void SetHardwareVertexPointer(GLuint slot, GLint size, GLenum type, GLsizei stride,
+                                   GLintptr offset);
+ 
+@@ -129,6 +140,12 @@
+         bool operator==(const VertexPointer&) const = default;
+     };
+     std::array<VertexPointer, 16> hw_vertex_pointers{};
++    struct ResidentVertexInput {
++        OGLBuffer buffer;
++        std::vector<u8> bytes;
++    };
++    std::unordered_map<u64, ResidentVertexInput> resident_vertex_inputs;
++    std::size_t resident_vertex_bytes{};
+ #endif
+ 
+     OGLStreamBuffer vertex_buffer;
+diff --git a/src/video_core/renderer_opengl/gl_rasterizer.cpp b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -5,6 +5,7 @@
+ #ifdef __EMSCRIPTEN__
+ #include <emscripten.h>
+ #endif
++#include <cstring>
+ #include "common/alignment.h"
+ #include "common/assert.h"
+ #include "common/literals.h"
+@@ -490,6 +491,94 @@
+     glVertexAttribPointer(slot, size, type, GL_FALSE, stride, reinterpret_cast<GLvoid*>(offset));
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++std::optional<GLuint> RasterizerOpenGL::PrepareResidentVertexInput(u8* output, u32 size,
++                                                                   u32 vertex_min, u32 vertex_max) {
++    constexpr std::size_t MaxBytes = 4_MiB;
++    constexpr std::size_t MaxEntries = 256;
++    if (size < 256 || size > 256_KiB) {
++        return std::nullopt;
++    }
++
++    const auto& attributes = regs.pipeline.vertex_attributes;
++    const auto base = attributes.GetPhysicalBaseAddress();
++    const u32 vertex_count = vertex_max - vertex_min + 1;
++    struct Range {
++        PAddr address;
++        u32 size;
++    };
++    std::array<Range, 12> ranges{};
++    std::size_t num_ranges = 0;
++    std::size_t bytes = 0;
++    for (const auto& loader : attributes.attribute_loaders) {
++        if (loader.component_count == 0 || loader.byte_count == 0) {
++            continue;
++        }
++        const u64 length = static_cast<u64>(loader.byte_count) * vertex_count;
++        if (length > size - bytes || num_ranges == ranges.size()) {
++            return std::nullopt;
++        }
++        ranges[num_ranges++] = {
++            base + loader.data_offset + vertex_min * loader.byte_count, static_cast<u32>(length)};
++        bytes += length;
++    }
++    // The original path leaves unused alignment bytes in the stream buffer.
++    // Only cache draws whose upload is completely described by these ranges.
++    if (bytes != size) {
++        return std::nullopt;
++    }
++
++    const u8* input = output;
++    if (num_ranges == 1) {
++        const auto& range = ranges[0];
++        res_cache.FlushRegion(range.address, range.size);
++        input = memory.GetPhysicalPointer(range.address);
++    } else {
++        auto* dest = output;
++        for (std::size_t i = 0; i < num_ranges; ++i) {
++            const auto& range = ranges[i];
++            res_cache.FlushRegion(range.address, range.size);
++            std::memcpy(dest, memory.GetPhysicalPointer(range.address), range.size);
++            dest += range.size;
++        }
++    }
++
++    // Sampled bytes are only an index. A hit always verifies the full upload.
++    u64 key = size;
++    for (u32 i = 0; i < 16; ++i) {
++        key = (key ^ input[(size - 1) * i / 15]) * 1099511628211ull;
++    }
++    const auto item = resident_vertex_inputs.find(key);
++    if (item != resident_vertex_inputs.end()) {
++        const auto& entry = item->second;
++        if (entry.bytes.size() == size && std::memcmp(entry.bytes.data(), input, size) == 0) {
++            return entry.buffer.handle;
++        }
++    }
++    if (input != output) {
++        std::memcpy(output, input, size);
++    }
++    if (item != resident_vertex_inputs.end() || resident_vertex_inputs.size() >= MaxEntries ||
++        resident_vertex_bytes + size > MaxBytes) {
++        return 0;
++    }
++
++    ResidentVertexInput entry;
++    entry.buffer.Create();
++    if (!entry.buffer.handle) {
++        return 0;
++    }
++    entry.bytes.assign(output, output + size);
++    const GLuint handle = entry.buffer.handle;
++    state.draw.vertex_buffer = handle;
++    state.Apply();
++    glBufferData(GL_ARRAY_BUFFER, size, output, GL_STATIC_DRAW);
++    resident_vertex_bytes += size;
++    resident_vertex_inputs.emplace(key, std::move(entry));
++    return handle;
++}
++#endif
++
+ void RasterizerOpenGL::SetupVertexArray(u8* array_ptr, GLintptr buffer_offset,
+                                         GLuint vs_input_index_min, GLuint vs_input_index_max) {
+     MICROPROFILE_SCOPE(OpenGL_VAO);
+@@ -497,7 +586,6 @@
+     PAddr base_address = vertex_attributes.GetPhysicalBaseAddress();
+ 
+     state.draw.vertex_array = hw_vao.handle;
+-    state.draw.vertex_buffer = vertex_buffer.GetHandle();
+     state.Apply();
+ 
+     std::array<bool, 16> enable_attributes{};
+@@ -538,10 +626,11 @@
+         const u32 vertex_num = vs_input_index_max - vs_input_index_min + 1;
+         const u32 data_size = loader.byte_count * vertex_num;
+ 
+-        res_cache.FlushRegion(data_addr, data_size);
+-        std::memcpy(array_ptr, memory.GetPhysicalPointer(data_addr), data_size);
+-
+-        array_ptr += data_size;
++        if (array_ptr) {
++            res_cache.FlushRegion(data_addr, data_size);
++            std::memcpy(array_ptr, memory.GetPhysicalPointer(data_addr), data_size);
++            array_ptr += data_size;
++        }
+         buffer_offset += data_size;
+     }
+ 
+@@ -662,7 +751,9 @@
+     if (status != ProgramStatus::Ready) {
+         return status;
+     }
++#ifndef __EMSCRIPTEN__
+     state.draw.vertex_buffer = vertex_buffer.GetHandle();
++#endif
+     state.Apply();
+ #ifdef __EMSCRIPTEN__
+     curr_shader_manager->UploadCombiner(state.draw.shader_program);
+@@ -671,8 +762,20 @@
+     u8* buffer_ptr;
+     GLintptr buffer_offset;
+     std::tie(buffer_ptr, buffer_offset, std::ignore) = vertex_buffer.Map(vs_input_size, 4);
++#if defined(__EMSCRIPTEN__)
++    const auto resident =
++        PrepareResidentVertexInput(buffer_ptr, vs_input_size, vs_input_index_min, vs_input_index_max);
++    const GLuint cached = resident.value_or(0);
++    state.draw.vertex_buffer = cached ? cached : vertex_buffer.GetHandle();
++    SetupVertexArray(resident ? nullptr : buffer_ptr, buffer_offset, vs_input_index_min,
++                     vs_input_index_max);
++    if (!cached) {
++        vertex_buffer.Unmap(vs_input_size);
++    }
++#else
+     SetupVertexArray(buffer_ptr, buffer_offset, vs_input_index_min, vs_input_index_max);
+     vertex_buffer.Unmap(vs_input_size);
++#endif
+ 
+     state.Apply();
+ 

@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.21",
+    "date": "November 21, 2026",
+    "title": "3DS cutscene performance improvements",
+    "changes": [
+      "The 3DS core reduces overhead for common ARM and floating-point instructions and reuses previously uploaded vertex data.",
+      "The 3DS player learns groups of nearby game reads and fetches them in the background on later launches to reduce cutscene stalls."
+    ]
+  },
+  {
     "version": "3.1.20",
     "date": "November 21, 2026",
     "title": "Smoother 3DS battle menus on WebKit",

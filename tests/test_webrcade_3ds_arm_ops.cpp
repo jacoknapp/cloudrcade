@@ -3,6 +3,7 @@
 #include "core/arm/dyncom/arm_dyncom_trans.h"
 #include "core/arm/dyncom/wasm_arm_ops.h"
 #include "core/arm/dyncom/wasm_arm_stack.h"
+#include "core/arm/dyncom/wasm_arm_vfp.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -20,6 +21,7 @@ struct Access {
 
 struct Cpu {
     std::array<std::uint32_t, 16> Reg{};
+    std::array<std::uint32_t, 64> ExtReg{};
     unsigned NFlag{}, ZFlag{}, CFlag{}, VFlag{}, shifter_carry_out{};
     Access access;
     static unsigned MemoryValue(unsigned address) { return address ^ 0xe516c27bu; }
@@ -64,6 +66,10 @@ void Compare(unsigned word, Cpu before) {
             if (shift) before.shifter_carry_out = rhs >> 31;
         }
         switch ((word >> 21) & 15) {
+        case 0: before.Reg[rd] = lhs & rhs; break;
+        case 1: before.Reg[rd] = lhs ^ rhs; break;
+        case 12: before.Reg[rd] = lhs | rhs; break;
+        case 14: before.Reg[rd] = lhs & ~rhs; break;
         case 4: before.Reg[rd] = lhs + rhs; break;
         case 2: before.Reg[rd] = lhs - rhs; break;
         case 13: before.Reg[rd] = rhs; break;
@@ -143,6 +149,62 @@ void CheckMappedRuns() {
     }
 }
 
+void CheckMixedVfpRuns() {
+    using namespace WasmArm;
+
+    constexpr std::array words{0xe2801004u, 0xed9f0a00u, 0xee300a00u, 0xed810a00u};
+    std::array<Instruction, words.size()> run{};
+    assert(Decode(words[0], run[0]));
+    for (unsigned i = 1; i < words.size(); ++i) {
+        assert(DecodeVfp(words[i], run[i]));
+        assert(!DecodeVfp(words[i] ^ (1u << 8), run[i]));
+        assert(!DecodeVfp(words[i] ^ (1u << 28), run[i]));
+    }
+    const auto instruction_at = [&](unsigned i) -> const Instruction& { return run.at(i); };
+    const auto add_four = [](Cpu& cpu, std::uint32_t word) {
+        assert(word == 0xee300a00u);
+        cpu.ExtReg[0] += 4;
+    };
+
+    for (unsigned budget = 0; budget <= words.size(); ++budget) {
+        Cpu cpu;
+        cpu.Reg[0] = 8;
+        cpu.Reg[15] = 0x20;
+        std::array<std::uint8_t, 4096> page{};
+        page[0x2c] = 0x23;
+        std::array<std::uint8_t*, 2> pages{page.data(), nullptr};
+
+        assert(RunMappedWithVfp(cpu, pages.data(), budget, instruction_at, add_four) == budget);
+        assert(cpu.Reg[1] == (budget >= 1 ? 12u : 0u));
+        assert(cpu.Reg[15] == 0x20);
+        assert(cpu.ExtReg[0] == (budget >= 3 ? 0x27u : budget >= 2 ? 0x23u : 0u));
+        assert(page[12] == (budget >= 4 ? 0x27u : 0u));
+        assert(cpu.access == Access{});
+    }
+
+    std::array<std::uint8_t, 4096> page{};
+    std::array<std::uint8_t*, 2> pages{page.data(), nullptr};
+    for (unsigned miss : {4093u, 4094u, 4095u, 4096u}) {
+        Cpu cpu;
+        cpu.Reg[0] = 8;
+        cpu.Reg[15] = miss - 12; // The second instruction is VLDR s0, [PC, #0].
+        if (miss & 3u) {
+            assert(DecodeVfp(0xed901a00, run[1]));
+            cpu.Reg[0] = miss;
+        }
+        assert(RunMappedWithVfp(cpu, pages.data(), 2, instruction_at, add_four) == 1);
+        assert(cpu.ExtReg[0] == 0 && cpu.ExtReg[2] == 0 && cpu.access == Access{});
+        cpu.Reg[15] += 4;
+        ExecuteVfp(cpu, run[1], add_four);
+        assert(cpu.access == (Access{4, miss, Cpu::MemoryValue(miss), false}));
+        assert(DecodeVfp(words[1], run[1]));
+    }
+
+    Instruction rejected;
+    assert(!DecodeVfp(0xed200a00, rejected)); // Multiple transfer with writeback.
+    assert(!DecodeVfp(0xee800a00, rejected)); // Divide retains its existing decoder.
+}
+
 void CheckMappedStackTransfers() {
     struct StackCpu {
         std::array<std::uint32_t, 16> Reg{};
@@ -191,6 +253,7 @@ void CheckMappedStackTransfers() {
 
 int main() {
     CheckMappedRuns();
+    CheckMixedVfpRuns();
     CheckMappedStackTransfers();
     // An empty payload still occupies one byte. The next instruction may
     // carry an addressing function pointer, including on wider host builds.
@@ -227,7 +290,7 @@ int main() {
         cpu.CFlag = rng() & 1;
         cpu.NFlag = cpu.VFlag = cpu.ZFlag = cpu.shifter_carry_out = i & 1;
         const unsigned rn = rng() % 15, rd = rng() % 15;
-        for (unsigned opcode : {4u, 8u, 21u, 26u}) {
+        for (unsigned opcode : {0u, 2u, 4u, 8u, 21u, 24u, 26u, 28u}) {
             const unsigned stem = 0xe0000000u | (opcode << 20) |
                 ((opcode == 26 ? 0 : rn) << 16) | ((opcode == 21 ? 0 : rd) << 12);
             Compare(stem | (1u << 25) | (i & 4095u), cpu);

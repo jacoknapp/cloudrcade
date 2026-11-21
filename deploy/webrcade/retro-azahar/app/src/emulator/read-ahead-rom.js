@@ -11,6 +11,13 @@ const MAX_FORWARD_GAP = 64 * 1024;
 const GAME_ID_BYTES = 64 * 1024;
 const MAX_READ_HINTS = 64;
 const MAX_RECENT_ANCHORS = 16;
+const MAX_WARM_RANGES = 6;
+const MAX_BURST_RANGES = 3;
+const MAX_BURST_PAGES = 10;
+const BURST_WINDOW_MS = 1800;
+const MIN_BURST_TOTAL_MS = 12;
+const WARM_REUSE_WINDOW_MS = 45000;
+const MIN_WARM_WAIT_MS = 12;
 const MAX_RANGES_PER_HINT = 2;
 const MAX_HINT_ATTEMPTS = MAX_READ_HINTS * MAX_RANGES_PER_HINT;
 const MIN_HINT_LEAD_MS = 40;
@@ -40,6 +47,8 @@ export class ReadAheadRom extends LazyRom {
     this.lastDemandIndex = -1;
     this.headerController = null;
     this.prefetched = new Set();
+    this.warmPages = new Set();
+    this.warmUntil = -1;
     this.readAheadStats = { misses: 0, prefetched: 0, prefetchHits: 0 };
   }
 
@@ -88,9 +97,21 @@ export class ReadAheadRom extends LazyRom {
 
   trim(limit) {
     while (this.chunks.size > limit) {
-      const index = this.chunks.keys().next().value;
+      let index = this.chunks.keys().next().value;
+      // Recently learned cold reads can otherwise be evicted by asset loading
+      // before the player reaches them. Keep at most 54 warmed pages in the
+      // shared cache through the initial play window.
+      if (this.warmPages.has(index)) {
+        for (const candidate of this.chunks.keys()) {
+          if (!this.warmPages.has(candidate)) {
+            index = candidate;
+            break;
+          }
+        }
+      }
       this.chunks.delete(index);
       this.prefetched.delete(index);
+      this.warmPages.delete(index);
     }
   }
 
@@ -100,7 +121,7 @@ export class ReadAheadRom extends LazyRom {
     if (pending) pending.controller.abort();
   }
 
-  prefetch(index, pages = STREAM_PAGES, learned = null) {
+  prefetch(index, pages = STREAM_PAGES, learned = null, warm = false) {
     if (this.closed || typeof fetch !== 'function' || typeof AbortController !== 'function' ||
         index * PAGE_SIZE >= this.size || this.chunks.has(index) ||
         index === this.failedPrefetch || this.pending) return;
@@ -115,9 +136,13 @@ export class ReadAheadRom extends LazyRom {
       if (this.pending !== pending || this.closed) return;
       this.pending = null;
       this.storePages(index, bytes);
-      for (let i = index; i <= lastPage; i++) this.prefetched.add(i);
+      const retainWarm = warm && (this.warmUntil < 0 || this.frameTime < this.warmUntil);
+      for (let i = index; i <= lastPage; i++) {
+        this.prefetched.add(i);
+        if (retainWarm) this.warmPages.add(i);
+      }
       this.readAheadStats.prefetched++;
-      if (learned?.length) this.prefetchLearned(learned);
+      if (learned?.length) this.prefetchLearned(learned, warm);
     }).catch(() => {
       // Speculation never changes demand-read errors or retries a bad range
       // every frame. A cancelled/stale request cannot modify the current one.
@@ -139,6 +164,41 @@ export class ReadAheadRom extends LazyRom {
     this.startingHints = new Set();
     this.hintAttempts = 0;
     this.frameTime = -1;
+    this.warmKey = `${this.hintKey}.warm.v1`;
+    this.warmRanges = [];
+    this.startingWarmRanges = new Map();
+    this.usedWarmRanges = new Set();
+    this.burstKey = `${this.hintKey}.burst.v1`;
+    this.burstRanges = [];
+    this.startingBursts = new Map();
+    this.usedBurstRanges = new Set();
+    try {
+      const text = storage.getItem(this.warmKey);
+      const ranges = text && text.length <= 512 ? JSON.parse(text) : [];
+      if (Array.isArray(ranges) && ranges.length <= MAX_WARM_RANGES) {
+        this.warmRanges = ranges.filter(range => Array.isArray(range) && range.length === 3 &&
+          range.every(Number.isSafeInteger) && range[0] >= 0 && range[1] > 0 &&
+          range[1] <= STREAM_PAGES && range[0] + range[1] <= Math.ceil(this.size / PAGE_SIZE) &&
+          range[2] >= MIN_WARM_WAIT_MS && range[2] <= 2000);
+        for (const range of this.warmRanges) this.startingWarmRanges.set(range[0], range);
+      }
+    } catch (error) { /* Warm hints are optional. */ }
+    try {
+      const text = storage.getItem(this.burstKey);
+      const ranges = text && text.length <= 512 ? JSON.parse(text) : [];
+      if (Array.isArray(ranges) && ranges.length <= MAX_BURST_RANGES) {
+        for (const range of ranges) {
+          if (Array.isArray(range) && range.length === 2 && range.every(Number.isSafeInteger) &&
+              range[0] >= 0 && range[1] > 0 && range[1] <= MAX_BURST_PAGES &&
+              range[0] + range[1] <= Math.ceil(this.size / PAGE_SIZE)) {
+            this.startingBursts.set(range[0], range);
+          }
+        }
+      }
+    } catch (error) { /* Burst hints are optional. */ }
+    // A foreground miss cancels the in-flight request and its continuation.
+    this.prefetchLearned([...this.warmRanges, ...this.startingBursts.values()], true);
+    this.warmRanges.sort((a, b) => b[2] - a[2]);
     try {
       const text = storage.getItem(this.hintKey);
       const rows = text && text.length <= 8192 ? JSON.parse(text) : [];
@@ -163,17 +223,61 @@ export class ReadAheadRom extends LazyRom {
   markReadAheadFrame(time) {
     this.frameTime = time;
     this.anchorRecorded = false;
+    if (this.warmPages.size) {
+      if (this.warmUntil < 0) this.warmUntil = time + WARM_REUSE_WINDOW_MS;
+      if (time >= this.warmUntil) this.warmPages.clear();
+    }
   }
 
-  prefetchLearned(ranges) {
-    for (let i = 0; i < ranges.length && this.hintAttempts < MAX_HINT_ATTEMPTS; i++) {
+  prefetchLearned(ranges, warm = false) {
+    for (let i = 0; i < ranges.length && (warm || this.hintAttempts < MAX_HINT_ATTEMPTS); i++) {
       const [page, count] = ranges[i];
-      if (this.prefetch(page, count, ranges.slice(i + 1))) {
-        this.hintAttempts++;
+      if (this.prefetch(page, count, ranges.slice(i + 1), warm)) {
+        if (!warm) this.hintAttempts++;
         return true;
       }
     }
     return false;
+  }
+
+  rememberWarmRange(page, count, elapsed) {
+    let ms = Math.min(Math.round(elapsed), 2000);
+    if (ms < MIN_WARM_WAIT_MS) return;
+    const previous = this.warmRanges.findIndex(range => range[0] === page);
+    if (previous >= 0) {
+      if (this.warmRanges[previous][1] >= count && this.warmRanges[previous][2] >= ms) return;
+      const entry = this.warmRanges[previous];
+      this.warmRanges.splice(previous, 1);
+      count = Math.max(count, entry[1]);
+      ms = Math.max(ms, entry[2]);
+    } else if (this.warmRanges.length === MAX_WARM_RANGES && this.warmRanges.at(-1)[2] >= ms) {
+      return;
+    }
+    this.warmRanges.push([page, count, ms]);
+    this.warmRanges.sort((a, b) => b[2] - a[2]);
+    this.warmRanges.length = Math.min(this.warmRanges.length, MAX_WARM_RANGES);
+    this.warmChanged = true;
+  }
+
+  rememberBurst(page, count, elapsed) {
+    if (elapsed < 4 || count > MAX_BURST_PAGES) return;
+    const end = page + count;
+    const previous = this.recentDemandBurst;
+    const first = previous ? Math.min(page, previous.first) : page;
+    const last = previous ? Math.max(end, previous.end) : end;
+    if (!previous || this.frameTime - previous.time > BURST_WINDOW_MS ||
+        last - first > MAX_BURST_PAGES || page > previous.end + 2 || end + 2 < previous.first) {
+      this.recentDemandBurst = { first: page, end, time: this.frameTime, elapsed };
+      return;
+    }
+    previous.first = first;
+    previous.end = last;
+    previous.elapsed += elapsed;
+    if (previous.elapsed >= MIN_BURST_TOTAL_MS) {
+      this.burstRanges = this.burstRanges.filter(([base, pages]) => base + pages <= first || base >= last);
+      this.burstRanges.push([first, last - first]);
+      if (this.burstRanges.length > MAX_BURST_RANGES) this.burstRanges.shift();
+    }
   }
 
   observeShortRead(position, firstMissing, pages) {
@@ -223,6 +327,37 @@ export class ReadAheadRom extends LazyRom {
     this.cancelPrefetch();
     this.chunks.clear();
     this.prefetched.clear();
+    this.warmPages.clear();
+    if (this.warmChanged) {
+      this.warmChanged = false;
+      try {
+        // A range that served a demand read is more reliable than a new
+        // candidate that might only reflect a single slow request.
+        const known = new Map(this.warmRanges.map(range => [range[0], range]));
+        const confirmed = [];
+        for (const page of this.usedWarmRanges) {
+          confirmed.push(known.get(page) || this.startingWarmRanges.get(page));
+          known.delete(page);
+        }
+        const next = [...confirmed, ...known.values()].slice(0, MAX_WARM_RANGES);
+        this.hintStorage.setItem(this.warmKey, JSON.stringify(next));
+      } catch (error) { /* Warm hints are optional. */ }
+    }
+    if (this.burstRanges?.length) {
+      const learned = this.burstRanges;
+      this.burstRanges = [];
+      try {
+        const known = new Map(learned.map(range => [range[0], range]));
+        const confirmed = [];
+        for (const page of this.usedBurstRanges) {
+          confirmed.push(known.get(page) || this.startingBursts.get(page));
+          known.delete(page);
+        }
+        const recent = [...known.values()].reverse();
+        const bursts = [...confirmed, ...recent].slice(0, MAX_BURST_RANGES);
+        this.hintStorage.setItem(this.burstKey, JSON.stringify(bursts));
+      } catch (error) { /* Burst hints are optional. */ }
+    }
     if (this.hintsChanged) {
       this.hintsChanged = false;
       try {
@@ -242,7 +377,13 @@ export class ReadAheadRom extends LazyRom {
     if (chunk) {
       if (index === this.lastDemandIndex) return chunk;
       this.chunks.delete(index);
-      if (this.prefetched.delete(index)) this.readAheadStats.prefetchHits++;
+      if (this.prefetched.delete(index)) {
+        this.readAheadStats.prefetchHits++;
+        if (this.warmPages.has(index)) {
+          if (this.startingWarmRanges.has(index)) this.usedWarmRanges.add(index);
+          if (this.startingBursts.has(index)) this.usedBurstRanges.add(index);
+        }
+      }
     } else {
       // A demand read must not wait for an asynchronous request. Reclaim its
       // reservation before using the existing synchronous fallback.
@@ -256,6 +397,7 @@ export class ReadAheadRom extends LazyRom {
       const reserved = this.pending ? this.pending.lastPage - this.pending.index + 1 : 0;
       this.trim(MAX_PAGES - reserved - (last - index + 1));
       this.readAheadStats.misses++;
+      const warmStart = this.warmRanges && this.frameTime >= 0 ? performance.now() : -1;
       if (last === index) {
         chunk = this.fetchChunk(index);
       } else {
@@ -264,6 +406,11 @@ export class ReadAheadRom extends LazyRom {
         this.storePages(index, bytes);
         chunk = this.chunks.get(index);
         this.chunks.delete(index);
+      }
+      if (warmStart >= 0) {
+        const elapsed = performance.now() - warmStart;
+        this.rememberWarmRange(index, Math.min(last - index + 1, STREAM_PAGES), elapsed);
+        this.rememberBurst(index, last - index + 1, elapsed);
       }
     }
     this.chunks.set(index, chunk);
