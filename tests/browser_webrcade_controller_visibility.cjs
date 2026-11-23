@@ -1,17 +1,39 @@
 // Requires Playwright Chromium and WebKit. Isolated controller lifecycle harness; no accounts or saves.
 const {chromium,webkit}=require('playwright');const fs=require('fs'),assert=require('assert/strict');
+const path=require('node:path');
+const assets=process.env.WEBRCADE_TOUCH_ASSETS_ROOT||path.join(__dirname,'../deploy/webrcade/touch/assets');
 (async()=>{for(const engine of [chromium,webkit]){
 const b=await engine.launch({headless:true,...(engine===chromium?{...(process.env.CHROME ? {executablePath:process.env.CHROME} : {}),args:['--no-sandbox']}:{executablePath:process.env.WEBRCADE_TEST_WEBKIT_PATH} )});const c=await b.newContext({hasTouch:true,viewport:{width:402,height:874}});const p=await c.newPage();await p.route('http://controller.test/**',route=>route.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'}));await p.goto('http://controller.test/play/app/retro-azahar/');
-await p.addStyleTag({content:fs.readFileSync(require('path').join(__dirname,'../deploy/webrcade/touch/assets/controller.css'),'utf8')});await p.addScriptTag({content:fs.readFileSync(require('path').join(__dirname,'../deploy/webrcade/touch/assets/controller.js'),'utf8')});assert.equal(await p.locator('.kt-tab').isVisible(),false,'library must hide dock');
+await p.addStyleTag({content:fs.readFileSync(path.join(assets,'controller.css'),'utf8')});await p.addScriptTag({content:fs.readFileSync(path.join(assets,'controller.js'),'utf8')});assert.equal(await p.locator('.kt-tab').isVisible(),false,'library must hide dock');
 await p.evaluate(()=>{const controller={isControlDown:()=>false,isPadButtonDown:()=>false,getAxisValue:()=>0,isAxisLeft:()=>false,isAxisRight:()=>false,isAxisUp:()=>false,isAxisDown:()=>false};window.app={isShowOverlay:()=>false,isPauseScreen:()=>false,emulator:{started:false,paused:false,updateScreenSize(){},controllers:{getController:()=>controller},pause(v){this.paused=v;return true;}}}});await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),false,'loading must hide dock');await p.evaluate(()=>app.emulator.started=true);await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),true,'running game must show dock');
 assert.equal(await p.locator('[aria-label="Circle Pad"]').count(),1);assert.equal(await p.locator('[aria-label="C-stick"]').count(),1);assert.equal(await p.locator('.kt-dpad').count(),1);
-for(const viewport of [{width:402,height:874},{width:874,height:402}]){
+for(const viewport of [{width:320,height:568},{width:402,height:874},{width:461,height:900},{width:480,height:900},{width:594,height:368},{width:874,height:402}]){
  await p.setViewportSize(viewport);await p.waitForTimeout(200);const r=await p.locator('.kt-c-stick').boundingBox();assert(r&&r.width===36&&r.height===36);assert(r.x>=0&&r.y>=0&&r.x+r.width<=viewport.width&&r.y+r.height<=viewport.height);
+ const shoulder=p.locator('.kt-shoulders [data-cid="9"]');
+ const nubHit=await p.locator('.kt-c-stick .kt-hit-area').boundingBox();
+ const shoulderHit=await shoulder.locator('.kt-hit-area').boundingBox();
+ assert(nubHit.x+nubHit.width<=shoulderHit.x||shoulderHit.x+shoulderHit.width<=nubHit.x||
+   nubHit.y+nubHit.height<=shoulderHit.y||shoulderHit.y+shoulderHit.height<=nubHit.y,
+   `C-stick clears the R touch area at ${viewport.width}px`);
+ const rb=await shoulder.boundingBox();
+ await p.mouse.move(rb.x+rb.width/2,rb.y+rb.height/2);
+ await p.mouse.down();
+ assert.equal(await p.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(9)),true,'R sends its own input');
+ assert.equal(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true)),0,'R does not engage the C-stick');
+ await p.mouse.up();
+ if(viewport.width<=460){
+  const x=await p.locator('.kt-actions [data-cid="7"]').boundingBox();
+  assert(Math.abs(r.x+r.width/2-x.x-x.width/2)<1 && r.y+r.height+18<=x.y,'C-stick sits above X with a touch gap');
+ }
+ if(viewport.width>460&&viewport.width<600){
+  const y=await p.locator('.kt-actions [data-cid="6"]').boundingBox();
+  assert(r.x+r.width+18<=y.x && r.y+r.height>y.y,'C-stick sits next to the face buttons');
+ }
  await p.mouse.move(r.x+r.width*.8,r.y+r.height*.5);await p.mouse.down();assert(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true))>.5);assert.equal(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(0,true)),0);await p.mouse.up();assert.equal(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true)),0);
  await p.mouse.move(r.x+r.width+6,r.y+r.height/2);await p.mouse.down();assert(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true))>.99,'invisible nub margin reaches full analog input');const knob=await p.locator('.kt-c-stick i').boundingBox();assert(knob.width===18&&knob.x>=r.x&&knob.x+knob.width<=r.x+r.width,'nub travel stays inside its small base');await p.mouse.up();assert.equal(await p.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true)),0);
 }
 await p.setViewportSize({width:402,height:874});await p.waitForTimeout(200);
 await p.locator('.kt-tab').tap();await p.locator('.kt-edit').tap();await p.waitForTimeout(200);assert.equal(await p.locator('.kt-save').isVisible(),true,'paused editing must stay usable');await p.locator('.kt-cancel').tap();await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),true);
 await p.evaluate(()=>app.emulator.paused=true);await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),false,'native pause must hide dock');await p.evaluate(()=>app.emulator.paused=false);await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),true);await p.evaluate(()=>app.emulator.started=false);await p.waitForTimeout(200);assert.equal(await p.locator('.kt-tab').isVisible(),false,'exit must hide dock');console.log('PASS',engine.name(),'library/loading/play/edit/pause/resume/exit controller visibility');
-const desktop=await b.newContext({viewport:{width:1440,height:900}});await desktop.addInitScript(()=>Object.defineProperty(navigator,'maxTouchPoints',{get:()=>5}));for(const route of ['/experimental/gamecube/','/play/app/nes/','/play/app/retro-ppsspp/']){const d=await desktop.newPage();await d.route('http://controller.test/**',r=>r.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'}));await d.goto('http://controller.test'+route);await d.addScriptTag({content:fs.readFileSync(require('path').join(__dirname,'../deploy/webrcade/touch/assets/controller.js'),'utf8')});assert.equal(await d.locator('#wrcad-touch').count(),0,'fine-pointer desktop never creates touch UI, even with a touchscreen');await d.close();}console.log('PASS',engine.name(),'GameCube/NES/PSP desktop and hybrid touch-capable desktops have no touch overlay');await b.close();
+const desktop=await b.newContext({viewport:{width:1440,height:900}});await desktop.addInitScript(()=>Object.defineProperty(navigator,'maxTouchPoints',{get:()=>5}));for(const route of ['/experimental/gamecube/','/play/app/nes/','/play/app/retro-ppsspp/']){const d=await desktop.newPage();await d.route('http://controller.test/**',r=>r.fulfill({contentType:'text/html',body:'<html><head></head><body></body></html>'}));await d.goto('http://controller.test'+route);await d.addScriptTag({content:fs.readFileSync(path.join(assets,'controller.js'),'utf8')});assert.equal(await d.locator('#wrcad-touch').count(),0,'fine-pointer desktop never creates touch UI, even with a touchscreen');await d.close();}console.log('PASS',engine.name(),'GameCube/NES/PSP desktop and hybrid touch-capable desktops have no touch overlay');await b.close();
 }})().catch(e=>{console.error(e);process.exitCode=1});

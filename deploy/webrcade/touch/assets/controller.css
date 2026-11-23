@@ -142,7 +142,6 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 #wrcad-touch .kt-cbuttons button:nth-child(2) { top: 44px; left: 0; }
 #wrcad-touch .kt-cbuttons button:nth-child(3) { top: 44px; right: 0; }
 #wrcad-touch .kt-cbuttons button:nth-child(4) { top: 88px; left: 28px; }
-@media (max-width: 460px) { #wrcad-touch.kt-n64 .kt-pad, #wrcad-touch.kt-3ds .kt-pad { height: 370px; } #wrcad-touch.kt-n64 .kt-cbuttons { bottom: 192px; } }
 @media (max-width: 599px) {
   #wrcad-touch.kt-n64 .kt-extra-dpad, #wrcad-touch.kt-3ds .kt-extra-dpad, #wrcad-touch.kt-psp .kt-extra-dpad { left: 0; bottom: 190px; }
   /* PSP needs room for L, the D-pad and the analog stick on the same side.
@@ -150,10 +149,17 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
   #wrcad-touch.kt-psp .kt-pad { height: 370px; }
   #wrcad-touch.kt-psp .kt-extra-dpad { bottom: 210px; }
   #wrcad-touch.kt-dualshock .kt-pad { height: 370px; }
-  #wrcad-touch.kt-3ds .kt-c-stick { right: 0; bottom: 204px; }
+  /* The shorter compact pad leaves room beside the face buttons, below the shoulders. */
+  #wrcad-touch.kt-3ds .kt-c-stick { right: 158px; bottom: 137px; }
   #wrcad-touch.kt-dualshock .kt-dpad, #wrcad-touch.kt-dualshock .kt-actions { bottom: 176px; }
   #wrcad-touch .kt-analog-left { left: 0; bottom: 56px; }
   #wrcad-touch .kt-analog-right { left: auto; right: 0; bottom: 56px; }
+}
+@media (max-width: 460px) {
+  #wrcad-touch.kt-n64 .kt-pad, #wrcad-touch.kt-3ds .kt-pad { height: 370px; }
+  #wrcad-touch.kt-n64 .kt-cbuttons { bottom: 192px; }
+  /* Narrow phones have room above X and need the space beside Y for the Circle Pad. */
+  #wrcad-touch.kt-3ds .kt-c-stick { right: 50px; bottom: 212px; }
 }
 @media (min-width: 460px) and (max-width: 599px) and (orientation: landscape) {
   #wrcad-touch.kt-psp .kt-pad { height: 244px; }

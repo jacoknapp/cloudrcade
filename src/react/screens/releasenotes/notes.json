@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.1.23",
+    "date": "November 22, 2026",
+    "title": "3DS C-stick placement on phones",
+    "changes": [
+      "The default compact layout places the C-stick near the face buttons and clears the R shoulder button’s touch area."
+    ]
+  },
+  {
     "version": "3.1.22",
     "date": "November 22, 2026",
     "title": "3DS landscape layout for the open Duo",
