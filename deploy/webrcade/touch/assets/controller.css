@@ -185,8 +185,8 @@ html[data-cr-installed] #wrcad-touch .kt-pad { bottom: max(12px, calc(env(safe-a
 #wrcad-touch .kt-fold-position input, #wrcad-touch .kt-fold-position button { width: 100%; min-height: 44px; }
 #wrcad-touch .kt-fold-position input { accent-color: #67e5c5; }
 #wrcad-touch .kt-fold-guide { position: absolute; z-index: 1; background: #67e5c533; pointer-events: none; }
-/* Console presentation: every control belongs to the touchscreen pane. The
- * primary display has its own full-width, aspect-preserving picture area. */
+/* Console presentation keeps controls below or beside the touchscreen.
+ * Expanded 3DS landscape puts the left-hand controls in the primary pane. */
 #wrcad-touch.kt-sections[data-section-controls] .kt-pad { max-width: none; }
 #wrcad-touch.kt-sections[data-section-controls] .kt-center button { bottom: 0; }
 #wrcad-touch.kt-sections .kt-ds-mic { left: calc(50% - 29px); }
@@ -213,6 +213,11 @@ html.kt-ds-sections #touch-overlay { display: none !important; }
 #wrcad-touch.kt-sections[data-section-controls="compact"] .kt-extra-dpad { width: 88px; height: 88px; --kt-arrow-offset: 29px; left: 0; bottom: 214px; }
 #wrcad-touch.kt-sections[data-section-controls="compact"] .kt-c-stick { width: 72px; height: 72px; right: 0; bottom: 214px; }
 #wrcad-touch.kt-sections[data-section-controls="compact"] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick) { bottom: 54px; }
+/* In wide 3DS landscape sections, the fold separates the two hand grips. */
+#wrcad-touch.kt-sections[data-section-controls="split"] .kt-shoulders button { top: auto; bottom: 200px; }
+#wrcad-touch.kt-sections[data-section-controls="split"] .kt-pad > .kt-stick:not(.kt-extra-dpad):not(.kt-c-stick) { width: 120px; height: 120px; }
+#wrcad-touch.kt-sections[data-section-controls="split"] .kt-extra-dpad { left: 134px; bottom: 64px; width: 88px; height: 88px; --kt-arrow-offset: 29px; }
+#wrcad-touch.kt-sections[data-section-controls="split"] .kt-c-stick { right: 148px; bottom: 120px; }
 /* The 3DS C-stick is a small nub; its invisible 10px touch margin remains. */
 #wrcad-touch.kt-3ds .kt-pad > .kt-c-stick { width: 36px; height: 36px; }
 #wrcad-touch.kt-3ds .kt-c-stick i { left: calc(50% - 9px); top: calc(50% - 9px); width: 18px; height: 18px; }

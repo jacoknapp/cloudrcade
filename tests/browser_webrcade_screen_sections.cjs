@@ -15,6 +15,11 @@ let savedDS=4;const saved3DS='touch';
 localStorage.setItem(VIEW_KEY,saved3DS);localStorage.setItem('webrcade.touch.3ds-view.v1',saved3DS);
 const oldLayout={'button-8':[.5,.7],'button-10':[.5,.7],stick:[.5,.7],dpad:[.5,.7],'button-4':[.5,.7]};
 localStorage.setItem('webrcade.touch.layouts.v1',JSON.stringify({[system+':portrait']:oldLayout,[system+':portrait:sections']:oldLayout,[system+':landscape']:oldLayout}));
+if(system==='3ds'){
+ const layouts=JSON.parse(localStorage.getItem('webrcade.touch.layouts.v1'));
+ layouts['3ds:landscape:sections-console']={stick:[.75,.7],dpad:[.75,.5]};
+ localStorage.setItem('webrcade.touch.layouts.v1',JSON.stringify(layouts));
+}
 window.pads=[];Object.defineProperty(navigator,'getGamepads',{value:()=>pads});
 window.Module={cwrap(){return()=>{}}};
 const canvas=document.createElement('canvas');document.body.append(canvas);
@@ -68,7 +73,7 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
    await page.route('http://sections.test/**',r=>r.fulfill({contentType:'text/html',body:html()}));
    await page.goto('http://sections.test/play/app/retro-'+(system==='3ds'?'azahar':'melonds')+'/');await page.locator('.kt-pad').waitFor({state:'visible'});
    const saved=await page.evaluate(()=>[savedLayout(),localStorage.getItem('wrcad.touch.3ds-view.v1'),localStorage.getItem('webrcade.touch.layouts.v1')]);
-   for(const size of [{width:669,height:867},{width:951,height:585},{width:669,height:902},{width:951,height:620},{width:382,height:580},{width:385,height:571},{width:669,height:867}]){
+   for(const size of [{width:669,height:867},{width:951,height:585},{width:669,height:902},{width:951,height:620},{width:951,height:669},{width:382,height:580},{width:385,height:571},{width:669,height:867}]){
     await page.setViewportSize(size);await page.waitForTimeout(400);
     const expanded=size.width>=600;assert.equal(await page.locator('.kt-sections').count(),+expanded);
     if(expanded){
@@ -82,14 +87,47 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
      const blank=await page.evaluate(({fold,side})=>sample(side?fold.center:innerWidth/2,side?innerHeight/2:fold.center),{fold,side});assert(blank[0]<3&&blank[1]<3&&blank[2]<3,'fold pixels remain black');
      const controls=await page.locator('.kt-pad button:visible,.kt-stick:visible,.kt-tab:visible').evaluateAll(els=>els.map(el=>({...el.getBoundingClientRect().toJSON(),id:el.dataset.layoutId||'tab'})));
      assert.equal(controls.length,system==='3ds'?15:12,'every control visible');near(controls.find(r=>r.id==='tab').right,size.width,'closed settings tab is flush with outer edge');
-     for(const r of controls){assert(side?r.x>=fold.end-.1:r.y>=fold.end-.1,'all controls stay in touchscreen pane '+r.id);assert(r.x>=-.1&&r.right<=size.width+.1&&r.bottom<=size.height+.1,'control visible '+r.id);assert(r.right<=rects[1].left+1||r.x>=rects[1].right-1||r.bottom<=rects[1].top+1||r.y>=rects[1].bottom-1,'control outside lower picture '+r.id);}
+     const split=side&&system==='3ds';
+     const leftControls=new Set(['stick','dpad','button-8','button-10','button-12']);
+     for(const r of controls){
+      const left=split&&leftControls.has(r.id);
+      assert(side?(left?r.right<=fold.start+.1:r.x>=fold.end-.1):r.y>=fold.end-.1,'control stays in its pane '+r.id);
+      assert(r.x>=-.1&&r.right<=size.width+.1&&r.bottom<=size.height+.1,'control visible '+r.id);
+      const picture=rects[left?0:1];
+      assert(r.right<=picture.left+1||r.x>=picture.right-1||r.bottom<=picture.top+1||r.y>=picture.bottom-1,'control outside picture '+r.id);
+     }
+     if(split){
+      assert.equal(await page.locator('#wrcad-touch').getAttribute('data-section-controls'),'split');
+      near(rects[0].width,fold.start-12,'landscape upper picture retains its full width');
+      near(rects[1].width,Math.min(size.width-108-fold.end,(size.height-280)*4/3),'landscape touchscreen fills the space above the right grip');
+      near(rects[0].top+rects[0].height/2,rects[1].top+rects[1].height/2,'landscape pictures align vertically');
+      const circle=controls.find(r=>r.id==='stick'), face=controls.find(r=>r.id==='button-5');
+      assert(circle.left<40&&face.right>size.width-40,'main buttons stay close to the outer grips');
+      near(controls.find(r=>r.id==='button-8').top,controls.find(r=>r.id==='button-9').top,'shoulder buttons share a row');
+      near(controls.find(r=>r.id==='button-6').top,face.top,'face buttons retain their diamond arrangement');
+      near(controls.find(r=>r.id==='button-4').left,controls.find(r=>r.id==='button-7').left,'top and bottom face buttons align');
+      await page.mouse.move(circle.x+circle.width*.9,circle.y+circle.height/2);
+      await page.mouse.down();
+      assert(await page.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(0,true))>.7,'left Circle Pad sends analog input');
+      await page.mouse.up();
+      await page.mouse.move(face.x+face.width/2,face.y+face.height/2);
+      await page.mouse.down();
+      assert(await page.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(5)),'right face button sends digital input');
+      await page.mouse.up();
+      assert.equal(await page.evaluate(()=>app.emulator.controllers.getController(0).isControlDown(5)),false,'face button releases');
+     }
      if(!side){near(rects[0].left+rects[0].width/2,rects[1].left+rects[1].width/2,'portrait screens share the same horizontal center');near(rects[0].width,Math.min(size.width-24,(fold.start-12)*(system==='3ds'?5/3:4/3)),'upper display still fits its full pane');assert(rects[1].width>=360&&rects[1].height>=270,'portrait touchscreen uses available lower space');}
      if(system==='3ds'){const nub=await page.locator('.kt-c-stick').boundingBox();assert.equal(nub.width,36);assert.equal(nub.height,36);await page.mouse.move(nub.x+nub.width+6,nub.y+nub.height/2);await page.mouse.down();assert(await page.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true))>.99,'small C-stick retains its invisible touch margin');assert.equal(await page.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(0,true)),0,'C-stick stays independent of Circle Pad');await page.mouse.up();assert.equal(await page.evaluate(()=>app.emulator.controllers.getController(0).getAxisValue(1,true)),0);}
-     const r=rects[1];await page.touchscreen.tap((r.left+r.right)/2,(r.top+r.bottom)/2);await page.waitForTimeout(30);
-     const point=await page.evaluate(()=>system==='3ds'?nativeTouch.at(-1):nativeMouse.at(-1));const canvas=await page.locator('canvas').boundingBox();
-     const nx=system==='3ds'?(side?(400+160)/720:.5):(side?.75:.5);const ny=side?.5:system==='3ds'?.75:(224+96)/416;
+     const r=rects[1],canvas=await page.locator('canvas').boundingBox();
      const nativeWidth=system==='3ds'?(side?720:400):(side?544:256),nativeHeight=side?(system==='3ds'?240:192):(system==='3ds'?480:416);
-     const vp=system==='3ds'?await page.evaluate(()=>fixtureVP):[0,0,nativeWidth,nativeHeight];const bw=system==='3ds'?size.width:nativeWidth,bh=system==='3ds'?size.height:nativeHeight;near(((point[0]-canvas.x)/canvas.width*bw-vp[0])/vp[2]*nativeWidth,nx*nativeWidth,'native stylus horizontal mapping');near(((point[1]-canvas.y)/canvas.height*bh-(bh-vp[1]-vp[3]))/vp[3]*nativeHeight,ny*nativeHeight,'native stylus vertical mapping');
+     const vp=system==='3ds'?await page.evaluate(()=>fixtureVP):[0,0,nativeWidth,nativeHeight];const bw=system==='3ds'?size.width:nativeWidth,bh=system==='3ds'?size.height:nativeHeight;
+     for(const fraction of split?[.1,.5,.9]:[.5]){
+      await page.touchscreen.tap(r.left+r.width*fraction,r.top+r.height*fraction);await page.waitForTimeout(30);
+      const point=await page.evaluate(()=>system==='3ds'?nativeTouch.at(-1):nativeMouse.at(-1));
+      const nx=system==='3ds'?(side?(400+320*fraction)/720:.5):(side?.75:.5);const ny=side?fraction:system==='3ds'?.75:(224+96)/416;
+      near(((point[0]-canvas.x)/canvas.width*bw-vp[0])/vp[2]*nativeWidth,nx*nativeWidth,'native stylus horizontal mapping');
+      near(((point[1]-canvas.y)/canvas.height*bh-(bh-vp[1]-vp[3]))/vp[3]*nativeHeight,ny*nativeHeight,'native stylus vertical mapping');
+     }
      const before=await page.evaluate(()=>[nativeTouch.length,nativeMouse.length]);await page.touchscreen.tap((rects[0].left+rects[0].right)/2,(rects[0].top+rects[0].bottom)/2);assert.deepEqual(await page.evaluate(()=>[nativeTouch.length,nativeMouse.length]),before,'upper display does not activate stylus');
      assert.equal(await page.locator('canvas').count(),1,'one native canvas/context');
      if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-'+system+'-'+size.width+'x'+size.height+'.png')});
@@ -114,6 +152,28 @@ const near=(a,b,message)=>assert(Math.abs(a-b)<1.2,message+': '+a+' != '+b);
    const safeInset=await page.addStyleTag({content:'.kt-ds-origin,.kt-3ds-origin{bottom:34px}'});
    await page.locator('#kt-fold-gap').evaluate(el=>{el.value='40';el.dispatchEvent(new Event('input',{bubbles:true}))});
    await page.evaluate(()=>{document.documentElement.setAttribute('data-cr-status-top','');document.documentElement.setAttribute('data-cr-installed','');Object.defineProperty(navigator,'standalone',{value:true,configurable:true});Object.defineProperty(screen,'width',{get:()=>669,configurable:true});Object.defineProperty(screen,'height',{get:()=>951,configurable:true});Object.defineProperty(document,'fullscreenElement',{get:()=>window.fixtureFullscreen?document.body:null,configurable:true});const e=new Event('gamepaddisconnected');e.gamepad=pads[0]||{index:0,connected:false};pads=[];dispatchEvent(e)});
+   if(system==='3ds'){
+    await page.setViewportSize({width:951,height:585});
+    await page.waitForFunction(()=>document.querySelector('#wrcad-touch')?.dataset.sectionControls==='split');
+    const landscape=await page.locator('#wrcad-touch').evaluate(el=>({
+     rects:JSON.parse(el.dataset.screenRects),fold:JSON.parse(el.dataset.foldBounds)
+    }));
+    near(landscape.rects[0].width,landscape.fold.start-12,'installed landscape retains upper picture size above left grip');
+    near(landscape.rects[1].width,Math.min(951-108-landscape.fold.end,(585-280-34)*4/3),'installed landscape uses the space above the right grip');
+    const controls=await page.locator('.kt-pad button:visible,.kt-stick:visible').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().toJSON()));
+    assert(controls.every(control=>control.bottom<=585-34-12+.1),'both grips respect the bottom safe area');
+    if(process.env.WEBRCADE_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.WEBRCADE_TEST_OUTPUT,engine.name()+'-3ds-installed-landscape.png')});
+    for(const side of ['left','right']){
+     await page.evaluate(side=>{
+      const key='webrcade.touch.dock-side.v1';
+      localStorage.setItem(key,side);
+      window.dispatchEvent(new StorageEvent('storage',{key}));
+     },side);
+     const tab=await page.locator('.kt-tab').boundingBox();
+     const picture=landscape.rects[1];
+     assert(side==='left'?tab.x+tab.width<=picture.left-9.9:tab.x>=picture.right+9.9,'settings tab clears touchscreen on either edge');
+    }
+   }
    for(const [height,fullscreen,palette=true] of [[867,true],[839,true],[839,false],[951,true],[867,true,false]]){
     await page.evaluate(({fullscreen,palette})=>{window.fixtureFullscreen=fullscreen;document.documentElement.toggleAttribute('data-cr-status-top',palette)},{fullscreen,palette});await page.setViewportSize({width:669,height});await page.waitForFunction(()=>document.querySelector('#wrcad-touch')?.dataset.screenSections==='stacked'&&document.querySelector('#wrcad-touch').dataset.screenRects);await page.waitForTimeout(100);
     const r=await page.locator('#wrcad-touch').evaluate(el=>({rects:JSON.parse(el.dataset.screenRects),fold:JSON.parse(el.dataset.foldBounds),layout:el.dataset.sectionControls})),excluded=951-height;

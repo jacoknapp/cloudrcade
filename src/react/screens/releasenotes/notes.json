@@ -1,5 +1,14 @@
 [
   {
+    "version": "3.1.22",
+    "date": "November 22, 2026",
+    "title": "3DS landscape layout for the open Duo",
+    "changes": [
+      "On the open Duo in landscape, 3DS movement controls sit under the left thumb and face buttons under the right thumb.",
+      "The right touchscreen uses more of its pane while retaining its 4:3 aspect ratio and touch mapping."
+    ]
+  },
+  {
     "version": "3.1.21",
     "date": "November 21, 2026",
     "title": "3DS cutscene performance improvements",

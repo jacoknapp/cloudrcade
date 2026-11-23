@@ -613,14 +613,22 @@
     const lower = rectangle(stacked ? bounds.left : fold.end, stacked ? fold.end : bounds.top, bounds.right, bounds.bottom);
     const rails = lower.width >= 576 && lower.height >= (system === '3ds' ? 386 : 286);
     const wide = lower.width >= 576;
-    const controlsHeight = Math.min(lower.height, rails ? lower.height : system === '3ds' && !wide ? 370 : 244);
-    const rightInset = rails ? (stacked ? 0 : 14) : 42;
+    const splitControls = !stacked && system === '3ds' && !wide && Math.min(upper.width, lower.width) >= 256;
+    const controlsHeight = Math.min(lower.height, rails ? lower.height : system === '3ds' && !wide && !splitControls ? 370 : 244);
+    const rightInset = rails || splitControls ? (stacked ? 0 : 14) : 42;
     const controls = rectangle(lower.left + 14, rails ? lower.top + 12 : lower.bottom - controlsHeight, lower.right - rightInset, lower.bottom);
+    // Reserve space for the left shoulder row above the movement controls.
+    const leftControls = splitControls ? rectangle(upper.left + 14, controls.top, upper.right - 14, upper.bottom) : null;
+    const primary = leftControls ? rectangle(upper.left, upper.top, upper.right, leftControls.top - 12) : upper;
     // In portrait, use the space between the outer sticks/face buttons and
     // between the shoulder/footer rows. Keep the original touchscreen aspect.
-    const picture = rails ? (stacked ? rectangle(lower.left + 134, lower.top + 68, lower.right - 134, lower.bottom - 64) :
-      rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64)) :
-      rectangle(lower.left, lower.top, lower.right, Math.max(lower.top, controls.top - 12));
+    // The settings tab can dock to either edge of the right pane. Leave room
+    // for its 44px width and a 10px gap above the aligned shoulder rows.
+    const picture = splitControls ? rectangle(lower.left + 54, lower.top,
+      Math.min(lower.right, visible.right - 54), Math.max(lower.top, controls.top - 12)) :
+      rails ? (stacked ? rectangle(lower.left + 134, lower.top + 68, lower.right - 134, lower.bottom - 64) :
+        rectangle(lower.left + 170, lower.top, lower.right - 170, lower.bottom - 64)) :
+        rectangle(lower.left, lower.top, lower.right, Math.max(lower.top, controls.top - 12));
     const fit = (area, ratio) => {
       const width = Math.min(area.width, area.height * ratio), height = width / ratio;
       return rectangle((area.left + area.right - width) / 2, (area.top + area.bottom - height) / 2,
@@ -633,19 +641,20 @@
       [{left: 0, top: 0, width: 400 / 720, height: 1}, {left: 400 / 720, top: 0, width: 320 / 720, height: 1}]) :
       (stacked ? [{left: 0, top: 0, width: 1, height: ratio * .75}, {left: 0, top: 1 - ratio * .75, width: 1, height: ratio * .75}] :
         [{left: 0, top: 0, width: (4 / 3) / ratio, height: 1}, {left: 1 - (4 / 3) / ratio, top: 0, width: (4 / 3) / ratio, height: 1}]);
-    const destinations = [fit(upper, system === '3ds' ? 5 / 3 : 4 / 3), fit(picture, 4 / 3)];
+    const destinations = [fit(primary, system === '3ds' ? 5 / 3 : 4 / 3), fit(picture, 4 / 3)];
     // The pinned DS mouse handler treats horizontal screens as equal halves,
     // even when its native image includes a gap. Keep that input ABI intact.
     const inputSource = system === 'nds' && !stacked ? {left: .5, top: 0, width: .5, height: 1} : sources[1];
-    sectionState.presentation = {canvas: visible, sources, inputSource, destinations, controls, rails, lower, fold};
-    host.dataset.sectionControls = rails ? 'rails' : wide ? 'wide' : 'compact';
+    sectionState.presentation = {canvas: visible, sources, inputSource, destinations, controls, leftControls, rails, lower, fold};
+    host.dataset.sectionControls = splitControls ? 'split' : rails ? 'rails' : wide ? 'wide' : 'compact';
     const rects = JSON.stringify(destinations);
     if (host.dataset.screenRects !== rects) host.dataset.screenRects = rects;
     const foldJSON = JSON.stringify(fold);
     if (host.dataset.foldBounds !== foldJSON) host.dataset.foldBounds = foldJSON;
     document.documentElement.style.setProperty('--kt-section-controls-top', `${lower.top}px`);
-    for (const [name, value] of Object.entries({left: `${controls.left - visible.left}px`, top: `${controls.top - visible.top}px`,
-      width: `${controls.width}px`, height: `${controls.height}px`, right: 'auto', bottom: 'auto', margin: '0'})) {
+    const padLeft = leftControls?.left ?? controls.left;
+    for (const [name, value] of Object.entries({left: `${padLeft - visible.left}px`, top: `${controls.top - visible.top}px`,
+      width: `${controls.right - padLeft}px`, height: `${controls.height}px`, right: 'auto', bottom: 'auto', margin: '0'})) {
       if (pad.style[name] !== value) pad.style[name] = value;
     }
     const canvas = emulator.canvas;
@@ -830,7 +839,13 @@
     element.dataset.layoutId ||= element === stick ? 'stick' : element.dataset.cid !== undefined ?
       `button-${element.dataset.cid}` : element.dataset.axis ? `axis-${element.dataset.axis}` : 'menu';
   }
-  const layoutKey = () => `${wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ? 'wii-' + host.dataset.wiiLayout : system || 'library'}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}${sectionState?.mode ? ':sections-console' : ''}`;
+  function layoutKey() {
+    const platform = wii && host.dataset.wiiLayout && host.dataset.wiiLayout !== 'nunchuk' ?
+      'wii-' + host.dataset.wiiLayout : system || 'library';
+    const orientation = innerWidth > innerHeight ? 'landscape' : 'portrait';
+    const sections = sectionState?.presentation?.leftControls ? ':sections-console-split' : sectionState?.mode ? ':sections-console' : '';
+    return `${platform}:${orientation}${sections}`;
+  }
   function currentLayout() {
     // Keep layouts saved before platform names replaced emulator URL names.
     const legacyKey = `${emulatorPath}:${innerWidth > innerHeight ? 'landscape' : 'portrait'}`;
@@ -998,6 +1013,7 @@
     for (const element of movable) { element.style.transform = ''; element.style.visibility = ''; }
     if (pad.hidden) return;
     const saved = currentLayout();
+    const presentation = sectionState?.presentation;
     const obstacles = [tab.getBoundingClientRect()];
     // Wider portrait pictures also exclude restored coordinates and live drags.
     if (sectionState?.mode === 'stacked' && sectionState.presentation?.rails)
@@ -1016,13 +1032,13 @@
       const custom = Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
       const desiredX = custom ? point[0] * innerWidth : r.left + r.width / 2;
       const desiredY = custom ? point[1] * innerHeight : r.top + r.height / 2;
-      const controls = sectionState?.presentation?.controls;
+      const isLeft = (presentation?.leftControls || presentation?.rails) &&
+        (element === stick || element.classList.contains('kt-extra-dpad') || ['8', '10', '12'].includes(element.dataset.cid));
+      const controls = (isLeft && presentation?.leftControls) || presentation?.controls;
       const area = controls && element.classList.contains('kt-ds-mic') ?
         {...controls, left: controls.left + 156, right: controls.right - 156, top: controls.bottom - 44} : controls || controllerBounds;
       let left = area.left, right = area.right;
-      if (sectionState?.presentation?.rails && !element.classList.contains('kt-ds-mic')) {
-        const isLeft = element === stick || element.classList.contains('kt-extra-dpad') ||
-          ['8','10','12'].includes(element.dataset.cid);
+      if (presentation?.rails && !element.classList.contains('kt-ds-mic')) {
         if (isLeft) right = left + 144;
         else left = right - 136;
       }
@@ -1080,7 +1096,7 @@
       } catch (_) { /* Session layout still works. */ }
       // Expanded sections belong to this device; keep the normal synced phone
       // layout and the sync protocol's existing orientation keys intact.
-      const synced = Object.fromEntries(Object.entries(changes).filter(([key]) => !/:sections(?:-console)?$/.test(key)).map(([key, value]) => ['layout:' + key, value]));
+      const synced = Object.fromEntries(Object.entries(changes).filter(([key]) => !/:sections(?:-console(?:-split)?)?$/.test(key)).map(([key, value]) => ['layout:' + key, value]));
       if (Object.keys(synced).length) saveControls(synced);
     } else if (beforeEdit) layouts = beforeEdit;
     editing = false; beforeEdit = null;
@@ -1238,10 +1254,10 @@
   function dockPosition() {
     const point = currentLayout().dock;
     if (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) return point;
-    if (sectionState?.mode) {
-      const area = sectionState.presentation?.lower;
-      if (area) return [dockSide === 'left' ? area.left / innerWidth : area.right / innerWidth,
-        (sectionState.presentation.rails ? area.top + 94 : sectionState.presentation.controls.top + 24) / innerHeight];
+    if (sectionState?.presentation) {
+      const {lower, rails, leftControls, controls} = sectionState.presentation;
+      const centerY = rails || leftControls ? lower.top + 94 : controls.top + 24;
+      return [(dockSide === 'left' ? lower.left : lower.right) / innerWidth, centerY / innerHeight];
     }
     if (gameboy && innerWidth < innerHeight && !gamepadMode()) {
       // The wide portrait picture reaches the screen edges. Its default tab
